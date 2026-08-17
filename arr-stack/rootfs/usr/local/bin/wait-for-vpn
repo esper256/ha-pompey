@@ -1,0 +1,16 @@
+#!/command/with-contenv bashio
+# shellcheck shell=bash
+set -euo pipefail
+
+HEALTH_URL="${VPN_HEALTH_URL:-http://127.0.0.1:9999}"
+TRIES="${1:-60}"
+
+i=0
+until curl -sf "${HEALTH_URL}" >/dev/null 2>&1; do
+  i=$((i + 1))
+  if [[ "${i}" -ge "${TRIES}" ]]; then
+    bashio::log.error "Gluetun did not become healthy at ${HEALTH_URL}"
+    exit 1
+  fi
+  sleep 2
+done

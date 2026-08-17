@@ -1,0 +1,40 @@
+#!/command/with-contenv bashio
+# shellcheck shell=bash
+set -euo pipefail
+
+enabled() {
+  bashio::config.true "$1" && echo "reserved" || echo "off"
+}
+
+cat <<EOF
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Arr Stack</title>
+  <style>
+    body { font-family: sans-serif; max-width: 42rem; margin: 2rem auto; padding: 0 1rem; }
+    code { background: #f2f2f2; padding: 0.1rem 0.3rem; }
+    .status { margin: 1rem 0; padding: 0.75rem 1rem; background: #eef6ff; }
+    ul { line-height: 1.7; }
+  </style>
+</head>
+<body>
+  <h1>Arr Stack</h1>
+  <p>This Home Assistant app runs the *arr stack in one container so every process shares a Proton VPN tunnel (Gluetun). Supervisor cannot attach other addons to a Gluetun network namespace.</p>
+  <div class="status">
+    <strong>VPN</strong>: wait for Gluetun health on <code>127.0.0.1:9999</code>.
+    Public IP file: <code>/tmp/gluetun/ip</code>
+  </div>
+  <h2>Bundled UIs (not started in 0.1.0)</h2>
+  <ul>
+    <li>qBittorrent — ${enabled 'enable_qbittorrent'} — <a href="qbittorrent/">/qbittorrent/</a></li>
+    <li>Prowlarr — ${enabled 'enable_prowlarr'} — <a href="prowlarr/">/prowlarr/</a></li>
+    <li>Sonarr — ${enabled 'enable_sonarr'} — <a href="sonarr/">/sonarr/</a></li>
+    <li>Radarr — ${enabled 'enable_radarr'} — <a href="radarr/">/radarr/</a></li>
+    <li>Bazarr — ${enabled 'enable_bazarr'} — <a href="bazarr/">/bazarr/</a></li>
+  </ul>
+  <p>Each location will reverse-proxy to localhost and rewrite <code>UrlBase</code> using <code>X-Ingress-Path</code>. See the design doc in the repository.</p>
+</body>
+</html>
+EOF

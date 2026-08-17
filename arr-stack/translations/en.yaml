@@ -1,0 +1,45 @@
+configuration:
+  vpn_type:
+    name: VPN type
+    description: WireGuard is preferred. OpenVPN uses Proton's OpenVPN-specific username, not your account password.
+  wireguard_private_key:
+    name: WireGuard private key
+    description: PrivateKey from a Proton WireGuard config. Enable NAT-PMP on that config if you torrent.
+  openvpn_user:
+    name: OpenVPN username
+    description: Proton OpenVPN username. Append +pmp when using OpenVPN port forwarding.
+  openvpn_password:
+    name: OpenVPN password
+    description: Proton OpenVPN password.
+  server_countries:
+    name: Server countries
+    description: Comma-separated Proton countries for Gluetun (for example Netherlands or United States).
+  port_forwarding:
+    name: Port forwarding
+    description: Use only Proton servers that support P2P/NAT-PMP and push the forwarded port to qBittorrent.
+  lan_networks:
+    name: LAN networks
+    description: CIDRs that may bypass the VPN (local media servers). Supervisor's 172.30.32.0/23 is always included.
+  enable_qbittorrent:
+    name: Enable qBittorrent
+    description: Download client. Skeleton does not start it yet.
+  enable_prowlarr:
+    name: Enable Prowlarr
+    description: Indexer manager. Skeleton does not start it yet.
+  enable_sonarr:
+    name: Enable Sonarr
+    description: TV automation. Skeleton does not start it yet.
+  enable_radarr:
+    name: Enable Radarr
+    description: Movie automation. Skeleton does not start it yet.
+  enable_bazarr:
+    name: Enable Bazarr
+    description: Subtitles. Skeleton does not start it yet.
+  connection_mode:
+    name: Connection mode
+    description: ingress_noauth uses Home Assistant login only. Do not expose the optional LAN port to the internet in that mode.
+  log_level:
+    name: Log level
+    description: Verbosity for Gluetun and nginx.
+network:
+  8089/TCP: Optional LAN launcher (same UI as Ingress). Leave unmapped unless you need it.

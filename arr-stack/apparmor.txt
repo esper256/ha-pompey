@@ -1,0 +1,60 @@
+#include <tunables/global>
+
+profile arr-stack flags=(attach_disconnected,mediate_deleted) {
+  #include <abstractions/base>
+  #include <abstractions/nameservice>
+
+  file,
+  network,
+  capability net_admin,
+  capability net_raw,
+  capability net_bind_service,
+  capability chown,
+  capability setuid,
+  capability setgid,
+  capability dac_override,
+  capability kill,
+
+  signal (send) set=(kill,term,int,hup,cont),
+
+  # s6-overlay
+  /init ix,
+  /bin/** ix,
+  /usr/bin/** ix,
+  /usr/local/bin/** ix,
+  /run/{s6,s6-rc*,service}/** ix,
+  /package/** ix,
+  /command/** ix,
+  /etc/services.d/** rwix,
+  /etc/cont-init.d/** rwix,
+  /etc/cont-finish.d/** rwix,
+  /run/{,**} rwk,
+  /dev/tty rw,
+  /dev/net/tun rw,
+
+  # bashio + tmp
+  /usr/lib/bashio/** ix,
+  /tmp/** rwk,
+
+  # HA options and addon config
+  /data/** rw,
+  /config/** rw,
+  /share/** rw,
+  /media/** rw,
+  /ssl/** r,
+
+  # Gluetun / VPN
+  /usr/local/bin/gluetun ix,
+  /etc/gluetun.env r,
+  /usr/sbin/openvpn ix,
+  /usr/bin/wg ix,
+  /usr/bin/wg-quick ix,
+
+  # nginx
+  /usr/sbin/nginx ix,
+  /etc/nginx/** r,
+  /var/lib/nginx/** rw,
+  /var/log/nginx/** rw,
+  /run/nginx/** rwk,
+  /usr/share/arr-stack/** r,
+}
