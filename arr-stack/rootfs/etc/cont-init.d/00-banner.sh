@@ -2,25 +2,25 @@
 # shellcheck shell=bash
 set -euo pipefail
 
-bashio::log.info "Arr Stack ${BUILD_VERSION:-0.1.0} starting"
+bashio::log.info "Arr Stack ${BUILD_VERSION:-0.1.1} starting"
 
-VPN_TYPE="$(bashio::config 'vpn_type')"
-HAS_WG=false
-HAS_OVPN=false
+mkdir -p /config/wireguard /etc/wireguard /tmp/vpn /run/nginx
+chmod 700 /config/wireguard /etc/wireguard
 
-if bashio::config.has_value 'wireguard_private_key'; then
-  HAS_WG=true
+WG_FILE="/config/wireguard/$(bashio::config 'wireguard_config')"
+HAS_FILE=false
+HAS_FIELDS=false
+
+if [[ -s "${WG_FILE}" ]]; then
+  HAS_FILE=true
 fi
-if bashio::config.has_value 'openvpn_user' && bashio::config.has_value 'openvpn_password'; then
-  HAS_OVPN=true
+if bashio::config.has_value 'wireguard_private_key' \
+  && bashio::config.has_value 'wireguard_address' \
+  && bashio::config.has_value 'wireguard_peer_public_key' \
+  && bashio::config.has_value 'wireguard_endpoint'; then
+  HAS_FIELDS=true
 fi
 
-if [[ "${VPN_TYPE}" == "wireguard" && "${HAS_WG}" != "true" ]]; then
-  bashio::exit.nok "vpn_type is wireguard but wireguard_private_key is empty. Paste PrivateKey from a Proton WireGuard config."
+if [[ "${HAS_FILE}" != "true" && "${HAS_FIELDS}" != "true" ]]; then
+  bashio::exit.nok "Need a Proton WireGuard config: put it at ${WG_FILE} or fill private key, address, peer public key, and endpoint."
 fi
-if [[ "${VPN_TYPE}" == "openvpn" && "${HAS_OVPN}" != "true" ]]; then
-  bashio::exit.nok "vpn_type is openvpn but openvpn_user/openvpn_password are empty."
-fi
-
-mkdir -p /config /data/gluetun /tmp/gluetun /run/nginx
-chmod 700 /data/gluetun

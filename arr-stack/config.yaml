@@ -1,11 +1,11 @@
 # https://developers.home-assistant.io/docs/apps/configuration
 name: Arr Stack
-version: "0.1.0"
+version: "0.1.1"
 slug: arr-stack
 description: >-
-  qBittorrent and the *arr apps in one container, forced through Proton VPN
-  via Gluetun. Home Assistant OS cannot share a Gluetun network namespace
-  across addons, so they share this image instead.
+  qBittorrent and the *arr apps in one container, forced through a Proton
+  WireGuard interface they all share. Home Assistant OS cannot attach other
+  addons to a VPN network namespace, so they share this image instead.
 url: https://github.com/esper256/ha-arr-addons/tree/main/arr-stack
 arch:
   - aarch64
@@ -40,8 +40,8 @@ ports_description:
 # Publish to GHCR before uncommenting. Matching tag must equal `version` above.
 # image: ghcr.io/esper256/arr-stack
 options:
-  vpn_type: wireguard
-  server_countries: Netherlands
+  wireguard_config: wg0.conf
+  wireguard_dns: 10.2.0.1
   port_forwarding: true
   lan_networks: 10.0.0.0/8,172.16.0.0/12,192.168.0.0/16
   enable_qbittorrent: true
@@ -52,11 +52,12 @@ options:
   connection_mode: ingress_noauth
   log_level: info
 schema:
-  vpn_type: list(wireguard|openvpn)
+  wireguard_config: str
   wireguard_private_key: password?
-  openvpn_user: str?
-  openvpn_password: password?
-  server_countries: str
+  wireguard_address: str?
+  wireguard_peer_public_key: str?
+  wireguard_endpoint: str?
+  wireguard_dns: str
   port_forwarding: bool
   lan_networks: str
   enable_qbittorrent: bool

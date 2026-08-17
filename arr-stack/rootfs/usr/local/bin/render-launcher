@@ -21,12 +21,12 @@ cat <<EOF
 </head>
 <body>
   <h1>Arr Stack</h1>
-  <p>This Home Assistant app runs the *arr stack in one container so every process shares a Proton VPN tunnel (Gluetun). Supervisor cannot attach other addons to a Gluetun network namespace.</p>
+  <p>This Home Assistant app runs the *arr stack in one container so every process shares a Proton WireGuard interface (<code>wg0</code>). Supervisor cannot attach other addons to a VPN network namespace. Gluetun is not used.</p>
   <div class="status">
-    <strong>VPN</strong>: wait for Gluetun health on <code>127.0.0.1:9999</code>.
-    Public IP file: <code>/tmp/gluetun/ip</code>
+    <strong>VPN</strong>: handshake on <code>wg0</code>.
+    Forwarded port file: <code>/tmp/vpn/forwarded_port</code>
   </div>
-  <h2>Bundled UIs (not started in 0.1.0)</h2>
+  <h2>Bundled UIs (not started in 0.1.1)</h2>
   <ul>
     <li>qBittorrent — ${enabled 'enable_qbittorrent'} — <a href="qbittorrent/">/qbittorrent/</a></li>
     <li>Prowlarr — ${enabled 'enable_prowlarr'} — <a href="prowlarr/">/prowlarr/</a></li>

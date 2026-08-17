@@ -2,14 +2,25 @@
 # shellcheck shell=bash
 set -euo pipefail
 
-HEALTH_URL="${VPN_HEALTH_URL:-http://127.0.0.1:9999}"
+IFACE="${WG_IFACE:-wg0}"
 TRIES="${1:-60}"
+MAX_AGE="${WG_HANDSHAKE_MAX_AGE:-180}"
+
+handshake_ok() {
+  command -v wg >/dev/null 2>&1 || return 1
+  wg show "${IFACE}" >/dev/null 2>&1 || return 1
+  local ts now
+  ts="$(wg show "${IFACE}" latest-handshakes 2>/dev/null | awk 'NR==1 { print $2 }')"
+  [[ -n "${ts}" && "${ts}" != "0" ]] || return 1
+  now="$(date +%s)"
+  (( now - ts < MAX_AGE ))
+}
 
 i=0
-until curl -sf "${HEALTH_URL}" >/dev/null 2>&1; do
+until handshake_ok; do
   i=$((i + 1))
   if [[ "${i}" -ge "${TRIES}" ]]; then
-    bashio::log.error "Gluetun did not become healthy at ${HEALTH_URL}"
+    bashio::log.error "WireGuard ${IFACE} has no fresh handshake"
     exit 1
   fi
   sleep 2

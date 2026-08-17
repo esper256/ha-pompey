@@ -1,0 +1,7 @@
+#!/command/with-contenv bashio
+# shellcheck shell=bash
+wg-quick down wg0 >/dev/null 2>&1 || true
+if [[ "${1:-0}" -ne 0 ]] && [[ "${1:-0}" -ne 256 ]]; then
+  bashio::log.error "WireGuard service exited (${1}); halting container (kill switch)"
+  exec /run/s6/basedir/bin/halt
+fi

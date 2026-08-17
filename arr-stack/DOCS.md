@@ -1,30 +1,30 @@
 # Home Assistant App: Arr Stack
 
-Proton VPN plus the *arr applications in **one** container. See the [design doc](../docs/DESIGN.md) for why this is not five addons behind Gluetun.
+Proton VPN plus the *arr applications in **one** container. They share a single WireGuard interface (`wg0`). See the [design doc](../docs/DESIGN.md) for why this is not five addons behind Gluetun, and why Gluetun itself is not in the image.
 
 ## Current status
 
-`0.1.0` is a skeleton: Gluetun, an Ingress launcher, and the HA options schema. qBittorrent / Prowlarr / Sonarr / Radarr / Bazarr are not started yet. Enable flags are already in the options UI so they will do something in a later version.
+`0.1.1` is a skeleton: native Proton WireGuard, iptables kill switch, NAT-PMP helper, Ingress launcher, HA options schema. qBittorrent / Prowlarr / Sonarr / Radarr / Bazarr are not started yet. Enable flags are already in the options UI so they will do something in a later version.
 
 ## Configuration
 
 ### Required for the VPN
 
-1. In Proton, create a **WireGuard** certificate. Enable **NAT-PMP (Port Forwarding)** if you will torrent.
-2. Paste the `PrivateKey` value into **WireGuard private key**.
-3. Set **Server countries** to a Proton country you actually have servers in (default `Netherlands`).
-4. Leave **VPN type** on `wireguard` unless you have a reason to use OpenVPN.
+In Proton, create a **WireGuard** certificate. Enable **NAT-PMP (Port Forwarding)** if you will torrent. Then either:
 
-OpenVPN uses the *OpenVPN-specific* username and password from Proton’s dashboard, not your account password. For port forwarding, append `+pmp` to that username.
+1. Copy the downloaded `.conf` to the addon config share as `/addon_configs/<hash>_arr-stack/wireguard/wg0.conf`, or
+2. Paste **Private key**, **Address**, **Peer public key**, and **Endpoint** from that file into the app options.
 
-The app will not start Gluetun until one of those credential sets is present.
+There is no country dropdown. The Proton file already chose a server. Generate a new file to change region.
 
 ### Important options
 
 | Option | Meaning |
 | --- | --- |
-| Port forwarding | Restricts Gluetun to Proton P2P/PF servers and pushes the forwarded port into qBittorrent (once that service exists) |
-| LAN networks | CIDRs that may be reached *without* the VPN (Jellyfin, SMB, printers). Supervisor’s `172.30.32.0/23` is always added |
+| WireGuard config | Filename under `/config/wireguard/` (default `wg0.conf`) |
+| WireGuard DNS | Proton tunnel DNS, default `10.2.0.1` |
+| Port forwarding | NAT-PMP against that DNS/gateway; later versions push the port into qBittorrent |
+| LAN networks | CIDRs that may be reached *without* the VPN (Jellyfin, SMB). Supervisor’s `172.30.32.0/23` is always added |
 | Enable * | Which processes to start once they are packaged |
 | Connection mode | `ingress_noauth` — HA login is enough (do not publish the LAN port to the internet). `ingress_auth` keeps *arr’s own login. `noingress_auth` is LAN-only |
 
@@ -47,7 +47,9 @@ Open Web UI is a launcher. Each app will hang off `/sonarr`, `/radarr`, `/prowla
 
 ## Network
 
-This app needs `NET_ADMIN` and `/dev/net/tun`. That is a security-rating hit; Ingress and a custom AppArmor profile are meant to offset it.
+This app needs `NET_ADMIN` (and `/dev/net/tun` if the kernel has no WireGuard module). That is a security-rating hit; Ingress and a custom AppArmor profile are meant to offset it.
+
+Internet egress uses `wg0` plus an iptables OUTPUT drop if `wg0` is down. Apps do not each get their own adapter; they share the container’s default route.
 
 Do not publish torrent peer ports on the Home Assistant host. Peers should connect through Proton’s forwarded port on the tunnel.
 

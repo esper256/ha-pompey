@@ -1,10 +1,6 @@
 # syntax=docker/dockerfile:1
-# Arr Stack — Gluetun + nginx skeleton. *arr binaries are added in a later
-# stage by copying /app/<name> from pinned linuxserver images (see docs/DESIGN.md).
-
-ARG GLUETUN_VERSION=v3
-
-FROM qmcgaw/gluetun:${GLUETUN_VERSION} AS gluetun
+# Arr Stack — native Proton WireGuard + nginx skeleton. *arr binaries are
+# added later by copying /app/<name> from pinned linuxserver images.
 
 FROM ghcr.io/home-assistant/base:latest
 
@@ -14,7 +10,7 @@ ARG BUILD_DESCRIPTION="Arr stack behind Proton VPN"
 ARG BUILD_NAME="Arr Stack"
 ARG BUILD_REF
 ARG BUILD_REPOSITORY="esper256/ha-arr-addons"
-ARG BUILD_VERSION="0.1.0"
+ARG BUILD_VERSION="0.1.1"
 
 RUN apk add --no-cache \
     bind-tools \
@@ -23,11 +19,11 @@ RUN apk add --no-cache \
     iptables-legacy \
     iproute2 \
     jq \
+    libnatpmp \
     nginx \
-    openvpn \
+    wireguard-go \
     wireguard-tools
 
-COPY --from=gluetun /gluetun-entrypoint /usr/local/bin/gluetun
 COPY rootfs/ /
 
 ENV BUILD_VERSION="${BUILD_VERSION}"
@@ -38,7 +34,8 @@ RUN rm -f /etc/nginx/http.d/default.conf \
       /etc/services.d/*/run \
       /etc/services.d/*/finish \
       /usr/local/bin/wait-for-vpn \
-      /usr/local/bin/render-launcher
+      /usr/local/bin/render-launcher \
+      /usr/local/bin/vpn-killswitch
 
 LABEL \
     io.hass.name="${BUILD_NAME}" \

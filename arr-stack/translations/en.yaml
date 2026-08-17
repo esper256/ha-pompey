@@ -1,22 +1,25 @@
 configuration:
-  vpn_type:
-    name: VPN type
-    description: WireGuard is preferred. OpenVPN uses Proton's OpenVPN-specific username, not your account password.
+  wireguard_config:
+    name: WireGuard config file
+    description: Filename under /config/wireguard/ (the Proton-generated .conf). Used when that file exists.
   wireguard_private_key:
     name: WireGuard private key
-    description: PrivateKey from a Proton WireGuard config. Enable NAT-PMP on that config if you torrent.
-  openvpn_user:
-    name: OpenVPN username
-    description: Proton OpenVPN username. Append +pmp when using OpenVPN port forwarding.
-  openvpn_password:
-    name: OpenVPN password
-    description: Proton OpenVPN password.
-  server_countries:
-    name: Server countries
-    description: Comma-separated Proton countries for Gluetun (for example Netherlands or United States).
+    description: PrivateKey from the Proton config. Only needed if the file is not present.
+  wireguard_address:
+    name: WireGuard address
+    description: Interface Address from the Proton config (for example 10.2.0.2/32).
+  wireguard_peer_public_key:
+    name: Peer public key
+    description: Peer's PublicKey from the Proton config.
+  wireguard_endpoint:
+    name: Endpoint
+    description: Peer's Endpoint (host:port) from the Proton config.
+  wireguard_dns:
+    name: WireGuard DNS
+    description: Tunnel DNS/gateway. Proton WireGuard uses 10.2.0.1. Also the NAT-PMP gateway.
   port_forwarding:
     name: Port forwarding
-    description: Use only Proton servers that support P2P/NAT-PMP and push the forwarded port to qBittorrent.
+    description: Renew a Proton NAT-PMP mapping and later push it to qBittorrent.
   lan_networks:
     name: LAN networks
     description: CIDRs that may bypass the VPN (local media servers). Supervisor's 172.30.32.0/23 is always included.
@@ -40,6 +43,6 @@ configuration:
     description: ingress_noauth uses Home Assistant login only. Do not expose the optional LAN port to the internet in that mode.
   log_level:
     name: Log level
-    description: Verbosity for Gluetun and nginx.
+    description: Verbosity for nginx and VPN scripts.
 network:
   8089/TCP: Optional LAN launcher (same UI as Ingress). Leave unmapped unless you need it.
