@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Find</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #12141a;
+      --fg: #ece8e1;
+      --muted: #9a948a;
+      --line: #2a2d36;
+      --focus: #e8c07a;
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body {
+      height: 100%;
+      margin: 0;
+    }
+
+    body {
+      font-family: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+      background: var(--bg);
+      color: var(--fg);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 2rem 1.25rem;
+    }
+
+    main {
+      width: min(36rem, 100%);
+    }
+
+    h1 {
+      font-weight: 600;
+      font-size: 1.15rem;
+      letter-spacing: 0.04em;
+      margin: 0 0 1.25rem;
+    }
+
+    form {
+      position: relative;
+    }
+
+    input[type="search"] {
+      width: 100%;
+      appearance: none;
+      font: inherit;
+      font-size: 1.35rem;
+      line-height: 1.4;
+      color: var(--fg);
+      background: transparent;
+      border: 0;
+      border-bottom: 1px solid var(--line);
+      padding: 0.4rem 0 0.7rem;
+      outline: none;
+    }
+
+    input[type="search"]::placeholder {
+      color: var(--muted);
+    }
+
+    input[type="search"]:focus {
+      border-bottom-color: var(--focus);
+    }
+
+    .hint, .status {
+      margin: 1rem 0 0;
+      font-family: ui-sans-serif, system-ui, sans-serif;
+      font-size: 0.9rem;
+      line-height: 1.5;
+      color: var(--muted);
+    }
+
+    .status[hidden] {
+      display: none;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Find</h1>
+    <form id="search" action="#" method="get">
+      <input
+        type="search"
+        name="q"
+        placeholder="A movie or TV show"
+        aria-label="Search for a movie or TV show"
+        autocomplete="off"
+        autofocus
+      >
+    </form>
+    <p class="hint">Type a title. We’ll help you pick the right one, get it, and put it where it belongs.</p>
+    <p class="status" id="status" hidden></p>
+  </main>
+  <script>
+    const form = document.getElementById("search");
+    const status = document.getElementById("status");
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      const q = new FormData(form).get("q");
+      const title = typeof q === "string" ? q.trim() : "";
+      status.hidden = false;
+      status.textContent = title
+        ? "Search isn’t connected yet. This screen is the starting point."
+        : "Type a title to search.";
+    });
+  </script>
+</body>
+</html>

@@ -1,4 +1,4 @@
 # https://developers.home-assistant.io/docs/apps/repository
-name: HA Arr Stack
+name: Find
 url: https://github.com/esper256/ha-arr-addons
 maintainer: Eric Friesen <esper256@users.noreply.github.com>

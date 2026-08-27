@@ -38,7 +38,7 @@ jobs:
         run: |
           image=${{ steps.info.outputs.image }}
           if [[ -z "${image}" || "${image}" == "null" ]]; then
-            image="ghcr.io/${GITHUB_REPOSITORY_OWNER}/arr-stack"
+            image="ghcr.io/${GITHUB_REPOSITORY_OWNER}/find"
           fi
           echo "image_name=${image##*/}" >> "$GITHUB_OUTPUT"
           echo "registry_prefix=${image%/*}" >> "$GITHUB_OUTPUT"

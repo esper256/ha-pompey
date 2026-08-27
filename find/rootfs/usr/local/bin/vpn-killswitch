@@ -1,0 +1,53 @@
+#!/command/with-contenv bashio
+# shellcheck shell=bash
+# Apply an OUTPUT kill switch that does not depend on the default route.
+# Allowed: loopback, wg0, established, HA/LAN CIDRs, UDP handshake to Proton.
+set -euo pipefail
+
+WG_CONF="${1:-/etc/wireguard/wg0.conf}"
+LAN_FILE=/etc/find-lan-networks
+HASS_NET="172.30.32.0/23"
+
+if [[ ! -f "${WG_CONF}" ]]; then
+  bashio::exit.nok "vpn-killswitch: missing ${WG_CONF}"
+fi
+
+ENDPOINT="$(awk -F'= *' 'tolower($1) ~ /^endpoint$/ { gsub(/ /,"",$2); print $2; exit }' "${WG_CONF}")"
+ENDPOINT_IP="${ENDPOINT%%:*}"
+ENDPOINT_PORT="${ENDPOINT##*:}"
+if [[ -z "${ENDPOINT_IP}" || -z "${ENDPOINT_PORT}" || "${ENDPOINT_IP}" == "${ENDPOINT_PORT}" ]]; then
+  bashio::exit.nok "vpn-killswitch: could not parse Endpoint from ${WG_CONF}"
+fi
+
+ensure_chain() {
+  local bin="$1"
+  "${bin}" -N FIND-KILLSWITCH 2>/dev/null || "${bin}" -F FIND-KILLSWITCH
+  if ! "${bin}" -C OUTPUT -j FIND-KILLSWITCH >/dev/null 2>&1; then
+    "${bin}" -I OUTPUT 1 -j FIND-KILLSWITCH
+  fi
+}
+
+ensure_chain iptables
+iptables -A FIND-KILLSWITCH -o lo -j ACCEPT
+iptables -A FIND-KILLSWITCH -o wg0 -j ACCEPT
+iptables -A FIND-KILLSWITCH -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+iptables -A FIND-KILLSWITCH -d "${HASS_NET}" -j ACCEPT
+iptables -A FIND-KILLSWITCH -d "${ENDPOINT_IP}" -p udp --dport "${ENDPOINT_PORT}" -j ACCEPT
+
+if [[ -f "${LAN_FILE}" ]]; then
+  IFS=',' read -r -a cidrs <"${LAN_FILE}"
+  for cidr in "${cidrs[@]}"; do
+    cidr="${cidr// /}"
+    [[ -n "${cidr}" ]] || continue
+    iptables -A FIND-KILLSWITCH -d "${cidr}" -j ACCEPT
+  done
+fi
+
+iptables -A FIND-KILLSWITCH -j DROP
+
+if command -v ip6tables >/dev/null 2>&1; then
+  ensure_chain ip6tables
+  ip6tables -A FIND-KILLSWITCH -o lo -j ACCEPT
+  ip6tables -A FIND-KILLSWITCH -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+  ip6tables -A FIND-KILLSWITCH -j DROP
+fi
