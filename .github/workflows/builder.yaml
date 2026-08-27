@@ -67,8 +67,6 @@ jobs:
     if: needs.init.outputs.changed == 'true'
     permissions:
       contents: read
-      id-token: write
-      packages: write
     strategy:
       fail-fast: false
       matrix:
@@ -76,5 +74,3 @@ jobs:
     uses: ./.github/workflows/build-app.yaml
     with:
       app: ${{ matrix.app }}
-      publish: ${{ github.event_name == 'push' }}
-    secrets: inherit

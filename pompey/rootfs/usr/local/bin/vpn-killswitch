@@ -5,7 +5,7 @@
 set -euo pipefail
 
 WG_CONF="${1:-/etc/wireguard/wg0.conf}"
-LAN_FILE=/etc/find-lan-networks
+LAN_FILE=/etc/pompey-lan-networks
 HASS_NET="172.30.32.0/23"
 
 if [[ ! -f "${WG_CONF}" ]]; then
@@ -21,33 +21,33 @@ fi
 
 ensure_chain() {
   local bin="$1"
-  "${bin}" -N FIND-KILLSWITCH 2>/dev/null || "${bin}" -F FIND-KILLSWITCH
-  if ! "${bin}" -C OUTPUT -j FIND-KILLSWITCH >/dev/null 2>&1; then
-    "${bin}" -I OUTPUT 1 -j FIND-KILLSWITCH
+  "${bin}" -N POMPEY-KILLSWITCH 2>/dev/null || "${bin}" -F POMPEY-KILLSWITCH
+  if ! "${bin}" -C OUTPUT -j POMPEY-KILLSWITCH >/dev/null 2>&1; then
+    "${bin}" -I OUTPUT 1 -j POMPEY-KILLSWITCH
   fi
 }
 
 ensure_chain iptables
-iptables -A FIND-KILLSWITCH -o lo -j ACCEPT
-iptables -A FIND-KILLSWITCH -o wg0 -j ACCEPT
-iptables -A FIND-KILLSWITCH -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
-iptables -A FIND-KILLSWITCH -d "${HASS_NET}" -j ACCEPT
-iptables -A FIND-KILLSWITCH -d "${ENDPOINT_IP}" -p udp --dport "${ENDPOINT_PORT}" -j ACCEPT
+iptables -A POMPEY-KILLSWITCH -o lo -j ACCEPT
+iptables -A POMPEY-KILLSWITCH -o wg0 -j ACCEPT
+iptables -A POMPEY-KILLSWITCH -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+iptables -A POMPEY-KILLSWITCH -d "${HASS_NET}" -j ACCEPT
+iptables -A POMPEY-KILLSWITCH -d "${ENDPOINT_IP}" -p udp --dport "${ENDPOINT_PORT}" -j ACCEPT
 
 if [[ -f "${LAN_FILE}" ]]; then
   IFS=',' read -r -a cidrs <"${LAN_FILE}"
   for cidr in "${cidrs[@]}"; do
     cidr="${cidr// /}"
     [[ -n "${cidr}" ]] || continue
-    iptables -A FIND-KILLSWITCH -d "${cidr}" -j ACCEPT
+    iptables -A POMPEY-KILLSWITCH -d "${cidr}" -j ACCEPT
   done
 fi
 
-iptables -A FIND-KILLSWITCH -j DROP
+iptables -A POMPEY-KILLSWITCH -j DROP
 
 if command -v ip6tables >/dev/null 2>&1; then
   ensure_chain ip6tables
-  ip6tables -A FIND-KILLSWITCH -o lo -j ACCEPT
-  ip6tables -A FIND-KILLSWITCH -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
-  ip6tables -A FIND-KILLSWITCH -j DROP
+  ip6tables -A POMPEY-KILLSWITCH -o lo -j ACCEPT
+  ip6tables -A POMPEY-KILLSWITCH -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+  ip6tables -A POMPEY-KILLSWITCH -j DROP
 fi

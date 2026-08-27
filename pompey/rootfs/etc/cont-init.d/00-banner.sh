@@ -2,7 +2,7 @@
 # shellcheck shell=bash
 set -euo pipefail
 
-bashio::log.info "Find ${BUILD_VERSION:-0.1.0} starting"
+bashio::log.info "Pompey ${BUILD_VERSION:-0.1.1} starting"
 
 mkdir -p /config/wireguard /etc/wireguard /tmp/vpn /run/nginx
 chmod 700 /config/wireguard /etc/wireguard

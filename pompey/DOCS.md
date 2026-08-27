@@ -1,14 +1,16 @@
-# Find
+# Pompey
 
 Search for a movie or TV show from the Home Assistant sidebar. Confirm if we need you. It lands in the right library and Plex is told to scan.
 
-`0.1.0` is the starting point: the search screen, Proton WireGuard, an iptables kill switch, and a NAT-PMP helper. Search is not connected yet.
+`0.1.1` is the starting point: the search screen, Proton WireGuard, an iptables kill switch, and a NAT-PMP helper. Search is not connected yet.
+
+This app is **not** published as a container image. Copy `pompey/` into `/addons` and let Supervisor build it on the machine. Artwork and (later) hidden engines are downloaded while the app runs, after the VPN is up.
 
 ## VPN (required)
 
 In Proton, create a **WireGuard** certificate. Enable **NAT-PMP (Port Forwarding)** if you want incoming connections for downloads. Then either:
 
-1. Copy the downloaded `.conf` to the app config share as `/addon_configs/<hash>_find/wireguard/wg0.conf`, or
+1. Copy the downloaded `.conf` to the app config share as `/addon_configs/<hash>_pompey/wireguard/wg0.conf`, or
 2. Paste **Private key**, **Address**, **Peer public key**, and **Endpoint** from that file into the app options.
 
 There is no country dropdown. The Proton file already chose a server. Generate a new file to change region.
@@ -33,4 +35,4 @@ Libraries and in-progress downloads should share a filesystem (`/media` is the u
 /media/TV
 ```
 
-App config lives in `/addon_configs/<hash>_find/`.
+App config lives in `/addon_configs/<hash>_pompey/`.

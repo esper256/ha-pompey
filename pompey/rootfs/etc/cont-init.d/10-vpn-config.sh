@@ -31,6 +31,6 @@ chmod 600 "${DST}"
 # Proton DNS lives on the tunnel. Fail closed if wg0 is down.
 printf 'nameserver %s\n' "${DNS}" >/etc/resolv.conf
 
-printf '%s\n' "$(bashio::config 'lan_networks')" >/etc/find-lan-networks
+printf '%s\n' "$(bashio::config 'lan_networks')" >/etc/pompey-lan-networks
 vpn-killswitch "${DST}"
 bashio::log.info "iptables kill switch applied (internet OUTPUT only via wg0 once it exists)"

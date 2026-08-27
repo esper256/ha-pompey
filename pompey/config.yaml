@@ -1,12 +1,12 @@
 # https://developers.home-assistant.io/docs/apps/configuration
-name: Find
-version: "0.1.0"
-slug: find
+name: Pompey
+version: "0.1.1"
+slug: pompey
 description: >-
   Search for a movie or TV show. Confirm if we need you. It lands in the
   right library and Plex notices. All internet from this app uses Proton
   WireGuard; if the tunnel is down, internet is dropped.
-url: https://github.com/esper256/ha-arr-addons/tree/main/find
+url: https://github.com/esper256/ha-arr-addons/tree/main/pompey
 arch:
   - aarch64
   - amd64
@@ -16,7 +16,7 @@ timeout: 120
 startup: application
 boot: manual
 panel_icon: mdi:magnify
-panel_title: Find
+panel_title: Pompey
 panel_admin: false
 ingress: true
 ingress_port: 8099
@@ -32,8 +32,6 @@ map:
     read_only: false
   - type: media
     read_only: false
-# Publish to GHCR before uncommenting. Matching tag must equal `version` above.
-# image: ghcr.io/esper256/find
 options:
   wireguard_config: wg0.conf
   wireguard_dns: 10.2.0.1

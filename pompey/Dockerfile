@@ -1,15 +1,16 @@
 # syntax=docker/dockerfile:1
-# Find — search UI + native Proton WireGuard. Engines come later.
+# Pompey — thin local image: search UI + Proton WireGuard.
+# Do not publish this image. Engines and artwork are fetched at runtime.
 
 FROM ghcr.io/home-assistant/base:latest
 
 ARG BUILD_ARCH
 ARG BUILD_DATE
 ARG BUILD_DESCRIPTION="Search for a movie or show; Proton WireGuard for all internet"
-ARG BUILD_NAME="Find"
+ARG BUILD_NAME="Pompey"
 ARG BUILD_REF
 ARG BUILD_REPOSITORY="esper256/ha-arr-addons"
-ARG BUILD_VERSION="0.1.0"
+ARG BUILD_VERSION="0.1.1"
 
 RUN apk add --no-cache \
     bind-tools \
