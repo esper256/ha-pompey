@@ -9,7 +9,7 @@ ARG BUILD_DATE
 ARG BUILD_DESCRIPTION="Search for a movie or show; Proton WireGuard for all internet"
 ARG BUILD_NAME="Pompey"
 ARG BUILD_REF
-ARG BUILD_REPOSITORY="esper256/ha-arr-addons"
+ARG BUILD_REPOSITORY="esper256/ha-pompey"
 ARG BUILD_VERSION="0.1.1"
 
 RUN apk add --no-cache \
