@@ -1,8 +1,8 @@
 # Pompey
 
-Search for a movie or TV show from the Home Assistant sidebar. Confirm if we need you. It lands in the right library and Plex is told to scan.
+Search for a movie or TV show from the Home Assistant sidebar. It lands in the right library and Plex is told to scan.
 
-`0.1.1` is the starting point: the search screen, Proton WireGuard, an iptables kill switch, and a NAT-PMP helper. Search is not connected yet.
+`0.1.1` is the starting point: Proton WireGuard, an iptables kill switch, a NAT-PMP helper, and a placeholder screen. The real face will be Seerr, fetched at runtime. That is not wired yet.
 
 This app is **not** published as a container image. Copy `pompey/` into `/addons` and let Supervisor build it on the machine. Artwork and (later) hidden engines are downloaded while the app runs, after the VPN is up.
 
