@@ -1,8 +1,8 @@
 # HA Arr Stack
 
-A Home Assistant OS app repository. The *arr applications (qBittorrent, Prowlarr, Sonarr, Radarr, Bazarr) run **in one Docker image** so they share a single Proton WireGuard interface.
+A Home Assistant OS app whose **product** is one search bar: disambiguate a title, pick a torrent when the scorer is unsure, file it (including kid-friendly vs general libraries), land it on a NAS, tell Plex to scan. See [docs/PRODUCT.md](docs/PRODUCT.md).
 
-Home Assistant OS cannot attach one addon’s network namespace to another. Putting the VPN tunnel and the apps in the same container is the supported way to force their internet traffic through Proton. Gluetun is not used: its job is sharing a namespace with *other* containers, which we already have. See [docs/DESIGN.md](docs/DESIGN.md).
+Infrastructure (still true): one Docker image so indexer + BitTorrent share a Proton WireGuard interface. Home Assistant OS cannot attach one addon’s network namespace to another. Gluetun is not used. See [docs/DESIGN.md](docs/DESIGN.md).
 
 ## Apps
 
@@ -22,4 +22,5 @@ Until `arr-stack/config.yaml` sets `image:`, Supervisor will build the Dockerfil
 
 Copy `arr-stack/` into `/addons` on an HAOS machine (Samba or SSH addon), then Settings → Apps → Check for updates. Local apps appear at the top of the store.
 
-Architecture, HA options, Ingress, kill switch, updates, and a survey of alexbelgium’s *arr addons are in the [design doc](docs/DESIGN.md).
+Product UX and why this is not five *arr consoles: [docs/PRODUCT.md](docs/PRODUCT.md).
+HAOS networking, WireGuard, Ingress, and publishing: [docs/DESIGN.md](docs/DESIGN.md).

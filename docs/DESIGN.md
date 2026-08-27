@@ -1,9 +1,9 @@
 # Arr Stack on Home Assistant OS — Design
 
-Status: accepted for implementation
-Scope: one Home Assistant app (addon) that runs an *arr media stack and a Proton VPN tunnel in a **single Docker image / single Supervisor container**
+Status: infrastructure accepted; **product target revised**
+Scope: one Home Assistant app (addon) in a **single Docker image / single Supervisor container**, with Proton WireGuard in-process.
 
-This document records the architecture for `esper256/ha-arr-addons`. It is the source of truth until a later revision supersedes it.
+This document is the source of truth for **HAOS constraints, WireGuard, kill switch, Ingress mechanics, and registry publishing**. It assumed the user-facing product was bundled Sonarr/Radarr/Prowlarr/qBittorrent Web UIs. That product assumption is superseded by [PRODUCT.md](PRODUCT.md): one search-to-Plex pipeline; *arr pieces are optional hidden engines, not the UX.
 
 ## Verdict: one container is the correct HAOS approach
 
