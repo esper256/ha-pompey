@@ -37,6 +37,17 @@ jobs:
           APP_DESCRIPTION: ${{ steps.info.outputs.description }}
           APP_URL: ${{ steps.info.outputs.url }}
         run: |
+          trim_quotes() {
+            local s="$1"
+            if [[ "${s}" == \"*\" ]]; then
+              s="${s:1:${#s}-2}"
+            fi
+            printf '%s' "${s}"
+          }
+          APP_VERSION="$(trim_quotes "${APP_VERSION}")"
+          APP_NAME="$(trim_quotes "${APP_NAME}")"
+          APP_DESCRIPTION="$(trim_quotes "${APP_DESCRIPTION}")"
+          APP_URL="$(trim_quotes "${APP_URL}")"
           {
             echo "image_name=pompey"
             echo "version=${APP_VERSION}"
