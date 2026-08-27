@@ -51,6 +51,21 @@ One Home Assistant OS app, one container. That is why this is not five community
 
 Challenge-solver sidecars are not in this starting point.
 
+## v1 locks
+
+These are decided so we can build:
+
+- **Face:** Seerr on Ingress. Auto-approve for the household. We do not vibe-code discovery.
+- **Box:** one Home Assistant app, one container, Proton `wg0`, kill switch, no split tunnel.
+- **Engines:** official Linux musl tarballs for the TV/movie/indexer apps; static `qbittorrent-nox` binary. Recyclarr/TRaSH quality so auto-grab is usually right.
+- **Seerr itself:** they ship Docker, not a tarball. We download *their* published image at runtime and unpack the app directory. We still do not publish an image of our own, and we do not compile them from source.
+- **Plex only.** Library folders on `/media` (same filesystem as downloads).
+- **Kid vs general:** after a request, TMDB certification routes the root folder. G/PG/PG-13 and TV-Y/TV-G/TV-PG → kid libraries. Everything else, including unknown, → general. We do not guess kid. We do not block the request to ask.
+- **Not v1:** picking a specific file when quality and seeds disagree; Cloudflare challenge solvers; Jellyfin; exposing this outside Home Assistant login.
+- **Sources:** we do not ship a catalog of indexers. First-run Pompey asks for at least one source as a URL plus key (plain language). No engine UI.
+
+Hardware: this stack wants a few GB of RAM on top of Home Assistant. A 2 GB Pi is not a target.
+
 ## This repo
 
 `pompey/` is the Home Assistant app for the whole stack. Right now: Proton handshake, kill switch, and a placeholder screen. Next: fetch and wire Seerr as Ingress, engines on localhost.
