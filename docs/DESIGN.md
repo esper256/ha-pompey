@@ -25,9 +25,11 @@ Rejected alternatives:
 
 So the apps and the VPN client live in **one container**. They already share one network namespace.
 
-Caveat we are accepting on purpose: Sonarr/Radarr/Prowlarr *could* stay off-VPN and only the download client would strictly need the tunnel. This project’s threat model is stricter — ISP/path observers should not see indexer queries, metadata lookups, or torrent traffic. Local Home Assistant, LAN media servers, and storage stay reachable via iptables exceptions.
+**Split-tunnel (VPN only the torrent client) is rejected.** The usual homelab advice is “only qBittorrent needs the VPN.” That produces a WAN pattern an ISP can read without decrypting anything: unencrypted/clearnet HTTP(S) from this house to indexer/tracker-adjacent IPs, then a fat WireGuard flow. Prowlarr talking to “some of the shadiest IPs on the planet” on the **clearnet**, followed by 100 Mbps of Proton, is more distinctive than “this customer uses a VPN.”
 
-Do **not** put Jellyfin/Plex/Emby in this image. Playback and transcoding do not belong on a VPN kill switch.
+So every process in this container that leaves the machine — Prowlarr, Sonarr, Radarr, qBittorrent, TMDB/TVDB lookups, Recyclarr — egresses on `wg0` or it does not egress. iptables drops untunneled internet OUTPUT. LAN/Home Assistant (`172.30.32.0/23` and user `lan_networks`) stay reachable so Ingress and Plex refresh work; those are not ISP-visible indexer hits.
+
+Do **not** put Jellyfin/Plex/Emby in this image. Playback and transcoding do not belong on a VPN kill switch. They stay a separate addon on the LAN; we call Plex’s API as LAN traffic, not as clearnet indexer traffic.
 
 ## Verdict: Gluetun is not needed
 
@@ -238,6 +240,20 @@ Layers, all of them:
 7. **Health.** If the handshake is stale, the WireGuard s6 service exits and takes the download client down with it.
 
 Ingress and LAN Web UIs are *incoming* on `eth0` (INPUT). The kill switch is OUTPUT. HA’s sidebar keeps working while internet egress is forced through Proton.
+
+### What the ISP is allowed to see
+
+| On the WAN | Allowed? |
+| --- | --- |
+| WireGuard UDP to the Proton endpoint in the user’s `wg0.conf` | Yes — that is the tunnel |
+| Prowlarr / indexer HTTP(S) to tracker IPs | **No** — that is the pattern we are preventing |
+| TMDB/TVDB, Sonarr/Radarr metadata, Recyclarr GitHub | **No** — same container, same `wg0` |
+| qBittorrent peer traffic | **No** on the WAN except as Proton payload |
+| Home Assistant Ingress, Plex refresh, NAS | Not WAN. LAN/`hassio` exceptions only |
+
+Proton (and anyone who operates that exit) **can** see indexer IPs and torrent traffic. The ISP, on the path between the house and Proton, should see one VPN customer, not “indexer reconnaissance then a VPN blast.”
+
+qBittorrent bound to `wg0` is extra. The firewall is the guarantee: **no untunneled internet OUTPUT**, including from Prowlarr. If `wg0` is down, Prowlarr does not fall back to `eth0`; it fails.
 
 ## Install and updates
 

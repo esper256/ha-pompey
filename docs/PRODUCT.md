@@ -94,8 +94,7 @@ HAOS app (one container, one netns)
   Radarr         ── headless; movie identity, aliases, release search API
   qBittorrent    ── headless; torrents on wg0
   Recyclarr data ── TRaSH custom formats into Sonarr/Radarr (naming quicksand)
-  Byparr         ── only if indexers need a Cloudflare solver (Prowlarr talks to it)
-  WireGuard      ── Proton, iptables kill switch (DESIGN.md)
+  WireGuard      ── Proton, iptables kill switch (DESIGN.md). All of the above internet egress is on wg0.
   /media/...     ── Kid Friendly {Movies,TV} | {Movies,TV}
 
 Plex addon (separate container)
@@ -139,11 +138,10 @@ The failure mode to avoid is **our** code parsing tracker HTML, scene names, and
 
 | Project | Quicksand they absorb | How we use it | Do not |
 | --- | --- | --- | --- |
-| **Prowlarr** | Indexer site HTML/APIs, login cookies, caps, tracker categories. This is the cat-and-mouse you named. Jackett is the older cousin; Prowlarr is the Servarr-native one and the default in 2026. | Headless. Add indexers once. Sonarr/Radarr get them via Prowlarr sync. | Rewrite indexer parsers. Use Jackett unless Prowlarr is missing a tracker we care about. |
-| **Byparr** (FlareSolverr’s replacement) | Cloudflare / anti-bot pages in front of indexers. FlareSolverr is effectively archived and losing to current CF. | Optional sidecar Prowlarr already knows how to call. Only if an indexer needs it. | Build a browser solver. Keep using dead FlareSolverr. |
-| **Sonarr** | TV is the second quicksand: series aliases, scene vs TVDB vs absolute numbering, daily shows, specials, season packs vs single episodes, “which file is S02E04.” Searching Prowlarr for the series title is the wrong query. | Headless. Our UI picks the show/season/episode (TVDB/TMDB). We add it via API, then `GET /api/v3/release` and grab the chosen row. | Reimplement episode matching. Movies-only forever. |
-| **Radarr** | Movie aliases, collections, foreign titles, Plex-friendly `{Movie Title} (Year)` paths, unpack/import. | Same pattern as Sonarr: identity + interactive release API, not their Web UI. | Treat “search Prowlarr for the movie name” as enough forever (it is closer than TV, still worse than Radarr). |
-| **qBittorrent** | BitTorrent itself: magnets, DHT, stalling, rechecks, bind-to-interface. Slower-moving than indexers, still not ours. | Headless download client on `wg0`. Sonarr/Radarr already speak its API. | libtorrent-in-process unless qBit becomes a problem. |
+| **Prowlarr** | Indexer site HTML/APIs, login cookies, caps, tracker categories. This is the cat-and-mouse you named. Jackett is the older cousin; Prowlarr is the Servarr-native one and the default in 2026. | Headless, **on `wg0`**. Add indexers once. Sonarr/Radarr get them via Prowlarr sync. | Rewrite indexer parsers. Let Prowlarr use the ISP path while only torrents use the VPN. |
+| **Sonarr** | TV is the second quicksand: series aliases, scene vs TVDB vs absolute numbering, daily shows, specials, season packs vs single episodes, “which file is S02E04.” Searching Prowlarr for the series title is the wrong query. | Headless, **on `wg0`**. Our UI picks the show/season/episode (TVDB/TMDB). We add it via API, then `GET /api/v3/release` and grab the chosen row. | Reimplement episode matching. Movies-only forever. |
+| **Radarr** | Movie aliases, collections, foreign titles, Plex-friendly `{Movie Title} (Year)` paths, unpack/import. | Same pattern as Sonarr, **on `wg0`**. | Treat “search Prowlarr for the movie name” as enough forever (it is closer than TV, still worse than Radarr). |
+| **qBittorrent** | BitTorrent itself: magnets, DHT, stalling, rechecks, bind-to-interface. Slower-moving than indexers, still not ours. | Headless download client **bound to `wg0`**. Sonarr/Radarr already speak its API. | libtorrent-in-process unless qBit becomes a problem. Split-tunnel “only qBit on VPN.” |
 | **TRaSH Guides + Recyclarr** | Release-group naming and “WEB-DL vs transcode” tokens change as groups rename. TRaSH maintains the lists; Recyclarr ships them into Sonarr/Radarr custom formats. | Recyclarr (or a one-shot sync) on image/update so quality scoring stays current **without our commits**. Our warn-UI reads the same scores. | Hand-maintaining a regex museum in our repo. |
 
 Prowlarr is **necessary and not sufficient**. It finds *rows on indexers*. Sonarr/Radarr turn “this episode of this show” into the right query and the right file on disk. For TV, skip Sonarr and we *become* Sonarr.
@@ -166,6 +164,13 @@ Prowlarr is **necessary and not sufficient**. It finds *rows on indexers*. Sonar
 - **Plex plugins** — dead
 - **Bazarr** — subtitle sites are another cat-and-mouse; later, as a hidden engine, not first
 - **Jackett** — only as a Prowlarr fallback for a missing tracker
+- **Byparr / FlareSolverr** — **v2 at the earliest.** Headless solvers are losing to Cloudflare and do not show a captcha to a human. A later version could put an interactive challenge in *our* UI (user solves it, we reuse the cookie). Until then, if an indexer is CF-walled, it is unavailable; we do not ship a silent Chromium sidecar.
+
+### VPN: no clearnet indexers, then a VPN blast
+
+The ISP-visible pattern to prevent: Prowlarr (and friends) hitting tracker/indexer IPs on the house WAN, then a large Proton flow. That is easier to ascribe than “uses a VPN.”
+
+Every internet-bound process in this container uses `wg0`. iptables drops the rest. Details in [DESIGN.md](DESIGN.md) (“What the ISP is allowed to see”). Plex/HA stay on the LAN; that is not the indexer pattern.
 
 ### How we avoid fiddling after it works
 
@@ -188,6 +193,6 @@ Interactive search flow (TV or movie):
 2. WireGuard + kill switch (already skeletoned) + headless qBittorrent.
 3. Headless Prowlarr + Radarr + Sonarr; Recyclarr profiles; our confirm UI on `/release`.
 4. Rating → root folder + NAS landing + Plex partial refresh.
-5. Optional: Byparr if Cloudflare-blocked indexers appear; Bazarr later.
+5. Optional: Bazarr later. **Byparr / human-in-the-loop Cloudflare is v2**, not a v1 sidecar.
 
 GHCR publishing remains optional (local Dockerfile build still works).
