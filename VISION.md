@@ -15,7 +15,7 @@ So the honest split:
 | Step | Who |
 | --- | --- |
 | Search, posters, pick the title, see if it is already there | **Seerr** (Ingress) |
-| Find a release, download, match episodes, land on the NAS | Hidden engines, fetched at runtime |
+| Find a release, download, match episodes, land on the NAS | Hidden engines, including **qBittorrent-nox** in this same container |
 | All of that on Proton, one box, no extra sidebars | **Pompey** (this app) |
 | “This file is popular but the wrong quality” | Not Seerr. Only if we add a small confirm later. |
 | Kid-friendly vs general by rating | Not Seerr. A tiny rule after the request, or we ask. |
@@ -41,7 +41,7 @@ We do **not** publish a container image to Docker Hub, GHCR, or anywhere else.
 
 Home Assistant OS builds a thin Dockerfile on the machine: WireGuard, kill switch, a little supervisor of our own. No posters, no other teams’ programs in the image.
 
-After the tunnel is up, Pompey downloads official upstream Linux releases onto the config share and starts them. Seerr is the Ingress UI. The rest listen on localhost. We unpack and run. We do not compile their source, and we do not host their bits.
+After the tunnel is up, Pompey downloads official upstream artifacts onto the config share and starts them. For Seerr that means unpacking their published image (they do not ship a tarball). For the engines, official Linux binaries. We do not compile their source, and we do not host their bits.
 
 Title art still comes from metadata CDNs at search time.
 
@@ -57,7 +57,8 @@ These are decided so we can build:
 
 - **Face:** Seerr on Ingress. Auto-approve for the household. We do not vibe-code discovery.
 - **Box:** one Home Assistant app, one container, Proton `wg0`, kill switch, no split tunnel.
-- **Engines:** official Linux musl tarballs for the TV/movie/indexer apps; static `qbittorrent-nox` binary. Recyclarr/TRaSH quality so auto-grab is usually right.
+- **Torrent engine:** **qBittorrent-nox**, in this same process namespace so it cannot leak off the tunnel. Bind traffic to `wg0`. Apply Proton’s NAT-PMP mapped port. No Web UI in the sidebar — the TV/movie engines talk to it on localhost. We fetch a static Linux binary at runtime (not compiled here). Transmission is simpler and worse for this stack; Deluge and rtorrent are more operator UI. Newer clients are not what the matching engines expect yet.
+- **Other engines:** official Linux musl tarballs for the TV/movie/indexer apps. Recyclarr/TRaSH quality so auto-grab is usually right.
 - **Seerr itself:** they ship Docker, not a tarball. We download *their* published image at runtime and unpack the app directory. We still do not publish an image of our own, and we do not compile them from source.
 - **Plex only.** Library folders on `/media` (same filesystem as downloads).
 - **Kid vs general:** after a request, TMDB certification routes the root folder. G/PG/PG-13 and TV-Y/TV-G/TV-PG → kid libraries. Everything else, including unknown, → general. We do not guess kid. We do not block the request to ask.
