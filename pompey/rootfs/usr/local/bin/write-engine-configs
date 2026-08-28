@@ -136,7 +136,7 @@ def patch_qbit_seed(text: str, settings: dict) -> str:
         pat = rf"(?m)^{re.escape(key)}=.*$"
         line = f"{key}={value}"
         if re.search(pat, text):
-            text = re.sub(pat, line, text, count=1)
+            text = re.sub(pat, lambda _m, ln=line: ln, text, count=1)
             continue
         if re.search(r"(?m)^Session\\DisableAutoTMMByDefault=.*$", text):
             text = re.sub(
