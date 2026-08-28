@@ -20,13 +20,7 @@ export POMPEY_SECRETS MEDIA_ROOT
 export PLEX_URL="$(bashio::config 'plex_url')"
 export PLEX_TOKEN="$(bashio::config 'plex_token')"
 export INDEXER_URL="$(bashio::config 'source_url')"
-if [[ -z "${INDEXER_URL}" ]]; then
-  INDEXER_URL="$(bashio::config 'indexer_url')"
-fi
 export INDEXER_API_KEY="$(bashio::config 'source_key')"
-if [[ -z "${INDEXER_API_KEY}" ]]; then
-  INDEXER_API_KEY="$(bashio::config 'indexer_api_key')"
-fi
 export INGRESS_PORT="$(bashio::addon.ingress_port)"
 
 # Retry until Seerr is up and wiring succeeds.

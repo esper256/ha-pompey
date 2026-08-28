@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.12
+
+- Wiring no longer marks search ready after a required step failed. A failed Prowlarr app/indexer add, qBittorrent category (other than "already exists"), Seerr session, or Seerr→Radarr/Sonarr used to be a log line while Ingress still flipped to search. Those now fail the process so s6 retries and the wait screen stays up. Plex login/libraries and Seerr chrome settings (title, trustProxy) stay optional. Rebuild so the banner says **0.2.12**.
+- `as_list` no longer treats an error object (`{"message": ...}`) or a name-only dict as an existing indexer/app. That hid failed GETs.
+- HTTP 502/503/504 to the engines is retried a couple of times (boot race). 4xx is not.
+- Dropped leftover `indexer_url` / `indexer_api_key` option fallbacks (schema is `source_url` / `source_key`).
+- nginx reload failure is a hard error when nginx is on PATH (tests without nginx still write the conf).
+
 ## 0.2.11
 
 - Engine fetch no longer dies on `tar: Prowlarr/*.dll: Cannot change mode ... Operation not permitted`. That was GNU tar restoring archive modes under `/tmp`, which HAOS AppArmor allows only `rwk` (no chmod). Linux Servarr builds are .NET — lots of `.dll` files plus an **ELF** launcher — not a Windows zip. Unpack under `/data/engines` with `--no-same-owner --no-same-permissions`, refuse zip/Windows/PE launchers, and log the artifact name (`linux-musl-core-x64`). Same path for Sonarr, Radarr, and Seerr. Rebuild so the banner says **0.2.11**.

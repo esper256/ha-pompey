@@ -33,6 +33,8 @@ Shipping path: copy `pompey/` into `/addons`. Supervisor builds locally. That is
 
 s6-overlay: `rootfs/etc/cont-init.d/*` once, then `rootfs/etc/services.d/*`.
 
+`wire-stack` must exit non-zero on a required miss (Prowlarr apps, source indexer when a URL is set, Seerr session, Seerr→Radarr/Sonarr, qBittorrent category other than 409). s6 retries; the wait screen stays up. Plex and Seerr chrome settings are optional. Do not log-and-continue on a required step — that flipped Ingress to a hollow search UI.
+
 ## What agents should run here (no HAOS)
 
 Fast, no Docker. CI unpacks a cached Prowlarr linux-musl tarball (not a torrent client):

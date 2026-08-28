@@ -75,6 +75,8 @@ class FakeState:
         self.seerr_radarr: list[dict] = []
         self.seerr_sonarr: list[dict] = []
         self.initialized = False
+        self.fail_seerr_radarr = False
+        self.fail_indexer = False
         self.qbit_prefs: object = None
         self.movies = [
             {"id": 1, "title": "Kid Flick", "certification": "PG", "path": "/media/Movies/Kid Flick"},
@@ -207,6 +209,8 @@ def handler_for(state: FakeState):
                     fields = [{"name": n} for n in ("baseUrl", "apiPath", "apiKey")]
                     return self._send(body=[{"implementation": "Torznab", "fields": fields}])
                 if path == "/api/v1/indexer" and method == "POST":
+                    if state.fail_indexer:
+                        return self._send(500, {"message": "indexer add failed"})
                     state.indexers.append(body)
                     return self._send(201, body)
                 if path == "/api/v1/command" and method == "POST":
@@ -251,6 +255,8 @@ def handler_for(state: FakeState):
                         return self._send(body={"initialized": False})
                     return self._send(body=state.seerr_radarr)
                 if path == "/api/v1/settings/radarr" and method == "POST":
+                    if state.fail_seerr_radarr:
+                        return self._send(500, {"message": "radarr wiring failed"})
                     state.seerr_radarr.append(body)
                     return self._send(201, body)
                 if path == "/api/v1/settings/sonarr" and method == "GET":
@@ -403,6 +409,8 @@ class Helpers(unittest.TestCase):
         )
         self.assertEqual(ws.as_list({"hostname": "127.0.0.1", "name": "Radarr"})[0]["name"], "Radarr")
         self.assertEqual(ws.as_list({"results": [{"id": 1}]}), [{"id": 1}])
+        self.assertEqual(ws.as_list({"message": "Sequence contains no matching element"}), [])
+        self.assertEqual(ws.as_list({"name": "Unauthorized"}), [])
 
 
 class WireStack(unittest.TestCase):
@@ -429,6 +437,9 @@ class WireStack(unittest.TestCase):
         secrets_path.write_text(json.dumps(secrets))
         nginx = self.tmp / "ingress.conf"
         ready = self.tmp / "ready"
+        if ready.exists():
+            for leftover in ready.iterdir():
+                leftover.unlink()
         ready.mkdir(exist_ok=True)
         os.environ.update(
             {
@@ -507,6 +518,30 @@ class WireStack(unittest.TestCase):
         self.assertTrue(self.state.initialized)
         live = json.loads((self.ready / "status.json").read_text())
         self.assertTrue(live["search"])
+
+    def test_does_not_mark_ready_when_seerr_radarr_fails(self):
+        self.state.fail_seerr_radarr = True
+        with self.assertRaises(RuntimeError) as ctx:
+            ws.main()
+        self.assertIn("500", str(ctx.exception))
+        self.assertFalse((self.ready / "wired").exists())
+        self.assertTrue((self.ready / "arr-wired").exists())
+
+    def test_does_not_mark_ready_when_source_indexer_fails(self):
+        self.state.fail_indexer = True
+        with self.assertRaises(RuntimeError):
+            ws.main()
+        self.assertFalse((self.ready / "wired").exists())
+        self.assertFalse((self.ready / "arr-wired").exists())
+
+    def test_wires_without_source_url(self):
+        os.environ["INDEXER_URL"] = ""
+        os.environ["INDEXER_API_KEY"] = ""
+        rc = ws.main()
+        self.assertEqual(rc, 0)
+        self.assertTrue((self.ready / "wired").exists())
+        self.assertEqual(self.state.indexers, [])
+        self.assertEqual(self.state.commands, [])
 
 
 class RouteRating(unittest.TestCase):

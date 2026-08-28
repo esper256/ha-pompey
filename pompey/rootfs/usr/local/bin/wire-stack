@@ -1,5 +1,15 @@
 #!/usr/bin/env python3
-"""Wire localhost engines and Seerr. Idempotent. Secrets never logged."""
+"""Wire localhost engines and Seerr. Idempotent. Secrets never logged.
+
+Required (must succeed or this process exits non-zero so s6 retries, and
+the wait screen does not flip to search): qBittorrent categories, Arr root
+folders and download clients, Prowlarr↔Radarr/Sonarr apps, the operator
+source indexer when a URL is configured, Seerr session, Seerr→Radarr/Sonarr.
+
+Optional (log and continue): Plex token/login/libraries, Seerr chrome
+settings (title, trustProxy). No source URL yet is also optional — the
+household can finish that from the search screen.
+"""
 from __future__ import annotations
 
 import json
@@ -33,18 +43,23 @@ def env(name: str, default: str = "") -> str:
 
 
 def as_list(value):
-    """HTTP JSON is usually an array of objects; stubs and error bodies often are not."""
+    """HTTP JSON is usually an array of objects; stubs and error bodies often are not.
+
+    Do not wrap an error object or a name-only dict as a one-item list.
+    That made a failed GET look like "indexer already exists" and skipped setup.
+    """
     if isinstance(value, list):
         return [item for item in value if isinstance(item, dict)]
     if isinstance(value, dict):
+        if (value.get("message") or value.get("error")) and not any(
+            key in value for key in ("id", "implementation", "path", "hostname")
+        ):
+            return []
         for key in ("results", "records", "data", "items"):
             inner = value.get(key)
             if isinstance(inner, list):
                 return as_list(inner)
-        if any(
-            key in value
-            for key in ("id", "hostname", "path", "implementation", "name", "address", "owned")
-        ):
+        if any(key in value for key in ("id", "hostname", "path", "implementation", "owned")):
             return [value]
         return []
     return []
@@ -133,20 +148,31 @@ def http(method: str, url: str, body=None, headers=None, timeout=30):
         else:
             data = json.dumps(body).encode()
             hdrs.setdefault("Content-Type", "application/json")
-    req = urllib.request.Request(url, data=data, method=method, headers=hdrs)
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            raw = resp.read()
-            if not raw:
-                return None
-            text = raw.decode(errors="replace")
-            try:
-                return json.loads(text)
-            except json.JSONDecodeError:
-                return text
-    except urllib.error.HTTPError as exc:
-        err = exc.read().decode(errors="replace")
-        raise RuntimeError(f"{method} {url} -> {exc.code} {err[:300]}") from exc
+    attempts = 3
+    last: Exception | None = None
+    for attempt in range(attempts):
+        req = urllib.request.Request(url, data=data, method=method, headers=hdrs)
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                raw = resp.read()
+                if not raw:
+                    return None
+                text = raw.decode(errors="replace")
+                try:
+                    return json.loads(text)
+                except json.JSONDecodeError:
+                    return text
+        except urllib.error.HTTPError as exc:
+            err = exc.read().decode(errors="replace")
+            last = RuntimeError(f"{method} {url} -> {exc.code} {err[:300]}")
+            if exc.code in {502, 503, 504} and attempt + 1 < attempts:
+                time.sleep(wait_sleep())
+                continue
+            raise last from exc
+        except urllib.error.URLError as exc:
+            last = RuntimeError(f"{method} {url} -> {exc}")
+            raise last from exc
+    raise last or RuntimeError(f"{method} {url} failed")
 
 
 def wait_http(url: str, tries: int | None = None):
@@ -229,7 +255,8 @@ def first_profile(base: str, api_key: str):
 def language_profile_id(base: str, api_key: str):
     try:
         langs = as_list(http("GET", f"{base}/languageprofile", headers=arr_headers(api_key)))
-    except Exception:  # noqa: BLE001
+    except RuntimeError:
+        # Sonarr v4 dropped language profiles (404). That is expected.
         return None
     if not langs:
         return None
@@ -284,16 +311,13 @@ def ensure_indexer(prowlarr: str, pkey: str) -> None:
     indexer["tags"] = []
     http("POST", f"{prowlarr}/api/v1/indexer", indexer, headers=arr_headers(pkey))
     log("added source")
-    try:
-        http(
-            "POST",
-            f"{prowlarr}/api/v1/command",
-            {"name": "ApplicationIndexerSync"},
-            headers=arr_headers(pkey),
-        )
-        log("prowlarr sync")
-    except RuntimeError as exc:
-        log(f"prowlarr sync: {exc}")
+    http(
+        "POST",
+        f"{prowlarr}/api/v1/command",
+        {"name": "ApplicationIndexerSync"},
+        headers=arr_headers(pkey),
+    )
+    log("prowlarr sync")
 
 
 def qbit_category(name: str) -> None:
@@ -302,8 +326,10 @@ def qbit_category(name: str) -> None:
         http("POST", f"{qbit_url()}/api/v2/torrents/createCategory", data)
         log(f"qbit category {name}")
     except RuntimeError as exc:
-        if "409" not in str(exc) and "already" not in str(exc).lower():
-            log(f"qbit category {name}: {exc}")
+        # 409 = category already exists. Anything else is a real failure.
+        if "409" in str(exc) or "already" in str(exc).lower():
+            return
+        raise
 
 
 class Seerr:
@@ -399,7 +425,7 @@ def configure_seerr(secrets: dict, radarr_profile, sonarr_profile, sonarr_lang) 
             log("seerr signed in with Plex token")
             signed_in = True
         except RuntimeError as exc:
-            log(f"seerr plex login: {exc}")
+            log(f"seerr plex login: {exc}", "WARNING")
             have_plex = False
 
     if not signed_in:
@@ -415,16 +441,16 @@ def configure_seerr(secrets: dict, radarr_profile, sonarr_profile, sonarr_lang) 
                 log("seerr signed in with local account")
                 signed_in = True
             except RuntimeError as exc:
-                log(f"seerr local login: {exc}")
+                log(f"seerr local login: {exc}", "WARNING")
     if not signed_in:
-        log("seerr has no session yet; TV/movie wiring may wait for the setup wizard")
+        raise RuntimeError("seerr has no session yet; cannot wire Radarr/Sonarr")
 
     try:
         main = s.call("GET", "/api/v1/settings/main") or {}
         if isinstance(main, dict) and main.get("apiKey"):
             s.api_key = main["apiKey"]
     except RuntimeError as exc:
-        log(f"seerr api key: {exc}")
+        log(f"seerr api key: {exc}", "WARNING")
 
     if have_plex:
         host, port, ssl = parse_plex(plex_url())
@@ -446,7 +472,7 @@ def configure_seerr(secrets: dict, radarr_profile, sonarr_profile, sonarr_lang) 
             s.call("POST", "/api/v1/settings/plex", payload)
             log("plex settings")
         except RuntimeError as exc:
-            log(f"plex settings: {exc}")
+            log(f"plex settings: {exc}", "WARNING")
 
         try:
             s.call("POST", "/api/v1/settings/plex/library/sync")
@@ -457,11 +483,11 @@ def configure_seerr(secrets: dict, radarr_profile, sonarr_profile, sonarr_lang) 
                     continue
                 try:
                     s.call("PUT", f"/api/v1/settings/plex/library/{lib_id}", {"enabled": True})
-                except RuntimeError:
-                    pass
+                except RuntimeError as exc:
+                    log(f"plex library {lib_id}: {exc}", "WARNING")
             log("plex libraries enabled")
         except RuntimeError as exc:
-            log(f"plex libraries: {exc}")
+            log(f"plex libraries: {exc}", "WARNING")
 
     radarr_id, radarr_name = radarr_profile
     sonarr_id, sonarr_name = sonarr_profile
@@ -508,23 +534,14 @@ def configure_seerr(secrets: dict, radarr_profile, sonarr_profile, sonarr_lang) 
 
     def upsert_arr(kind: str, payload: dict) -> None:
         path = f"/api/v1/settings/{kind}"
-        try:
-            existing = as_list(s.call("GET", path))
-        except RuntimeError:
-            existing = []
+        existing = as_list(s.call("GET", path))
         if any(item.get("hostname") == "127.0.0.1" for item in existing):
             return
         s.call("POST", path, payload)
         log(f"seerr {kind}")
 
-    try:
-        upsert_arr("radarr", radarr_payload)
-    except RuntimeError as exc:
-        log(f"seerr radarr: {exc}")
-    try:
-        upsert_arr("sonarr", sonarr_payload)
-    except RuntimeError as exc:
-        log(f"seerr sonarr: {exc}")
+    upsert_arr("radarr", radarr_payload)
+    upsert_arr("sonarr", sonarr_payload)
 
     try:
         s.call(
@@ -540,20 +557,17 @@ def configure_seerr(secrets: dict, radarr_profile, sonarr_profile, sonarr_lang) 
             },
         )
     except RuntimeError as exc:
-        log(f"seerr main settings: {exc}")
+        log(f"seerr main settings: {exc}", "WARNING")
 
     try:
         s.call("POST", "/api/v1/settings/network", {"trustProxy": True})
     except RuntimeError as exc:
-        log(f"seerr network: {exc}")
+        log(f"seerr network: {exc}", "WARNING")
 
-    try:
-        public = s.call("GET", "/api/v1/settings/public") or {}
-        if not (isinstance(public, dict) and public.get("initialized")):
-            s.call("POST", "/api/v1/settings/initialize")
-            log("seerr initialized")
-    except RuntimeError as exc:
-        log(f"seerr initialize: {exc}")
+    public = s.call("GET", "/api/v1/settings/public") or {}
+    if not (isinstance(public, dict) and public.get("initialized")):
+        s.call("POST", "/api/v1/settings/initialize")
+        log("seerr initialized")
 
 
 def reload_nginx() -> None:
@@ -595,7 +609,13 @@ def reload_nginx() -> None:
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     with open(path, "w", encoding="utf-8") as fh:
         fh.write(conf)
-    os.system("nginx -s reload >/dev/null 2>&1 || true")
+    nginx = shutil.which("nginx")
+    if nginx:
+        done = subprocess.run([nginx, "-s", "reload"], check=False, capture_output=True, text=True)
+        if done.returncode != 0:
+            raise RuntimeError(f"nginx reload failed: {(done.stderr or done.stdout or '').strip()}")
+    else:
+        log("nginx not on PATH; wrote ingress conf only", "WARNING")
     log("ingress now proxies Seerr")
 
 
@@ -619,15 +639,9 @@ def main() -> int:
     ensure_root_folder(radarr, rk, f"{media_root()}/Kid Friendly Movies")
     ensure_download_client(sonarr, sk, secrets, "sonarr")
     ensure_download_client(radarr, rk, secrets, "radarr")
-    try:
-        ensure_prowlarr_app(prowlarr, pk, "Sonarr", "Sonarr", sonarr_url(), sk)
-        ensure_prowlarr_app(prowlarr, pk, "Radarr", "Radarr", radarr_url(), rk)
-    except RuntimeError as exc:
-        log(f"prowlarr apps: {exc}")
-    try:
-        ensure_indexer(prowlarr, pk)
-    except RuntimeError as exc:
-        log(f"source: {exc}")
+    ensure_prowlarr_app(prowlarr, pk, "Sonarr", "Sonarr", sonarr_url(), sk)
+    ensure_prowlarr_app(prowlarr, pk, "Radarr", "Radarr", radarr_url(), rk)
+    ensure_indexer(prowlarr, pk)
 
     sp = first_profile(sonarr, sk)
     rp = first_profile(radarr, rk)
