@@ -206,8 +206,7 @@ ns env \
 test -f "${POMPEY_READY}/arr-wired"
 test -f "${POMPEY_READY}/wired"
 test "$(jq -r .search "${POMPEY_READY}/status.json")" = true
-grep -q 'proxy_pass http://127.0.0.1:8098' "${NGINX_INGRESS_CONF}"
-grep -q 'X-Ingress-Path' "${NGINX_INGRESS_CONF}"
+test ! -s "${NGINX_INGRESS_CONF}" || ! grep -q 'proxy_pass http://127.0.0.1:8098' "${NGINX_INGRESS_CONF}"
 
 PROWLARR_KEY="$(jq -r .prowlarr_api_key "${POMPEY_SECRETS}")"
 PROWLARR=http://127.0.0.1:9696
@@ -254,21 +253,7 @@ fi
 log "Radarr indexer: $(echo "${radarr_indexers}" | jq -r '.[0].name')"
 log "Sonarr indexer: $(echo "${sonarr_indexers}" | jq -r '.[0].name')"
 
-log "ingress rewriter against Seerr stub (no Seerr binary)"
-ns env \
-  SEERR_URL=http://127.0.0.1:5055 \
-  POMPEY_INGRESS_PROXY=http://127.0.0.1:8098 \
-  python3 "${BIN}/pompey-ingress" >"${WORK}/ingress.log" 2>&1 &
-PIDS+=("$!")
-wait_url http://127.0.0.1:8098/ 20
-html="$(ns curl -fsS -H 'X-Ingress-Path: /api/hassio_ingress/tok' http://127.0.0.1:8098/)"
-echo "${html}" | grep -q '/api/hassio_ingress/tok/_next/static/x.js'
-cookie_hdr="$(ns curl -sS -D - -o /dev/null -X POST \
-  -H 'X-Ingress-Path: /api/hassio_ingress/tok' \
-  -H 'Content-Type: application/json' \
-  -d '{"email":"a@b.c","password":"x"}' \
-  http://127.0.0.1:8098/api/v1/auth/local)"
-echo "${cookie_hdr}" | grep -qi 'Path=/api/hassio_ingress/tok'
+log "Seerr is on the published port; skip Ingress rewriter (that was the Plex no-op)"
 
 log "lookup ${MOVIE}"
 lookup="$(arr "${RADARR}" "${RADARR_KEY}" GET "/api/v3/movie/lookup?term=$(python3 -c 'import urllib.parse,os; print(urllib.parse.quote(os.environ["MOVIE"]))')" )"

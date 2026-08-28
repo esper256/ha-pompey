@@ -145,6 +145,25 @@
       opacity: 0.6;
       cursor: wait;
     }
+
+    #open-search {
+      margin-top: 1.25rem;
+    }
+
+    #open-search a {
+      display: inline-block;
+      font-family: ui-sans-serif, system-ui, sans-serif;
+      font-size: 0.95rem;
+      background: var(--focus);
+      color: #07090d;
+      border-radius: 0.35rem;
+      padding: 0.55rem 1rem;
+      text-decoration: none;
+    }
+
+    #open-search .hint {
+      margin-top: 0.6rem;
+    }
   </style>
 </head>
 <body>
@@ -158,6 +177,10 @@
       <textarea id="wg" name="config" spellcheck="false" autocomplete="off" autocapitalize="off"></textarea>
       <button type="submit" id="wg-go">Start the tunnel</button>
     </form>
+    <div id="open-search" hidden>
+      <a id="open-search-btn" href="#" target="_blank" rel="noopener">Open search</a>
+      <p class="hint" id="open-search-url"></p>
+    </div>
     <p id="file-hint" hidden>This file is only the wait screen. On Home Assistant it lives in the sidebar after Proton is up. In this repo run <code>python3 tests/preview.py</code> to watch progress here.</p>
     <p class="error" id="err" hidden></p>
   </main>
@@ -170,6 +193,9 @@
     const proton = document.getElementById("proton");
     const wg = document.getElementById("wg");
     const wgGo = document.getElementById("wg-go");
+    const openSearch = document.getElementById("open-search");
+    const openSearchBtn = document.getElementById("open-search-btn");
+    const openSearchUrl = document.getElementById("open-search-url");
     const marks = { pending: "·", active: "›", done: "✓", error: "!" };
     let protonSubmitted = false;
     let lastSig = "";
@@ -189,6 +215,7 @@
         data.error,
         data.need_proton,
         data.search,
+        data.search_port,
         data.steps,
       ]);
       if (sig === lastSig) {
@@ -217,14 +244,14 @@
         stepsEl.append(li);
       });
       if (data.search && !data.need_proton && !showForm) {
-        now.textContent = "Opening search…";
-        const n = Number(sessionStorage.getItem("pompey-handoff") || "0");
-        if (n < 8) {
-          sessionStorage.setItem("pompey-handoff", String(n + 1));
-          setTimeout(() => {
-            location.replace(location.pathname + location.hash);
-          }, 300);
-        }
+        const port = Number(data.search_port) || 5055;
+        const url = "http://" + location.hostname + ":" + port + "/";
+        now.textContent = "Search is ready. This sidebar stays Pompey; open search on port " + port + ".";
+        openSearch.hidden = false;
+        openSearchBtn.href = url;
+        openSearchUrl.textContent = url + " — if this host is Home Assistant Cloud, use this machine’s LAN IP instead. Plex is a separate app.";
+      } else {
+        openSearch.hidden = true;
       }
     }
 

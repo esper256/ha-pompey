@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.16
+
+- **Search is no longer stuffed through Home Assistant Ingress.** Seerr is a Next.js app with no runtime basePath. Prefixing `/_next` and `/login` for the sidebar iframe already broke `/login/i` (0.2.13) and `/^\/_next\/data\//` (0.2.15). The next Seerr update would invent another regex. Ingress now stays Pompey's wait/status UI. Seerr is published on host port **5055** with no path rewrite. When the box is ready, the sidebar shows **Open search**. Rebuild so the banner says **0.2.16**.
+- **Plex is not inside Pompey.** It never was an engine we fetch. Plex is the separate Home Assistant app (or another machine) you already run. Pompey only talks to it at the numeric IP you give Seerr.
+
+## 0.2.15
+
+- Seerr **Configure Plex** still did nothing after 0.2.13. That fix stopped rewriting `/login` inside `/login/i`, but a naive `/_next` replace still ran inside Next.js's `/^\/_next\/data\//` regex (`getNextPathnameInfo`). The result was `Invalid regular expression flags` in a setup chunk, so the first-screen click was a no-op. Escaped `/` matches are left for the `\/_next` pass, which prefixes them as `\/api\/hassio_ingress\/…\/_next`. CI now `node --check`s real Seerr chunks that contain `/_next`, and `tests/preview_seerr_ingress.py` serves `/setup` the way Home Assistant Ingress does. Rebuild so the banner says **0.2.15**.
+
 ## 0.2.14
 
 - Household guide in the root README: install from the Apps repository, first run (Proton paste, Plex wizard, source), which URLs you actually open, how updates should work over years, what this cut does not do yet, and a roadmap to the intended product. Supervisor-only notes stay in `DOCS.md`.

@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Proxy Seerr and rewrite root-absolute URLs for Home Assistant Ingress.
 
-Seerr is a Next.js app with no runtime basePath. Supervisor strips
-/api/hassio_ingress/<token> before the request hits us, then the browser
-resolves /_next/... against the Home Assistant origin. We prefix those
-paths with X-Ingress-Path so assets and API calls stay inside Ingress.
+Unused on the household path as of 0.2.16: Seerr is published on host
+port 5055 so Next.js can keep its own URLs. Ingress nginx serves only
+Pompey's wait/status UI. This module stays so we can prove the old
+rewrite bugs in tests, not because the sidebar still iframes Seerr.
 """
 from __future__ import annotations
 
@@ -69,9 +69,36 @@ def ingress_prefix(headers) -> str:
 
 
 def _replace_unprefixed(text: str, old: str, new: str) -> str:
+    """Replace old with new, skipping already-prefixed hits and escaped slashes.
+
+    Next.js ships regexes like /^\\/_next\\/data\\//. A naive /_next replace
+    turns that into /^\\/api/hassio_ingress/tok/_next\\/data\\// which is
+    invalid (the regex ends at /api). Skip a match whose '/' is escaped so
+    the later \\/_next pass can prefix it as a regex-safe path.
+    """
     if not old or old == new:
         return text
-    return new.join(part.replace(old, new) for part in text.split(new))
+
+    def replace_part(part: str) -> str:
+        if not old.startswith("/"):
+            return part.replace(old, new)
+        out: list[str] = []
+        i = 0
+        n = len(old)
+        while True:
+            j = part.find(old, i)
+            if j < 0:
+                out.append(part[i:])
+                return "".join(out)
+            if j > 0 and part[j - 1] == "\\":
+                out.append(part[i : j + n])
+                i = j + n
+                continue
+            out.append(part[i:j])
+            out.append(new)
+            i = j + n
+
+    return new.join(replace_part(part) for part in text.split(new))
 
 
 def rewrite_seerr_body(text: str, prefix: str) -> str:

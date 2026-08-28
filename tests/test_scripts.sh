@@ -304,10 +304,9 @@ grep -q '%H:%M:%S' "${ROOT}/pompey/rootfs/usr/local/bin/pompey-setup"
 grep -q '%H:%M:%S' "${ROOT}/pompey/rootfs/usr/local/bin/pompey-ingress"
 grep -q '%H:%M:%S' "${ROOT}/pompey/rootfs/usr/local/bin/wire-stack"
 test -f "${ROOT}/pompey/rootfs/etc/services.d/setup/run"
-test -f "${ROOT}/pompey/rootfs/etc/services.d/ingress-proxy/run"
-grep -q 'pompey-ingress' "${ROOT}/pompey/rootfs/etc/services.d/ingress-proxy/run"
+test -f "${ROOT}/pompey/rootfs/etc/services.d/ingress-proxy/down"
 grep -q 'POMPEY_CONFIG' "${ROOT}/pompey/rootfs/etc/services.d/radarr/run"
-grep -q 'HOST=127.0.0.1' "${ROOT}/pompey/rootfs/etc/services.d/seerr/run"
+grep -q 'HOST=0.0.0.0' "${ROOT}/pompey/rootfs/etc/services.d/seerr/run"
 
 echo "== status.json writer =="
 python3 "${BIN}/pompey-status" vpn "Waiting for Proton handshake" 15
@@ -320,6 +319,7 @@ test "$(jq -r .step "${POMPEY_READY}/status.json")" = vpn
 python3 "${BIN}/pompey-status" ready "Ready" 100
 test "$(jq -r .handoff "${POMPEY_READY}/status.json")" = true
 test "$(jq -r .search "${POMPEY_READY}/status.json")" = true
+test "$(jq -r .search_port "${POMPEY_READY}/status.json")" = 5055
 rm -rf "${POMPEY_READY}"
 python3 "${BIN}/pompey-status" vpn "Starting" 5
 test -f "${POMPEY_READY}/status.json"

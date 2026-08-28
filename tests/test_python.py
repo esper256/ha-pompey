@@ -366,17 +366,28 @@ class Helpers(unittest.TestCase):
         chosen = ws.pick_plex_server(servers, "172.30.32.1")
         self.assertEqual(chosen["name"], "Home")
 
-    def test_wait_page_reloads_only_when_search_is_live(self):
+    def test_wait_page_offers_search_port_instead_of_rewriting_seerr(self):
         html = (ROOT / "pompey/rootfs/usr/share/pompey/index.html").read_text()
         self.assertIn("data.search", html)
-        self.assertIn("location.replace", html)
-        self.assertIn("Opening search", html)
+        self.assertIn("open-search", html)
+        self.assertIn("Open search", html)
+        self.assertIn("search_port", html)
+        self.assertNotIn("location.replace", html)
+        self.assertNotIn("pompey-handoff", html)
         self.assertIn('src="logo.png"', html)
         self.assertIn("setup/proton", html)
         self.assertIn("need_proton", html)
         self.assertIn("Paste the Proton WireGuard file", html)
         self.assertIn("lastSig", html)
         self.assertIn("protonSubmitted", html)
+        cfg = (ROOT / "pompey/config.yaml").read_text()
+        self.assertIn("5055/tcp: 5055", cfg)
+        seerr = (ROOT / "pompey/rootfs/etc/services.d/seerr/run").read_text()
+        self.assertIn("HOST=0.0.0.0", seerr)
+        self.assertNotIn("HOST=127.0.0.1", seerr)
+        docker = (ROOT / "pompey/Dockerfile").read_text()
+        self.assertNotIn("plex", docker.lower())
+        self.assertTrue((ROOT / "pompey/rootfs/etc/services.d/ingress-proxy/down").is_file())
 
     def test_paste_apply_does_not_echo_keys(self):
         setup = (ROOT / "pompey/rootfs/usr/local/bin/pompey-setup").read_text()
@@ -517,16 +528,11 @@ class WireStack(unittest.TestCase):
         self.assertEqual(self.state.seerr_sonarr[0]["activeDirectory"], "/media/TV")
         self.assertTrue((self.ready / "seerr-arr").exists())
         self.assertTrue(self.state.initialized)
-        text = self.nginx.read_text()
-        self.assertIn("proxy_pass " + os.environ.get("POMPEY_INGRESS_PROXY", "http://127.0.0.1:8098"), text)
-        self.assertIn("X-Ingress-Path", text)
-        self.assertIn("X-Forwarded-Prefix", text)
-        self.assertIn("status.json", text)
-        self.assertIn("access_log off", text)
-        self.assertNotIn("test-plex-token", text)
+        self.assertFalse(self.nginx.exists(), "Ingress must stay the Pompey UI, not a Seerr proxy")
         live = json.loads((self.ready / "status.json").read_text())
         self.assertTrue(live["search"])
         self.assertTrue(live["handoff"])
+        self.assertEqual(live["search_port"], 5055)
         self.assertIsNone(self.state.local_auth)
 
     def test_wires_when_seerr_returns_objects(self):
@@ -623,23 +629,13 @@ class WireStack(unittest.TestCase):
         stub.chmod(0o755)
         os.environ["PATH"] = f"{bindir}:{self._old_path}"
 
-    def test_nginx_not_running_still_marks_ready(self):
-        self._stub_nginx(
-            'echo \'the "user" directive makes sense only if the master process runs with super-user privileges\' >&2\n'
-            'echo \'signal process started\' >&2\n'
-            'echo \'open() "/run/nginx.pid" failed (2: No such file or directory)\' >&2\n'
-            "exit 1\n"
-        )
+    def test_wiring_does_not_proxy_seerr_through_ingress(self):
+        """A broken nginx binary must not matter: Ingress is not rewritten into Seerr."""
+        self._stub_nginx("echo should-not-run >&2\nexit 1\n")
         rc = ws.main()
         self.assertEqual(rc, 0)
         self.assertTrue((self.ready / "wired").exists())
-
-    def test_nginx_reload_error_does_not_mark_ready(self):
-        self._stub_nginx('echo "invalid number of arguments in log_format" >&2\nexit 1\n')
-        with self.assertRaises(RuntimeError) as ctx:
-            ws.main()
-        self.assertIn("nginx reload failed", str(ctx.exception))
-        self.assertFalse((self.ready / "wired").exists())
+        self.assertFalse(self.nginx.exists())
 
 
 class RouteRating(unittest.TestCase):
@@ -700,6 +696,24 @@ class IngressRewrite(unittest.TestCase):
         self.assertIn(r'"\/api\/hassio_ingress\/tok\/setup"', escaped_out)
         regex_escaped = r"re=/\/login/i"
         self.assertEqual(ing.rewrite_seerr_body(regex_escaped, prefix), regex_escaped)
+
+    def test_escaped_next_data_regex_stays_valid(self):
+        """Next.js getNextPathnameInfo ships /^\\/_next\\/data\\//. Naive /_next
+        replace turns that into /^\\/api/hassio_ingress/tok/_next\\/data\\//
+        (invalid flags) and the Plex button is a no-op."""
+        prefix = "/api/hassio_ingress/tok"
+        chunk = (
+            'l.pathname.replace(/^\\/_next\\/data\\//,"").replace(/\\.json$/,"")'
+            ';window.open("/login/plex/loading",e,"scrollbars=yes")'
+        )
+        out = ing.rewrite_seerr_body(chunk, prefix)
+        self.assertIn(r"/^\/api\/hassio_ingress\/tok\/_next\/data\//", out)
+        self.assertNotIn(r"/^\/api/hassio_ingress", out)
+        self.assertNotIn(r"/^\/_next\/data\//", out)
+        self.assertIn(f'window.open("{prefix}/login/plex/loading"', out)
+        again = ing.rewrite_seerr_body(out, prefix)
+        self.assertEqual(out, again)
+        self.assertEqual(out.count(prefix), again.count(prefix))
 
     def test_empty_prefix_leaves_html(self):
         html = '<script src="/_next/static/x.js"></script>'
