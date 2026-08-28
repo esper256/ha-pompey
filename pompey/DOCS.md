@@ -19,7 +19,7 @@ This app is **not** published as a container image. Copy `pompey/` into `/addons
 
 Do this **before** you start the app:
 
-1. Use the **0.2.1** tree (the first-install PR), not an older copy of `main`.
+1. Current `main` (0.2.1). After adding the GitHub Apps repository, look under **Install app**, not the installed-apps list. If you added the URL while the repo was private, remove it and add it again.
 2. Proton WireGuard `.conf` in the app config share as `wireguard/wg0.conf`.
 3. Plex token: open any item on the Plex server in a browser, View Source, search for `X-Plex-Token`, or follow [Plex’s token article](https://support.plex.tv/articles/204059436-finding-an-authentication-token-x-plex-token/).
 4. Plex address is a **numeric IP** (see table below).
@@ -40,11 +40,24 @@ Do this **before** you start the app:
 
 ## Install
 
-1. Copy the `pompey/` folder into `/addons` on the Home Assistant OS machine (USB/Samba/SSH).
-2. Settings → Apps → ⋮ → Check for updates. Open **Pompey** and install. Supervisor builds the image locally.
-3. Put the Proton `.conf` in the app config share as `wireguard/wg0.conf` (see VPN below).
-4. Fill **Plex address** (numeric IP), **Plex token**, **source URL**, and **source key**.
-5. Start **Pompey**. Open it in the sidebar. First boot shows a wait screen, then should reload into search.
+The GitHub repo can be public. Home Assistant still **does not publish or pull a Docker image**; Supervisor builds `pompey/` on the machine.
+
+**Add as an Apps repository (now that the repo is public):**
+
+1. Settings → Apps → **Install app** (the store, not the list of already-installed apps).
+2. ⋮ → Repositories → add `https://github.com/esper256/ha-pompey`.
+3. If you added it **while the repo was still private**, remove that repository and add it again. Supervisor keeps the failed clone and will not pick up Pompey until you do.
+4. ⋮ → Check for updates. Search the store for **Pompey**. Custom repositories are often at the **bottom**, under a heading named Pompey. It is marked experimental.
+
+**Or copy the folder:** put `pompey/` on the machine as `/addons/pompey` (USB/Samba/SSH), then Check for updates.
+
+If it still does not appear: Settings → System → Logs → **Supervisor**. Look for `Can't read` / `pompey`. Pompey only lists on **aarch64** and **amd64** (not 32-bit Raspberry Pi).
+
+Then:
+
+1. Put the Proton `.conf` in the app config share as `wireguard/wg0.conf` (see VPN below).
+2. Fill **Plex address** (numeric IP), **Plex token**, **source URL**, and **source key**.
+3. Start **Pompey**. Open it in the sidebar. First boot shows a wait screen, then should reload into search.
 
 If the bar stays on the tunnel step, Proton is not up (missing/invalid WireGuard file is the usual cause). If search is a blank page, check the app log for `pompey-ingress` / Seerr.
 
