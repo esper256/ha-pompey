@@ -36,6 +36,62 @@ rr = load("route_rating", BIN / "route-rating")
 wqc = load("wg_quick_contract", ROOT / "tests/lib/wg_quick_contract.py")
 
 
+def any_quality_bundle(profile_id: int = 1, name: str = "Any") -> dict:
+    names = [
+        "CAM",
+        "TELESYNC",
+        "WORKPRINT",
+        "DVD",
+        "WEBDL-480p",
+        "HDTV-720p",
+        "WEBDL-720p",
+        "WEBRip-720p",
+        "Bluray-720p",
+        "HDTV-1080p",
+        "WEBDL-1080p",
+        "WEBRip-1080p",
+        "Bluray-1080p",
+        "Remux-1080p",
+        "HDTV-2160p",
+        "WEBDL-2160p",
+        "WEBRip-2160p",
+        "Bluray-2160p",
+        "Remux-2160p",
+        "BR-DISK",
+    ]
+    items = []
+    defs = []
+    remux_4k_id = None
+    for i, n in enumerate(names, start=1):
+        q = {"id": i, "name": n}
+        items.append({"quality": q, "items": [], "allowed": True})
+        defs.append(
+            {
+                "id": i,
+                "quality": q,
+                "title": n,
+                "minSize": 0,
+                "preferredSize": 199,
+                "maxSize": 400,
+            }
+        )
+        if n == "Remux-2160p":
+            remux_4k_id = i
+    return {
+        "profile": {
+            "id": profile_id,
+            "name": name,
+            "upgradeAllowed": True,
+            "cutoff": remux_4k_id or items[-1]["quality"]["id"],
+            "items": items,
+            "minFormatScore": 0,
+            "cutoffFormatScore": 0,
+            "formatItems": [],
+        },
+        "definitions": defs,
+    }
+
+
 def png_wh(path: Path) -> tuple[int, int]:
     data = path.read_bytes()
     if data[:8] != b"\x89PNG\r\n\x1a\n" or data[12:16] != b"IHDR":
@@ -67,6 +123,16 @@ class FakeState:
         self.radarr_folders: list[str] = []
         self.sonarr_folders: list[str] = []
         self.download_clients: list[dict] = []
+        self.radarr_clients: list[dict] = []
+        self.sonarr_clients: list[dict] = []
+        radarr_q = any_quality_bundle(1, "Any")
+        sonarr_q = any_quality_bundle(1, "Any")
+        self.radarr_profiles: list[dict] = [radarr_q["profile"]]
+        self.sonarr_profiles: list[dict] = [sonarr_q["profile"]]
+        self.radarr_defs: list[dict] = radarr_q["definitions"]
+        self.sonarr_defs: list[dict] = sonarr_q["definitions"]
+        self.radarr_formats: list[dict] = []
+        self.sonarr_formats: list[dict] = []
         self.apps: list[dict] = []
         self.indexers: list[dict] = []
         self.radarr_indexers: list[dict] = []
@@ -154,6 +220,9 @@ def handler_for(state: FakeState):
                 return self._send(404, {"error": path})
             if role in {"sonarr", "radarr"}:
                 folders = state.sonarr_folders if role == "sonarr" else state.radarr_folders
+                profiles = state.radarr_profiles if role == "radarr" else state.sonarr_profiles
+                defs = state.radarr_defs if role == "radarr" else state.sonarr_defs
+                formats = state.radarr_formats if role == "radarr" else state.sonarr_formats
                 if path == "/ping":
                     return self._send(body={"status": "OK"})
                 if path.endswith("/rootfolder") and method == "GET":
@@ -162,7 +231,8 @@ def handler_for(state: FakeState):
                     folders.append((body or {}).get("path"))
                     return self._send(201, body)
                 if path.endswith("/downloadclient") and method == "GET":
-                    return self._send(body=[])
+                    clients = state.radarr_clients if role == "radarr" else state.sonarr_clients
+                    return self._send(body=clients)
                 if path.endswith("/downloadclient/schema"):
                     return self._send(
                         body=[
@@ -177,10 +247,72 @@ def handler_for(state: FakeState):
                         ]
                     )
                 if path.endswith("/downloadclient") and method == "POST":
-                    state.download_clients.append(body)
-                    return self._send(201, body)
-                if path.endswith("/qualityprofile"):
-                    return self._send(body=[{"id": 1, "name": "HD-1080p"}])
+                    clients = state.radarr_clients if role == "radarr" else state.sonarr_clients
+                    posted = dict(body or {})
+                    posted.setdefault("id", len(clients) + 1)
+                    clients.append(posted)
+                    state.download_clients.append(posted)
+                    return self._send(201, posted)
+                if "/downloadclient/" in path and method == "PUT":
+                    clients = state.radarr_clients if role == "radarr" else state.sonarr_clients
+                    try:
+                        idx = int(path.rsplit("/", 1)[-1])
+                    except ValueError:
+                        return self._send(404, {"error": path})
+                    for i, item in enumerate(clients):
+                        if item.get("id") == idx:
+                            saved = dict(body or item)
+                            saved["id"] = idx
+                            clients[i] = saved
+                            return self._send(body=saved)
+                    return self._send(404, {"error": path})
+                if path.endswith("/qualityprofile") and method == "GET":
+                    return self._send(body=profiles)
+                if "/qualityprofile/" in path and method == "PUT":
+                    try:
+                        idx = int(path.rsplit("/", 1)[-1])
+                    except ValueError:
+                        return self._send(404, {"error": path})
+                    for i, item in enumerate(profiles):
+                        if item.get("id") == idx:
+                            saved = dict(body or item)
+                            saved["id"] = idx
+                            profiles[i] = saved
+                            return self._send(body=saved)
+                    return self._send(404, {"error": path})
+                if path.endswith("/customformat") and method == "GET":
+                    return self._send(body=formats)
+                if path.endswith("/customformat") and method == "POST":
+                    posted = dict(body or {})
+                    posted["id"] = len(formats) + 1
+                    formats.append(posted)
+                    return self._send(201, posted)
+                if "/customformat/" in path and method == "PUT":
+                    try:
+                        idx = int(path.rsplit("/", 1)[-1])
+                    except ValueError:
+                        return self._send(404, {"error": path})
+                    for i, item in enumerate(formats):
+                        if item.get("id") == idx:
+                            saved = dict(body or item)
+                            saved["id"] = idx
+                            formats[i] = saved
+                            return self._send(body=saved)
+                    return self._send(404, {"error": path})
+                if path.endswith("/qualitydefinition") and method == "GET":
+                    return self._send(body=defs)
+                if "/qualitydefinition/" in path and method == "PUT":
+                    try:
+                        idx = int(path.rsplit("/", 1)[-1])
+                    except ValueError:
+                        return self._send(404, {"error": path})
+                    for i, item in enumerate(defs):
+                        if item.get("id") == idx:
+                            saved = dict(body or item)
+                            saved["id"] = idx
+                            defs[i] = saved
+                            return self._send(body=saved)
+                    return self._send(404, {"error": path})
                 if path.endswith("/languageprofile"):
                     return self._send(body=[])
                 if path.endswith("/movie") and method == "GET":
@@ -696,6 +828,40 @@ PersistentKeepalive = 25
         self.assertEqual(fields["prowlarrUrl"], "http://127.0.0.1:9698")
         self.assertEqual(fields["syncCategories"], [2000])
 
+    def test_after_download_defaults_to_stop_sharing(self):
+        os.environ.pop("AFTER_DOWNLOAD", None)
+        self.assertEqual(ws.after_download(), "stop_sharing")
+        os.environ["AFTER_DOWNLOAD"] = "share_to_ratio"
+        self.assertEqual(ws.after_download(), "share_to_ratio")
+        os.environ["AFTER_DOWNLOAD"] = "share-one-day"
+        self.assertEqual(ws.after_download(), "share_one_day")
+        os.environ.pop("AFTER_DOWNLOAD", None)
+
+    def test_rebuild_hd_items_disallows_remux_and_4k(self):
+        catalog = ws.quality_catalog(any_quality_bundle()["profile"])
+        items = ws.rebuild_hd_items(catalog)
+        allowed: set[str] = set()
+        blocked: set[str] = set()
+
+        def walk(node: dict) -> None:
+            q = node.get("quality") if isinstance(node.get("quality"), dict) else {}
+            name = q.get("name")
+            if name:
+                (allowed if node.get("allowed") else blocked).add(name)
+            for child in node.get("items") or []:
+                if isinstance(child, dict):
+                    walk(child)
+
+        for item in items:
+            walk(item)
+        self.assertIn("Bluray-1080p", allowed)
+        self.assertIn("WEBDL-1080p", allowed)
+        self.assertIn("WEBRip-1080p", allowed)
+        self.assertIn("Remux-1080p", blocked)
+        self.assertIn("Remux-2160p", blocked)
+        self.assertIn("WEBDL-2160p", blocked)
+        self.assertIn("CAM", blocked)
+
     def test_language_profile_id_skips_http(self):
         self.assertIsNone(ws.language_profile_id("http://127.0.0.1:8989/api/v3", "k"))
 
@@ -755,6 +921,7 @@ class WireStack(unittest.TestCase):
                 "MEDIA_MOVIES_KID": "Movies/Kid Friendly",
                 "MEDIA_TV": "TV/Not Kid Friendly",
                 "MEDIA_TV_KID": "TV/Kid Friendly",
+                "AFTER_DOWNLOAD": "stop_sharing",
                 "PLEX_URL": "http://172.30.32.1:32400",
                 "PLEX_TOKEN": "test-plex-token",
                 "INDEXER_URL": "https://example-source.test",
@@ -792,6 +959,9 @@ class WireStack(unittest.TestCase):
             {"/media/Movies/Not Kid Friendly", "/media/Movies/Kid Friendly"},
         )
         self.assertEqual(len(self.state.download_clients), 2)
+        for client in self.state.download_clients:
+            self.assertTrue(client.get("removeCompletedDownloads"))
+            self.assertTrue(client.get("removeFailedDownloads"))
         self.assertEqual({a["name"] for a in self.state.apps}, {"Sonarr", "Radarr"})
         for app in self.state.apps:
             fields = {f["name"]: f.get("value") for f in app.get("fields") or []}
@@ -815,6 +985,8 @@ class WireStack(unittest.TestCase):
         self.assertEqual(source_fields["apiKey"], "test-source-key")
         self.assertEqual(self.state.plex_auth, {"authToken": "test-plex-token"})
         self.assertEqual(self.state.seerr_radarr[0]["hostname"], "127.0.0.1")
+        self.assertEqual(self.state.seerr_radarr[0]["activeProfileName"], "HD")
+        self.assertEqual(self.state.seerr_sonarr[0]["activeProfileName"], "HD")
         self.assertEqual(self.state.seerr_sonarr[0]["activeDirectory"], "/media/TV/Not Kid Friendly")
         self.assertTrue((self.ready / "seerr-arr").exists())
         self.assertTrue(self.state.initialized)
@@ -948,6 +1120,78 @@ class WireStack(unittest.TestCase):
         self.assertIn("Radarr indexers: 1 (Prowlarr enabled 2)", out)
         self.assertIn("missing Prowlarr source(s): LimeTorrents", out)
         self.assertIn("Sonarr indexers: 2 (Prowlarr enabled 2)", out)
+
+    def test_applies_hd_profile_instead_of_remux(self):
+        os.environ["INDEXER_URL"] = ""
+        os.environ["INDEXER_API_KEY"] = ""
+        rc = ws.main()
+        self.assertEqual(rc, 0)
+        profile = self.state.radarr_profiles[0]
+        self.assertEqual(profile["name"], "HD")
+        allowed: set[str] = set()
+        blocked: set[str] = set()
+
+        def walk(node: dict) -> None:
+            q = node.get("quality") if isinstance(node.get("quality"), dict) else {}
+            name = q.get("name")
+            if name:
+                (allowed if node.get("allowed") else blocked).add(name)
+            for child in node.get("items") or []:
+                if isinstance(child, dict):
+                    walk(child)
+
+        for item in profile.get("items") or []:
+            walk(item)
+        self.assertIn("Bluray-1080p", allowed)
+        self.assertIn("WEBDL-1080p", allowed)
+        self.assertIn("Remux-1080p", blocked)
+        self.assertIn("Remux-2160p", blocked)
+        bluray_id = next(
+            item["quality"]["id"]
+            for item in any_quality_bundle()["profile"]["items"]
+            if item["quality"]["name"] == "Bluray-1080p"
+        )
+        self.assertEqual(profile["cutoff"], bluray_id)
+        names = {item["name"] for item in self.state.radarr_formats}
+        self.assertIn("Pompey Prefer x265", names)
+        self.assertIn("Pompey Prefer WEB-DL", names)
+        self.assertIn("Pompey Reject Remux/DISK", names)
+        scores = {item["name"]: item["score"] for item in profile.get("formatItems") or []}
+        self.assertEqual(scores["Pompey Reject Remux/DISK"], -10000)
+        self.assertEqual(scores["Pompey Prefer x265"], 80)
+        bluray = next(item for item in self.state.radarr_defs if item["quality"]["name"] == "Bluray-1080p")
+        self.assertEqual(bluray["maxSize"], 130.0)
+        self.assertEqual(self.state.seerr_radarr[0]["activeProfileName"], "HD")
+        self.assertEqual(self.state.sonarr_profiles[0]["name"], "HD")
+
+    def test_share_to_ratio_leaves_torrent_until_ratio(self):
+        os.environ["INDEXER_URL"] = ""
+        os.environ["INDEXER_API_KEY"] = ""
+        os.environ["AFTER_DOWNLOAD"] = "share_to_ratio"
+        rc = ws.main()
+        self.assertEqual(rc, 0)
+        for client in self.state.download_clients:
+            self.assertFalse(client.get("removeCompletedDownloads"))
+            self.assertTrue(client.get("removeFailedDownloads"))
+
+    def test_updates_existing_download_client_remove_flag(self):
+        os.environ["INDEXER_URL"] = ""
+        os.environ["INDEXER_API_KEY"] = ""
+        os.environ["AFTER_DOWNLOAD"] = "stop_sharing"
+        self.state.radarr_clients = [
+            {
+                "id": 7,
+                "name": "qBittorrent",
+                "implementation": "QBittorrent",
+                "removeCompletedDownloads": False,
+                "removeFailedDownloads": False,
+            }
+        ]
+        rc = ws.main()
+        self.assertEqual(rc, 0)
+        self.assertTrue(self.state.radarr_clients[0]["removeCompletedDownloads"])
+        self.assertTrue(self.state.radarr_clients[0]["removeFailedDownloads"])
+        self.assertEqual(self.state.radarr_clients[0]["id"], 7)
 
     def test_retries_monitored_titles_still_missing_a_file(self):
         os.environ["INDEXER_URL"] = ""
@@ -1115,6 +1359,8 @@ class WireStack(unittest.TestCase):
             self.state.seerr_sonarr[0]["activeDirectory"],
             "/media/dlna/TV/Not Kid Friendly",
         )
+        self.assertEqual(self.state.seerr_radarr[0]["activeProfileName"], "HD")
+        self.assertEqual(self.state.seerr_sonarr[0]["activeProfileName"], "HD")
         self.assertEqual(
             set(self.state.radarr_folders),
             {

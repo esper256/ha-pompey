@@ -119,6 +119,13 @@ grep -Fq "FileLogger\\Path=${POMPEY_CONFIG}/qBittorrent/logs" "${POMPEY_CONFIG}/
 grep -Fq "Session\\Interface=wg0" "${POMPEY_CONFIG}/qBittorrent/qBittorrent.conf"
 grep -Fq "Session\\Interface=wg0" "${POMPEY_CONFIG}/qBittorrent/config/qBittorrent.conf"
 grep -Fq "Session\\DefaultSavePath=${MEDIA_ROOT}/downloads/complete" "${POMPEY_CONFIG}/qBittorrent/qBittorrent.conf"
+grep -Fq "Session\\MaxRatioAct=1" "${POMPEY_CONFIG}/qBittorrent/qBittorrent.conf"
+grep -Fq "Session\\MaxSeedingTime=2880" "${POMPEY_CONFIG}/qBittorrent/qBittorrent.conf"
+grep -Fq "Session\\MaxRatioEnabled=false" "${POMPEY_CONFIG}/qBittorrent/qBittorrent.conf"
+if grep -Fq "Session\\MaxRatioAct=3" "${POMPEY_CONFIG}/qBittorrent/qBittorrent.conf"; then
+  echo "MaxRatioAct=3 would delete library files" >&2
+  exit 1
+fi
 test -d "${MEDIA_ROOT}/Movies"
 test -d "${MEDIA_ROOT}/Movies/Not Kid Friendly"
 test -d "${MEDIA_ROOT}/Movies/Kid Friendly"
@@ -381,13 +388,25 @@ while IFS= read -r url; do
     if [[ "${out}" == "200" || "${out}" == "206" ]]; then
       break
     fi
+    # Cloudflare/Servarr origin failures are not a bad URL. Do not retry 40s×4.
+    case "${out}" in
+      ""|000|502|503|520|521|522|523|524) break ;;
+    esac
     sleep "${attempt}"
   done
-  if [[ "${out}" != "200" && "${out}" != "206" ]]; then
-    echo "bad ${out} ${url}" >&2
-    exit 1
+  if [[ "${out}" == "200" || "${out}" == "206" ]]; then
+    echo "${out} ${url%%\?*}"
+    continue
   fi
-  echo "${out} ${url%%\?*}"
+  # Servarr/GitHub range-GET 5xx/timeout is upstream, not a bad URL we built.
+  case "${out}" in
+    ""|000|502|503|520|521|522|523|524)
+      echo "skip live fetch ${out:-timeout} ${url%%\?*}" >&2
+      continue
+      ;;
+  esac
+  echo "bad ${out} ${url}" >&2
+  exit 1
 done <<<"${urls}"
 musl_urls="$(POMPEY_SERVARR_OS=linuxmusl run "${BIN}/fetch-engines" --print-urls)"
 grep -q 'os=linuxmusl' <<<"${musl_urls}"
@@ -507,5 +526,41 @@ run "${BIN}/write-engine-configs"
 grep -Fq "FileLogger\\Enabled=true" "${POMPEY_CONFIG}/qBittorrent/qBittorrent.conf"
 grep -Fq "FileLogger\\Path=${POMPEY_CONFIG}/qBittorrent/logs" "${POMPEY_CONFIG}/qBittorrent/qBittorrent.conf"
 grep -Fq "Session\\DefaultSavePath=${MEDIA_ROOT}/downloads/complete" "${POMPEY_CONFIG}/qBittorrent/qBittorrent.conf"
+grep -Fq "Session\\MaxRatioAct=1" "${POMPEY_CONFIG}/qBittorrent/qBittorrent.conf"
+grep -Fq "Session\\MaxSeedingTime=2880" "${POMPEY_CONFIG}/qBittorrent/qBittorrent.conf"
+
+echo "== write-engine-configs after_download from Home Assistant options =="
+share_opts="${WORK}/share-options.json"
+python3 - "${ROOT}/tests/options.json" "${share_opts}" <<'PY'
+import json, sys
+data = json.load(open(sys.argv[1], encoding="utf-8"))
+data["after_download"] = "share_to_ratio"
+json.dump(data, open(sys.argv[2], "w"))
+PY
+unset AFTER_DOWNLOAD || true
+BASHIO_OPTIONS="${share_opts}" run "${BIN}/write-engine-configs"
+grep -Fq "Session\\MaxRatioEnabled=true" "${POMPEY_CONFIG}/qBittorrent/qBittorrent.conf"
+grep -Fq "Session\\MaxRatio=1" "${POMPEY_CONFIG}/qBittorrent/qBittorrent.conf"
+grep -Fq "Session\\MaxSeedingTimeEnabled=false" "${POMPEY_CONFIG}/qBittorrent/qBittorrent.conf"
+grep -Fq "Session\\MaxRatioAct=1" "${POMPEY_CONFIG}/qBittorrent/qBittorrent.conf"
+if grep -Fq "Session\\MaxRatioAct=3" "${POMPEY_CONFIG}/qBittorrent/qBittorrent.conf"; then
+  echo "MaxRatioAct=3 would delete library files" >&2
+  exit 1
+fi
+python3 - "${ROOT}/tests/options.json" "${share_opts}" <<'PY'
+import json, sys
+data = json.load(open(sys.argv[1], encoding="utf-8"))
+data["after_download"] = "share_one_day"
+json.dump(data, open(sys.argv[2], "w"))
+PY
+unset AFTER_DOWNLOAD || true
+BASHIO_OPTIONS="${share_opts}" run "${BIN}/write-engine-configs"
+grep -Fq "Session\\MaxSeedingTime=1440" "${POMPEY_CONFIG}/qBittorrent/qBittorrent.conf"
+grep -Fq "Session\\MaxSeedingTimeEnabled=true" "${POMPEY_CONFIG}/qBittorrent/qBittorrent.conf"
+grep -Fq "Session\\MaxRatioAct=1" "${POMPEY_CONFIG}/qBittorrent/qBittorrent.conf"
+unset AFTER_DOWNLOAD || true
+BASHIO_OPTIONS="${ROOT}/tests/options.json" run "${BIN}/write-engine-configs"
+grep -Fq "Session\\MaxSeedingTime=2880" "${POMPEY_CONFIG}/qBittorrent/qBittorrent.conf"
+grep -Fq "Session\\MaxRatioEnabled=false" "${POMPEY_CONFIG}/qBittorrent/qBittorrent.conf"
 
 echo "script tests ok (${WORK})"

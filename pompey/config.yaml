@@ -1,6 +1,6 @@
 # https://developers.home-assistant.io/docs/apps/configuration
 name: Pompey
-version: "0.2.25"
+version: "0.2.26"
 slug: pompey
 description: >-
   Search for a movie or TV show. Confirm if we need you. It lands in the
@@ -48,16 +48,19 @@ map:
 # storage folder under it). Library fields are relative to that parent.
 # Defaults match this house: share name dlna, sibling kid/not-kid folders.
 # Plex must already scan those same folders. Proton is wait-screen paste.
-# Sources are Prowlarr on :9696.
+# Sources are Prowlarr on :9696. After a title is in the library, stop
+# sharing is the default so qBittorrent does not keep every torrent in RAM.
 options:
   media_folder: /media/dlna
   movies_folder: Movies/Not Kid Friendly
   movies_kid_folder: Movies/Kid Friendly
   tv_folder: TV/Not Kid Friendly
   tv_kid_folder: TV/Kid Friendly
+  after_download: stop_sharing
 schema:
   media_folder: str
   movies_folder: str
   movies_kid_folder: str
   tv_folder: str
   tv_kid_folder: str
+  after_download: list(stop_sharing|share_to_ratio|share_one_day)

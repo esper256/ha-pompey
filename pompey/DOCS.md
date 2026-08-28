@@ -21,7 +21,7 @@ Start the app and open **Pompey** in the sidebar. Paste the Proton WireGuard `.c
 
 The kill switch is **OUTPUT** (internet from this app). Home Assistant Ingress to port 8099 and LAN clients to published **5055** and **9696** are **INPUT** from Supervisor / Docker and are not blocked. If the tunnel cannot start, the wait screen stays up; the container is not halted.
 
-Home Assistant options are the media folder and four library folders relative to it. Plex is Seerr’s first screen. Sources are Prowlarr on **9696**. Proton is paste on the wait screen. WireGuard internals are fixed: Proton DNS `10.2.0.1`, RFC1918 LAN plus Supervisor `172.30.32.0/23`.
+Home Assistant options are the media folder, four library folders relative to it, and **after a title is in the library** (stop sharing by default). Plex is Seerr’s first screen. Sources are Prowlarr on **9696**. Proton is paste on the wait screen. WireGuard internals are fixed: Proton DNS `10.2.0.1`, RFC1918 LAN plus Supervisor `172.30.32.0/23`.
 
 Ingress **8099** is always Pompey's wait/status UI. Search is Seerr on published host port **5055**. Sources are Prowlarr on published host port **9696** (Seerr cannot add indexers). Putting Seerr under Ingress breaks on the next minified Next.js chunk.
 

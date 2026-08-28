@@ -47,6 +47,15 @@ def env(name: str, default: str = "") -> str:
     return os.environ.get(name, default).strip()
 
 
+def after_download() -> str:
+    raw = env("AFTER_DOWNLOAD", "stop_sharing").lower().replace("-", "_").replace(" ", "_")
+    if raw in {"share_to_ratio", "ratio"}:
+        return "share_to_ratio"
+    if raw in {"share_one_day", "one_day"}:
+        return "share_one_day"
+    return "stop_sharing"
+
+
 def as_list(value):
     """HTTP JSON is usually an array of objects; stubs and error bodies often are not.
 
@@ -319,8 +328,23 @@ def sync_cats_for(impl: str) -> list[int]:
 
 
 def ensure_download_client(base: str, api_key: str, secrets: dict, kind: str) -> None:
+    remove = after_download() == "stop_sharing"
     existing = as_list(http("GET", f"{base}/downloadclient", headers=arr_headers(api_key)))
-    if any(item.get("implementation") == "QBittorrent" for item in existing):
+    for item in existing:
+        if item.get("implementation") != "QBittorrent" or item.get("id") is None:
+            continue
+        if item.get("removeCompletedDownloads") is remove and item.get("removeFailedDownloads") is True:
+            return
+        updated = json.loads(json.dumps(item))
+        updated["removeCompletedDownloads"] = remove
+        updated["removeFailedDownloads"] = True
+        http(
+            "PUT",
+            f"{base}/downloadclient/{item['id']}",
+            updated,
+            headers=arr_headers(api_key),
+        )
+        log(f"{kind} download client after_download={after_download()} remove={remove}")
         return
     schema = http("GET", f"{base}/downloadclient/schema", headers=arr_headers(api_key))
     client = schema_impl(schema, "QBittorrent")
@@ -339,8 +363,10 @@ def ensure_download_client(base: str, api_key: str, secrets: dict, kind: str) ->
     client["name"] = "qBittorrent"
     client["enable"] = True
     client["priority"] = 1
+    client["removeCompletedDownloads"] = remove
+    client["removeFailedDownloads"] = True
     http("POST", f"{base}/downloadclient", client, headers=arr_headers(api_key))
-    log(f"{kind} download client")
+    log(f"{kind} download client after_download={after_download()} remove={remove}")
 
 
 def first_profile(base: str, api_key: str):
@@ -348,6 +374,245 @@ def first_profile(base: str, api_key: str):
     if not profiles:
         raise RuntimeError(f"no quality profiles at {base}")
     return int(profiles[0]["id"]), profiles[0].get("name") or "Default"
+
+
+# TRaSH-shaped HD Bluray + WEB: 1080p encodes, not remux or 4K.
+# A 26GB grab is almost always Remux-1080p or 2160p, which default Arr ranks first.
+HD_PROFILE_NAME = "HD"
+HD_GROUPS = (
+    ("Bluray-1080p", ("Bluray-1080p",)),
+    ("WEB 1080p", ("WEBDL-1080p", "WEBRip-1080p")),
+    ("HDTV-1080p", ("HDTV-1080p",)),
+    ("Bluray-720p", ("Bluray-720p",)),
+    ("WEB 720p", ("WEBDL-720p", "WEBRip-720p")),
+    ("HDTV-720p", ("HDTV-720p",)),
+)
+HD_CUTOFF = "Bluray-1080p"
+# Quality definition units are MB/minute, not total GB.
+# ~2 hour movie: 85 MB/min ≈ 10 GB; 130 MB/min ≈ 15 GB.
+HD_SIZES_MOVIE = {
+    "WEBDL-720p": (10.0, 30.0, 45.0),
+    "WEBRip-720p": (10.0, 30.0, 45.0),
+    "HDTV-720p": (10.0, 25.0, 40.0),
+    "Bluray-720p": (15.0, 35.0, 55.0),
+    "WEBDL-1080p": (12.5, 50.0, 85.0),
+    "WEBRip-1080p": (12.5, 50.0, 85.0),
+    "HDTV-1080p": (15.0, 40.0, 70.0),
+    "Bluray-1080p": (25.0, 75.0, 130.0),
+}
+HD_SIZES_SERIES = {
+    "WEBDL-720p": (8.0, 16.0, 28.0),
+    "WEBRip-720p": (8.0, 16.0, 28.0),
+    "HDTV-720p": (8.0, 14.0, 24.0),
+    "Bluray-720p": (10.0, 20.0, 32.0),
+    "WEBDL-1080p": (10.0, 25.0, 45.0),
+    "WEBRip-1080p": (10.0, 25.0, 45.0),
+    "HDTV-1080p": (10.0, 22.0, 40.0),
+    "Bluray-1080p": (15.0, 35.0, 60.0),
+}
+# (name, title regex, score). -10000 is a hard reject in Arr.
+HD_CUSTOM_FORMATS = (
+    (
+        "Pompey Reject CAM/TS",
+        r"(CAMRip|HDCAM|TELESYNC|HDTS|TELECINE|HDTC|WORKPRINT|[-_.]CAM[-_.])",
+        -10000,
+    ),
+    (
+        "Pompey Reject Remux/DISK",
+        r"\b(REMUX|BD[-_. ]?DISK|BRDISK|COMPLETE[-_. ]?BLURAY)\b",
+        -10000,
+    ),
+    ("Pompey Prefer WEB-DL", r"\bWEB[-_. ]?DL\b", 150),
+    ("Pompey Prefer x265", r"\b(x265|h265|HEVC)\b", 80),
+    ("Pompey Prefer Proper", r"\b(PROPER|REPACK|RERIP)\b", 25),
+)
+
+
+def quality_catalog(profile: dict) -> dict:
+    catalog = {}
+    for item in profile.get("items") or []:
+        if not isinstance(item, dict):
+            continue
+        q = item.get("quality")
+        if isinstance(q, dict) and q.get("name"):
+            catalog[str(q["name"])] = q
+        for child in item.get("items") or []:
+            if not isinstance(child, dict):
+                continue
+            cq = child.get("quality")
+            if isinstance(cq, dict) and cq.get("name"):
+                catalog[str(cq["name"])] = cq
+    return catalog
+
+
+def quality_id_of(value) -> int | None:
+    if isinstance(value, dict):
+        try:
+            return int(value["id"])
+        except (KeyError, TypeError, ValueError):
+            return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def rebuild_hd_items(catalog: dict) -> list[dict]:
+    used: set[str] = set()
+    items: list[dict] = []
+    for group_name, names in HD_GROUPS:
+        present = [catalog[n] for n in names if n in catalog]
+        if not present:
+            continue
+        used.update(n for n in names if n in catalog)
+        if len(present) == 1 and present[0].get("name") == group_name:
+            items.append({"quality": present[0], "items": [], "allowed": True})
+            continue
+        items.append(
+            {
+                "name": group_name,
+                "allowed": True,
+                "items": [{"quality": q, "items": [], "allowed": True} for q in present],
+            }
+        )
+    for name, q in catalog.items():
+        if name in used:
+            continue
+        items.append({"quality": q, "items": [], "allowed": False})
+    return items
+
+
+def title_custom_format(name: str, regex: str) -> dict:
+    return {
+        "name": name,
+        "includeCustomFormatWhenRenaming": False,
+        "specifications": [
+            {
+                "name": name,
+                "implementation": "ReleaseTitleSpecification",
+                "negate": False,
+                "required": True,
+                "fields": [{"name": "value", "value": regex}],
+            }
+        ],
+    }
+
+
+def ensure_hd_custom_formats(base: str, api_key: str) -> dict[str, int]:
+    """Upsert household encoding CFs. Returns name -> Arr id."""
+    try:
+        existing = as_list(http("GET", f"{base}/customformat", headers=arr_headers(api_key)))
+    except RuntimeError as exc:
+        log(f"custom formats: {exc}", "WARNING")
+        return {}
+    by_name = {item.get("name"): item for item in existing if item.get("name")}
+    ids: dict[str, int] = {}
+    for name, regex, _score in HD_CUSTOM_FORMATS:
+        payload = title_custom_format(name, regex)
+        have = by_name.get(name)
+        try:
+            if have and have.get("id") is not None:
+                payload["id"] = have["id"]
+                saved = http(
+                    "PUT",
+                    f"{base}/customformat/{have['id']}",
+                    payload,
+                    headers=arr_headers(api_key),
+                )
+            else:
+                saved = http(
+                    "POST",
+                    f"{base}/customformat",
+                    payload,
+                    headers=arr_headers(api_key),
+                )
+            saved_id = (saved or {}).get("id") if isinstance(saved, dict) else None
+            if saved_id is None and have:
+                saved_id = have.get("id")
+            if saved_id is not None:
+                ids[name] = int(saved_id)
+        except RuntimeError as exc:
+            log(f"custom format {name}: {exc}", "WARNING")
+    return ids
+
+
+def apply_hd_quality_sizes(base: str, api_key: str, sizes: dict) -> None:
+    try:
+        defs = as_list(http("GET", f"{base}/qualitydefinition", headers=arr_headers(api_key)))
+    except RuntimeError as exc:
+        log(f"quality sizes: {exc}", "WARNING")
+        return
+    for item in defs:
+        if not isinstance(item, dict) or item.get("id") is None:
+            continue
+        q = item.get("quality") if isinstance(item.get("quality"), dict) else {}
+        name = q.get("name") if isinstance(q, dict) else None
+        want = sizes.get(name)
+        if not want:
+            continue
+        min_s, pref_s, max_s = want
+        if (
+            item.get("minSize") == min_s
+            and item.get("preferredSize") == pref_s
+            and item.get("maxSize") == max_s
+        ):
+            continue
+        updated = json.loads(json.dumps(item))
+        updated["minSize"] = min_s
+        updated["preferredSize"] = pref_s
+        updated["maxSize"] = max_s
+        try:
+            http(
+                "PUT",
+                f"{base}/qualitydefinition/{item['id']}",
+                updated,
+                headers=arr_headers(api_key),
+            )
+        except RuntimeError as exc:
+            log(f"quality size {name}: {exc}", "WARNING")
+
+
+def household_quality_profile(base: str, api_key: str, kind: str):
+    """1080p WEB-DL / BluRay encodes. No remux, no 4K. Prefer x265 and WEB-DL."""
+    profiles = as_list(http("GET", f"{base}/qualityprofile", headers=arr_headers(api_key)))
+    if not profiles:
+        raise RuntimeError(f"no quality profiles at {base}")
+    profile = next((item for item in profiles if item.get("name") == HD_PROFILE_NAME), profiles[0])
+    catalog = quality_catalog(profile)
+    if not catalog:
+        log(f"{kind} quality profile has no qualities listed; leaving defaults", "WARNING")
+        return int(profile["id"]), profile.get("name") or "Default"
+    items = rebuild_hd_items(catalog)
+    cutoff_q = catalog.get(HD_CUTOFF) or catalog.get("WEBDL-1080p") or catalog.get("Bluray-720p")
+    cutoff_id = quality_id_of(cutoff_q)
+    if cutoff_id is None:
+        cutoff_id = quality_id_of(profile.get("cutoff"))
+    cf_ids = ensure_hd_custom_formats(base, api_key)
+    format_items = []
+    for name, _regex, score in HD_CUSTOM_FORMATS:
+        cf_id = cf_ids.get(name)
+        if cf_id is None:
+            continue
+        format_items.append({"format": cf_id, "name": name, "score": score})
+    updated = json.loads(json.dumps(profile))
+    updated["name"] = HD_PROFILE_NAME
+    updated["items"] = items
+    updated["upgradeAllowed"] = True
+    if cutoff_id is not None:
+        updated["cutoff"] = cutoff_id
+    updated["minFormatScore"] = 0
+    updated["cutoffFormatScore"] = 10000
+    updated["formatItems"] = format_items
+    http(
+        "PUT",
+        f"{base}/qualityprofile/{profile['id']}",
+        updated,
+        headers=arr_headers(api_key),
+    )
+    sizes = HD_SIZES_MOVIE if kind == "radarr" else HD_SIZES_SERIES
+    apply_hd_quality_sizes(base, api_key, sizes)
+    log(f"{kind} quality profile HD: 1080p WEB-DL/BluRay, no remux/4K")
+    return int(profile["id"]), HD_PROFILE_NAME
 
 
 def language_profile_id(_base: str, _api_key: str):
@@ -910,13 +1175,21 @@ def configure_seerr(secrets: dict, radarr_profile, sonarr_profile, sonarr_lang) 
                 want = (payload.get("activeDirectory") or "").rstrip("/")
                 have = (match.get("activeDirectory") or "").rstrip("/")
                 server_id = match.get("id")
-                if server_id is not None and want and want != have:
+                dir_changed = bool(want and want != have)
+                profile_changed = (
+                    match.get("activeProfileId") != payload.get("activeProfileId")
+                    or (match.get("activeProfileName") or "") != (payload.get("activeProfileName") or "")
+                )
+                if server_id is not None and (dir_changed or profile_changed):
                     update = dict(match)
                     update.update(payload)
                     # Seerr OpenAPI marks id read-only; it belongs in the URL.
                     update.pop("id", None)
                     s.call("PUT", f"{path}/{server_id}", update)
-                    log(f"seerr {kind} directory {want}")
+                    if dir_changed:
+                        log(f"seerr {kind} directory {want}")
+                    if profile_changed:
+                        log(f"seerr {kind} profile {payload.get('activeProfileName')}")
                 return True
             s.call("POST", path, payload)
             log(f"seerr {kind}")
@@ -995,11 +1268,11 @@ def main() -> int:
     ensure_indexer(prowlarr, pk)
     sync_prowlarr_indexers(prowlarr, pk)
     log_arr_vs_prowlarr_indexers(radarr, rk, sonarr, sk, prowlarr, pk)
+    sp = household_quality_profile(sonarr, sk, "sonarr")
+    rp = household_quality_profile(radarr, rk, "radarr")
     retry_unfilled_titles(radarr, rk, sonarr, sk)
     log_recent_prowlarr_searches(prowlarr, pk)
 
-    sp = first_profile(sonarr, sk)
-    rp = first_profile(radarr, rk)
     sl = language_profile_id(sonarr, sk)
 
     os.makedirs(ready_dir(), exist_ok=True)

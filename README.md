@@ -4,7 +4,7 @@ Search for a movie or TV show in Home Assistant. Confirm if we need you. It land
 
 Pompey is one Home Assistant OS app. The sidebar is the box: Proton, status, a button to search. Search itself is [Seerr](https://seerr.dev/) on this machine’s port **5055**, not an iframe. Downloads, matching, and the VPN stay inside Pompey. All internet from this app uses Proton WireGuard. If the tunnel is down, internet is dropped. **Plex is a separate Home Assistant app** (or another machine). Pompey does not run Plex.
 
-This is the user guide for the product we are building. It describes the journey as it should feel. [What is not ready yet](#what-is-not-ready-yet) is honest about the current cut (**0.2.25**). The [roadmap](#roadmap) is how we close the gap.
+This is the user guide for the product we are building. It describes the journey as it should feel. [What is not ready yet](#what-is-not-ready-yet) is honest about the current cut (**0.2.26**). The [roadmap](#roadmap) is how we close the gap.
 
 ## How a day with it should feel
 
@@ -60,8 +60,11 @@ Open **Settings → Apps → Pompey → Configuration**. The defaults already ma
 | Kid movies | `Movies/Kid Friendly` |
 | TV | `TV/Not Kid Friendly` |
 | Kid TV | `TV/Kid Friendly` |
+| After a title is in the library | Stop sharing |
 
-Those four must be **siblings** (neither library folder sits inside another). In-progress downloads go in `downloads/` under the media folder. Do not add `downloads` as a Plex library.
+Those four library folders must be **siblings** (neither library folder sits inside another). In-progress downloads go in `downloads/` under the media folder. Do not add `downloads` as a Plex library.
+
+**After a title is in the library** is not a hidden default. Sharing finished torrents uses RAM and CPU in this app. **Stop sharing** (the default) removes the torrent from qBittorrent once the file is in your library. You can instead share until a 1.0 ratio, or for one day. The library file is kept either way.
 
 If you already saved older defaults (`/media` plus `Movies` / `Kid Friendly Movies`), update the five fields and **restart** so engines pick up the folders.
 
@@ -99,7 +102,7 @@ Daily use is two places: **search** (`http://<home-assistant>:5055`) and **Plex*
 | Search, posters, requests | Everyone in the house | `http://<this-home-assistant-ip>:5055` — Seerr, on the LAN. Do not put this on the public internet. |
 | Sources (indexers) | Whoever manages what we can grab | `http://<this-home-assistant-ip>:9696` — Prowlarr. Seerr cannot do this. First visit sets a login. Do not put this on the public internet. |
 | Pompey (Proton, status, Open search, Open sources) | Whoever installed the app | Home Assistant sidebar → **Pompey**. Always this UI, never rewritten into Seerr. |
-| Media folders | Whoever installed the app | **Settings → Apps → Pompey → Configuration** |
+| Media folders and after-download | Whoever installed the app | **Settings → Apps → Pompey → Configuration** |
 | Watching | Everyone | Your Plex apps. On the LAN, Plex itself is typically `http://<plex-ip>:32400`. Pompey does not run Plex. |
 | Proton account / new WireGuard file | Whoever owns the VPN | Proton’s site, then paste into Pompey if you rotate the file |
 | App log | When something is stuck | **Settings → Apps → Pompey → Log** |
@@ -123,6 +126,7 @@ If a download is stuck, the **intended** product is still: handle that in Pompey
 
 - **Search and request** at `http://<home-assistant>:5055`. The sidebar is the box, not an iframe of search. Household members should not see a ticket queue. Seerr can have more than one user; the first admin is whoever completed the Plex wizard.
 - **Kid vs general** is a rule after the request, from TMDB certification. G / PG / PG-13 and TV-Y / TV-G / TV-PG go to the kid folders. Anything else, **including unknown**, goes to general. Pompey does not guess kid, and it does not stop the request to ask.
+- **After a title is in the library** is in **Settings → Apps → Pompey → Configuration**. Stop sharing is the default so finished torrents do not sit in RAM. Share to a 1.0 ratio or for one day if you want to give a little back. The library file is kept.
 - **Already on Plex** is Seerr’s job. If it is already there, you should see that before you request it.
 - **Confirm if we need you** is for the cases the stack cannot decide — not for every request. Picking a specific torrent by hand is not the default path.
 - **Open sources → History.** Empty Query is not always the Seerr title. Click the row: **top100** (or similar browse) means the source was asked with no name — that is not the request. **Parameters** with IMDb/TMDb is an ID search. The movie name in Query is a title search. RSS is empty Query, empty Parameters, event type RSS. After **0.2.25**, Arr is told to title-search so a request should show the movie name on every source that actually synced into Radarr/Sonarr. A source that fails Prowlarr’s category test (or is blocked by CloudFlare) never becomes an Arr indexer — the app log warns when that happens.
@@ -151,7 +155,7 @@ The product should keep those current for you — through the VPN, without you v
 
 - You should still update **Pompey** when we ship a wrapper fix.
 - You should not be expected to open Radarr/Sonarr to click Update.
-- Quality profiles stay at each engine’s defaults until Recyclarr/TRaSH is wired (auto-grab may pick a poor release).
+- Quality profiles: **0.2.26** applies a household HD profile. Recyclarr is not yet refreshing TRaSH scores on a schedule.
 
 ### Proton
 
@@ -165,12 +169,12 @@ A private tracker with a stable API key is set-and-forget. Prowlarr copies that 
 
 ## What is not ready yet
 
-The journey above is the target. **0.2.25** is a real Home Assistant OS install of that box, not the finished household app.
+The journey above is the target. **0.2.26** is a real Home Assistant OS install of that box, not the finished household app.
 
 | In the guide | On the machine today |
 | --- | --- |
 | Request → file on disk → Plex notices | Wiring is written. Automated tests never start the torrent client or wait on peers. A title actually landing in Plex is what a real install is still proving. |
-| Auto-grab is usually the right quality | Engines use their own defaults. Recyclarr / TRaSH profiles are not applied. |
+| Auto-grab is usually the right quality | **0.2.26** applies a household HD profile: 1080p WEB-DL/BluRay encodes, no remux or 4K, prefer x265. Live Recyclarr refresh of TRaSH scores is still later. |
 | “Confirm if we need you” when quality and seeds disagree | Not built. Seerr is not a download console; we will not fork it into one. |
 | Engines stay current for years | First fetch only. Already-present binaries are skipped on restart. |
 | Add another source from search/settings | **Open sources** (Prowlarr :9696). A Pompey-native source UI is still roadmap. |
@@ -182,7 +186,7 @@ The journey above is the target. **0.2.25** is a real Home Assistant OS install 
 | Jellyfin | Plex only. |
 | Use this from outside the house | Out of scope. Search is on the LAN at :5055. Sources at :9696. Do not port-forward either. |
 
-If search is a blank page on port 5055, or the Plex button on setup does nothing, that is a bug — send the log. Rebuild so the banner says **0.2.25** if a Seerr request only title-searched two Prowlarr sources and the rest were top100, or if you still need tagged app logs, a wait-screen fix, household media-folder defaults, **Open sources**, or an older wait screen.
+If search is a blank page on port 5055, or the Plex button on setup does nothing, that is a bug — send the log. Rebuild so the banner says **0.2.26** if auto-grab picked a huge remux, a Seerr request only title-searched two Prowlarr sources, or you still need tagged app logs, household media-folder defaults, **Open sources**, or an older wait screen.
 
 ## Roadmap
 
@@ -190,7 +194,7 @@ Work that turns the current box into the guide above, in the order it unblocks t
 
 1. **Prove request → file → Plex** on a real HAOS install. Until that loop is boring, nothing else is the product. Kid/general folders, Plex libraries, and NAT-PMP are already aimed at this.
 2. **Engine and Seerr updates.** After the tunnel is up, check official channels (Servarr update APIs, Seerr’s published image, qBittorrent-nox static builds). Replace on-disk copies when upstream moves, then restart those processes. Tie a check to Pompey add-on updates *and* to a periodic run so a wrapper we do not touch for months still refreshes Radarr. Never require the user to open an engine UI to click Update.
-3. **Quality profiles (Recyclarr / TRaSH).** Apply a sane default profile inside the container so auto-grab is usually right. Keep it off the sidebar. Refresh those profiles when engines update.
+3. **Quality profiles (Recyclarr / TRaSH).** **0.2.26** applies a household HD profile (1080p WEB-DL/BluRay, no remux/4K). Next is keeping TRaSH scores current (Recyclarr or equivalent) when engines update, still off the sidebar.
 4. **Operator status in the sidebar wait/search chrome** — enough to see “downloading / failed / needs you” without Radarr’s queue. This is ours, not a Seerr fork.
 5. **Confirm when we cannot decide.** A small “this file vs that file” step for the rare case. Not v1 if it means becoming a torrent picker. Not a Cloudflare solver.
 6. **Sources without opening Prowlarr.** Adding a source, rotating a key, and “source is down” should be possible from Pompey. Until then, **Open sources** is Prowlarr on :9696. Still no indexer catalog shipped in the repo, and no Home Assistant options for this.
