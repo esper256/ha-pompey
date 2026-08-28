@@ -29,7 +29,8 @@ These pieces exist, have tests or a smoke path, and are what 0.2.0 is *trying* t
 | Piece | What “done” means |
 | --- | --- |
 | Addon skeleton | `pompey/` is a Supervisor app: Ingress, `NET_ADMIN`, `/dev/net/tun`, options for Proton / Plex / one source / media folder |
-| Wait screen | Sidebar shows a progress bar (tunnel → download → start → connect), then reloads into search |
+| Store + wait branding | Square `icon.png` for the app list; rectangular `logo.png` for the store page and the loading/wait screen |
+| Wait screen | Sidebar shows the logo, a progress bar (tunnel → download → start → connect), then reloads into search |
 | Proton + kill switch | WireGuard from a file or pasted fields; internet OUTPUT only on `wg0`; LAN (Plex, NAS) allowed |
 | Runtime fetch | After the tunnel is up: Seerr, TV/movie/indexer engines, download engine. Nothing extra is baked into the image |
 | Local wiring | Engines talk to each other on localhost; Seerr is pointed at them; no extra sidebars |

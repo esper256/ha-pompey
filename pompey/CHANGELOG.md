@@ -8,6 +8,7 @@
 - Kid vs general folders from title certification (unknown → general).
 - NAT-PMP mapped port is applied to the download engine.
 - Agent/dev: `POMPEY_FAKE_VPN=1` brings up a veth named `wg0` that NATs out the default adapter (no Proton). `tests/integration.sh` fetches glibc TV/movie engines and looks up The Wild Robot on TMDB (no torrent client, no grab).
+- Store and wait-screen branding: square `icon.png`, rectangular `logo.png` (also the loading screen).
 - README states what 0.2.0 actually does vs what is still unproven. Home Assistant household use is premature.
 
 ## 0.1.1

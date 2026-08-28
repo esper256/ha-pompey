@@ -7,11 +7,11 @@
   <style>
     :root {
       color-scheme: dark;
-      --bg: #12141a;
+      --bg: #07090d;
       --fg: #ece8e1;
       --muted: #9a948a;
       --line: #2a2d36;
-      --focus: #e8c07a;
+      --focus: #d4af37;
       --err: #e08a7a;
     }
 
@@ -37,10 +37,13 @@
     }
 
     h1 {
-      font-weight: 600;
-      font-size: 1.15rem;
-      letter-spacing: 0.04em;
-      margin: 0 0 1.25rem;
+      margin: 0 0 1.35rem;
+    }
+
+    h1 img {
+      display: block;
+      width: min(36rem, 100%);
+      height: auto;
     }
 
     p, li {
@@ -103,7 +106,7 @@
 </head>
 <body>
   <main>
-    <h1>Pompey</h1>
+    <h1><img src="logo.png" width="1983" height="793" alt="Pompey"></h1>
     <div class="bar" aria-hidden="true"><span id="fill"></span></div>
     <ol id="steps"></ol>
     <p class="now" id="now">Bringing the fleet to heel…</p>

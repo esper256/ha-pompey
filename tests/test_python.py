@@ -6,6 +6,7 @@ import importlib.machinery
 import importlib.util
 import json
 import os
+import struct
 import threading
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -30,6 +31,13 @@ def load(name: str, path: Path):
 
 ws = load("wire_stack", BIN / "wire-stack")
 rr = load("route_rating", BIN / "route-rating")
+
+
+def png_wh(path: Path) -> tuple[int, int]:
+    data = path.read_bytes()
+    if data[:8] != b"\x89PNG\r\n\x1a\n" or data[12:16] != b"IHDR":
+        raise AssertionError(f"{path} is not a PNG")
+    return struct.unpack(">II", data[16:24])
 
 
 def yaml_indent2_keys(text: str, header: str) -> list[str]:
@@ -311,6 +319,19 @@ class Helpers(unittest.TestCase):
         self.assertIn("data.search", html)
         self.assertIn("location.replace", html)
         self.assertIn("Opening search", html)
+        self.assertIn('src="logo.png"', html)
+
+    def test_ha_store_icon_is_square_logo_is_wide(self):
+        icon = ROOT / "pompey/icon.png"
+        logo = ROOT / "pompey/logo.png"
+        wait = ROOT / "pompey/rootfs/usr/share/pompey/logo.png"
+        self.assertTrue(icon.is_file())
+        self.assertTrue(logo.is_file())
+        self.assertEqual(logo.read_bytes(), wait.read_bytes())
+        iw, ih = png_wh(icon)
+        lw, lh = png_wh(logo)
+        self.assertEqual(iw, ih)
+        self.assertGreater(lw, lh)
 
     def test_fill_fields(self):
         resource = {"fields": [{"name": "host", "value": ""}, {"name": "port", "value": 0}]}
