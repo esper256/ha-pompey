@@ -134,7 +134,7 @@ def downloads_complete() -> str:
     return f"{media_root()}/downloads/complete"
 
 
-def download_scan_paths() -> list[str]:
+def download_scan_paths(kind: str | None = None) -> list[str]:
     """Old qBittorrent categories used complete/radarr and complete/sonarr.
 
     New wiring sets the category save path to complete/ itself, so in-progress
@@ -143,7 +143,12 @@ def download_scan_paths() -> list[str]:
     look inside it.
     """
     root = downloads_complete()
-    return [root, os.path.join(root, "radarr"), os.path.join(root, "sonarr")]
+    paths = [root]
+    if kind != "sonarr":
+        paths.append(os.path.join(root, "radarr"))
+    if kind != "radarr":
+        paths.append(os.path.join(root, "sonarr"))
+    return paths
 
 
 def plex_url() -> str:
@@ -1903,7 +1908,9 @@ def scan_download_drop(base: str, api_key: str, kind: str) -> None:
     Kid vs Not Kid was stored when Seerr added the title.
     """
     name = "DownloadedMoviesScan" if kind == "radarr" else "DownloadedEpisodesScan"
-    for path in download_scan_paths():
+    for path in download_scan_paths(kind):
+        if path != downloads_complete() and not os.path.isdir(path):
+            continue
         try:
             http(
                 "POST",
@@ -1939,7 +1946,7 @@ def arr_already_has_library_file(item: dict, kind: str) -> bool:
     """True when Arr already assigned a library file. Do not ManualImport again.
 
     Re-importing a title that hasFile deletes the library copy (no recycle bin)
-    and treats leftover complete/ extras as a new movie.
+    and the subtitle extras that came with it.
     """
     if kind == "radarr":
         movie = item.get("movie") if isinstance(item.get("movie"), dict) else {}
@@ -1948,6 +1955,146 @@ def arr_already_has_library_file(item: dict, kind: str) -> bool:
     if not episodes:
         return False
     return all(isinstance(ep, dict) and ep.get("hasFile") is True for ep in episodes)
+
+
+def lookup_arr_has_file(base: str, api_key: str, kind: str, item: dict) -> bool:
+    """GET /manualimport often omits movie.hasFile even after CDH already imported."""
+    if arr_already_has_library_file(item, kind):
+        return True
+    try:
+        if kind == "radarr":
+            movie = item.get("movie") if isinstance(item.get("movie"), dict) else {}
+            movie_id = item.get("movieId") or movie.get("id")
+            if not movie_id:
+                return False
+            row = http(
+                "GET",
+                f"{base}/movie/{movie_id}",
+                headers=arr_headers(api_key),
+            )
+            return isinstance(row, dict) and row.get("hasFile") is True
+        if kind == "sonarr":
+            series = item.get("series") if isinstance(item.get("series"), dict) else {}
+            series_id = item.get("seriesId") or series.get("id")
+            if not series_id:
+                return False
+            rows = as_list(
+                http(
+                    "GET",
+                    f"{base}/episode?seriesId={series_id}",
+                    headers=arr_headers(api_key),
+                )
+            )
+            wanted = item.get("episodeIds")
+            if not isinstance(wanted, list):
+                wanted = [
+                    ep.get("id")
+                    for ep in item.get("episodes") or []
+                    if isinstance(ep, dict) and ep.get("id")
+                ]
+            wanted_ids = {eid for eid in wanted if eid}
+            if not wanted_ids:
+                return False
+            matched = [
+                ep
+                for ep in rows
+                if isinstance(ep, dict) and ep.get("id") in wanted_ids
+            ]
+            return bool(matched) and all(ep.get("hasFile") is True for ep in matched)
+    except RuntimeError:
+        return False
+    return False
+
+
+EXPECTED_CROSS_KIND_REJECT = ("unknown series", "unknown movie")
+
+
+def is_expected_cross_kind_reject(reason: str) -> bool:
+    low = reason.strip().lower()
+    return any(low == bit or low.startswith(bit) for bit in EXPECTED_CROSS_KIND_REJECT)
+
+
+def release_dir_under_complete(path: str) -> str:
+    """Torrent folder under complete/ (or complete/radarr), not complete/ itself."""
+    root = os.path.normpath(downloads_complete())
+    full = os.path.normpath(path.strip())
+    if os.path.isfile(full) or (
+        not os.path.isdir(full) and os.path.splitext(full)[1]
+    ):
+        full = os.path.dirname(full)
+    if not path_under_complete(full) or full == root:
+        return ""
+    category = {
+        os.path.normpath(os.path.join(root, "radarr")),
+        os.path.normpath(os.path.join(root, "sonarr")),
+    }
+    while True:
+        parent = os.path.dirname(full)
+        if parent == root or parent in category:
+            return full
+        if parent == full:
+            return ""
+        full = parent
+
+
+def library_dir_has_video(path: str) -> bool:
+    return bool(path) and os.path.isdir(path) and path_has_video(path)
+
+
+def remove_complete_release(release_dir: str, reason: str) -> None:
+    if not release_dir or not os.path.isdir(release_dir):
+        return
+    if os.path.normpath(release_dir) == os.path.normpath(downloads_complete()):
+        return
+    try:
+        shutil.rmtree(release_dir)
+    except OSError as exc:
+        log(f"could not remove leftover complete/ folder: {exc}", "WARNING")
+        return
+    log(f"removed leftover complete/ folder ({reason})")
+
+
+def prune_complete_extras() -> None:
+    """Arr imports the video (+ srt) into the movie folder, not the torrent dump."""
+    root = downloads_complete()
+    if not os.path.isdir(root):
+        return
+    removed = 0
+
+    def consider(folder: str) -> None:
+        nonlocal removed
+        if not os.path.isdir(folder):
+            return
+        if path_has_video(folder):
+            return
+        try:
+            shutil.rmtree(folder)
+        except OSError:
+            return
+        removed += 1
+
+    try:
+        names = [name for name in os.listdir(root) if not name.startswith(".")]
+    except OSError:
+        return
+    for name in names:
+        full = os.path.join(root, name)
+        if name in ("radarr", "sonarr") and os.path.isdir(full):
+            try:
+                children = [
+                    child for child in os.listdir(full) if not child.startswith(".")
+                ]
+            except OSError:
+                continue
+            for child in children:
+                consider(os.path.join(full, child))
+            continue
+        consider(full)
+    if removed:
+        log(
+            f"removed {removed} leftover complete/ folder(s) "
+            "(extras only; library files kept)"
+        )
 
 
 def lookup_arr_library_path(base: str, api_key: str, kind: str, row: dict) -> str:
@@ -2014,7 +2161,7 @@ def import_matched_drop(base: str, api_key: str, kind: str) -> None:
     """Rename matched files Arr already approved. Log why the rest stay in complete/."""
     seen: set[str] = set()
     files: list[dict] = []
-    for folder in download_scan_paths():
+    for folder in download_scan_paths(kind):
         if not os.path.isdir(folder):
             continue
         query = urllib.parse.urlencode(
@@ -2036,18 +2183,26 @@ def import_matched_drop(base: str, api_key: str, kind: str) -> None:
             seen.add(path)
             rejected = import_rejection_text(item)
             if rejected:
-                log(
-                    f"{kind} will not import {os.path.basename(path)}: {rejected}",
-                    "WARNING",
-                )
+                if not is_expected_cross_kind_reject(rejected):
+                    log(
+                        f"{kind} will not import {os.path.basename(path)}: {rejected}",
+                        "WARNING",
+                    )
                 continue
-            if arr_already_has_library_file(item, kind):
-                dest = arr_import_destination(item, kind) or "Arr title path"
+            dest = arr_import_destination(item, kind)
+            if lookup_arr_has_file(base, api_key, kind, item):
+                dest = dest or lookup_arr_library_path(base, api_key, kind, item)
+                dest = dest or "Arr title path"
                 log(
                     f"{kind} already has a library file for "
                     f"{os.path.basename(path)} -> {dest} "
                     "(not re-importing leftover complete/ files)"
                 )
+                if library_dir_has_video(dest):
+                    remove_complete_release(
+                        release_dir_under_complete(path),
+                        "title already in the library",
+                    )
                 continue
             row = manual_import_file(item, kind)
             if not row:
@@ -2057,9 +2212,7 @@ def import_matched_drop(base: str, api_key: str, kind: str) -> None:
                     "WARNING",
                 )
                 continue
-            dest = arr_import_destination(item, kind) or lookup_arr_library_path(
-                base, api_key, kind, row
-            )
+            dest = dest or lookup_arr_library_path(base, api_key, kind, row)
             dest = dest or "Arr title path"
             log(
                 f"{kind} importing {os.path.basename(path)} into {dest} "
@@ -2480,6 +2633,7 @@ def main() -> int:
     import_matched_drop(radarr, rk, "radarr")
     import_matched_drop(sonarr, sk, "sonarr")
     forget_moved_torrents()
+    prune_complete_extras()
     log_complete_drop_contents()
     log_stuck_imports(radarr, rk, "radarr")
     log_stuck_imports(sonarr, sk, "sonarr")
@@ -2520,6 +2674,7 @@ def housekeep() -> int:
     import_matched_drop(radarr, rk, "radarr")
     import_matched_drop(sonarr, sk, "sonarr")
     forget_moved_torrents()
+    prune_complete_extras()
     log_complete_drop_contents()
     log_stuck_imports(radarr, rk, "radarr")
     log_stuck_imports(sonarr, sk, "sonarr")

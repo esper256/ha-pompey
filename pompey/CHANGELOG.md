@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.34
+
+- Arr imports the **video** (and `.srt`, including a `Subs` folder) into the movie folder Seerr stored. It does not relocate the whole torrent directory, so `downloads/complete` can keep `.nfo` / `.txt` after the movie is in Plex. **0.2.33** could also re-import a title Radarr had already assigned (the manual-import list often omits `hasFile`), which deleted the library file and the subtitle that came with it. Housekeeping now looks the title up on Arr, skips that second import, and removes leftover `complete/` folders once the library already has the video. Rebuild so the banner says **0.2.34**. Do not drag leftover extras out by hand.
+
 ## 0.2.33
 
 - **0.2.32** did move the movies into the Plex library folder Seerr stored (this house: `Movies/Not Kid Friendly`). Folders left under `downloads/complete` were leftover subtitles and `.nfo` files, not the movie. The app log listed those extras as `still in complete/`, which looked like the import never ran. Housekeeping now warns only when a **video** is still in `complete/`. It also skips re-importing a title Arr already has a file for (re-import was deleting the library copy because there is no recycle bin). New imports bring subtitle files (including a `Subs` folder) into the movie folder with the video — not the whole torrent dump of `.nfo`/`.txt`. After a file lands, Seerr is asked to check Plex and Arr so requests can flip from active to available (Plex recently-added is also every few minutes on its own). Rebuild so the banner says **0.2.33**. Look in the library folders Plex scans, not in `complete/`. Do not drag leftover extras out by hand.

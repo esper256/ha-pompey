@@ -1124,12 +1124,25 @@ PersistentKeepalive = 25
 
     def test_download_scan_paths_include_legacy_category_folders(self):
         os.environ["MEDIA_ROOT"] = "/media/dlna"
-        paths = ws.download_scan_paths()
         self.assertEqual(
-            paths,
+            ws.download_scan_paths(),
             [
                 "/media/dlna/downloads/complete",
                 "/media/dlna/downloads/complete/radarr",
+                "/media/dlna/downloads/complete/sonarr",
+            ],
+        )
+        self.assertEqual(
+            ws.download_scan_paths("radarr"),
+            [
+                "/media/dlna/downloads/complete",
+                "/media/dlna/downloads/complete/radarr",
+            ],
+        )
+        self.assertEqual(
+            ws.download_scan_paths("sonarr"),
+            [
+                "/media/dlna/downloads/complete",
                 "/media/dlna/downloads/complete/sonarr",
             ],
         )
@@ -1314,6 +1327,21 @@ PersistentKeepalive = 25
                 "sonarr",
             )
         )
+        self.assertTrue(ws.is_expected_cross_kind_reject("Unknown Series"))
+        self.assertTrue(ws.is_expected_cross_kind_reject("Unknown Movie"))
+        self.assertFalse(ws.is_expected_cross_kind_reject("Not a wanted quality"))
+        os.environ["MEDIA_ROOT"] = "/media/dlna"
+        self.assertEqual(
+            ws.release_dir_under_complete(
+                "/media/dlna/downloads/complete/www.UIndex.org - Title/file.mp4"
+            ),
+            "/media/dlna/downloads/complete/www.UIndex.org - Title",
+        )
+        self.assertEqual(
+            ws.release_dir_under_complete("/media/dlna/downloads/complete/file.mp4"),
+            "",
+        )
+        os.environ.pop("MEDIA_ROOT", None)
         self.assertEqual(
             ws.import_rejection_text(
                 {"rejections": [{"reason": "Not a wanted quality"}]}
@@ -2041,7 +2069,7 @@ class WireStack(unittest.TestCase):
         self.assertEqual(rc, 0)
         self.assertEqual(self.state.qbit_removed[0]["hashes"], digest)
         self.assertEqual(self.state.qbit_removed[0]["deleteFiles"], "false")
-        self.assertTrue((leftover / "English.srt").is_file())
+        self.assertFalse(leftover.exists())
         self.assertFalse(any(item.get("hash") == digest for item in self.state.qbit_torrents))
 
     def test_housekeep_scans_legacy_complete_radarr_folder(self):
@@ -2072,13 +2100,20 @@ class WireStack(unittest.TestCase):
         os.environ["INDEXER_URL"] = ""
         os.environ["INDEXER_API_KEY"] = ""
         root = self.tmp / "skip-hasfile"
-        complete = root / "downloads" / "complete"
-        complete.mkdir(parents=True)
-        leftover = complete / "already-imported.mkv"
-        leftover.write_bytes(b"x")
+        release = root / "downloads" / "complete" / "www.UIndex.org - Already"
+        release.mkdir(parents=True)
+        leftover = release / "already-imported.mkv"
+        leftover.write_bytes(b"copy")
+        (release / "English.srt").write_bytes(b"sub")
         os.environ["MEDIA_ROOT"] = str(root)
-        dest = str(root / "Movies" / "Not Kid Friendly" / "Already (2024)")
+        dest = root / "Movies" / "Not Kid Friendly" / "Already (2024)"
+        dest.mkdir(parents=True)
+        (dest / "Already (2024).mkv").write_bytes(b"library")
         quality = {"quality": {"id": 7, "name": "Bluray-1080p"}, "revision": {"version": 1}}
+        for movie in self.state.movies:
+            if movie.get("id") == 2:
+                movie["hasFile"] = True
+                movie["path"] = str(dest)
         self.state.manual_import = [
             {
                 "path": str(leftover),
@@ -2086,8 +2121,7 @@ class WireStack(unittest.TestCase):
                 "movie": {
                     "id": 2,
                     "title": "Already",
-                    "path": dest,
-                    "hasFile": True,
+                    "path": str(dest),
                 },
                 "quality": quality,
                 "languages": [{"id": 1, "name": "English"}],
@@ -2110,6 +2144,8 @@ class WireStack(unittest.TestCase):
             "(not re-importing leftover complete/ files)",
             buf.getvalue(),
         )
+        self.assertFalse(release.exists())
+        self.assertTrue((dest / "Already (2024).mkv").is_file())
 
     def test_housekeep_logs_extras_not_videos_in_complete(self):
         os.environ["INDEXER_URL"] = ""
@@ -2128,9 +2164,36 @@ class WireStack(unittest.TestCase):
             rc = ws.housekeep()
         self.assertEqual(rc, 0)
         out = buf.getvalue()
-        self.assertIn("complete/ leftovers are extras only (2 srt/nfo/txt file(s))", out)
+        self.assertIn("removed 1 leftover complete/ folder(s)", out)
+        self.assertFalse(folder.exists())
         self.assertNotIn("still in complete/:", out)
         self.assertNotIn("English.srt", out)
+
+    def test_housekeep_does_not_log_unknown_series_for_a_movie_file(self):
+        os.environ["INDEXER_URL"] = ""
+        os.environ["INDEXER_API_KEY"] = ""
+        root = self.tmp / "cross-kind"
+        complete = root / "downloads" / "complete"
+        complete.mkdir(parents=True)
+        movie = complete / "The.Shadows.Edge.mp4"
+        movie.write_bytes(b"x")
+        os.environ["MEDIA_ROOT"] = str(root)
+        quality = {"quality": {"id": 7, "name": "Bluray-1080p"}, "revision": {"version": 1}}
+        self.state.manual_import = [
+            {
+                "path": str(movie),
+                "quality": quality,
+                "rejections": [{"reason": "Unknown Series"}],
+            }
+        ]
+        from io import StringIO
+        from contextlib import redirect_stdout
+
+        buf = StringIO()
+        with redirect_stdout(buf):
+            rc = ws.housekeep()
+        self.assertEqual(rc, 0)
+        self.assertNotIn("Unknown Series", buf.getvalue())
 
     def test_housekeep_asks_seerr_to_notice_library_files(self):
         os.environ["INDEXER_URL"] = ""
