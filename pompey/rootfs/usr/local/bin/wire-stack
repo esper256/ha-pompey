@@ -419,32 +419,47 @@ def ensure_download_client(base: str, api_key: str, secrets: dict, kind: str) ->
     log(f"{kind} download client category={cat} after_download={after_download()} remove={remove}")
 
 
+# Sonarr (and current Radarr) reject 0: "must be greater than or equal to 100".
+# skipFreeSpaceCheckWhenImporting is what ignores a NAS that reports 0 bytes free.
+MIN_IMPORT_FREE_SPACE = 100
+
+
 def ensure_media_management(base: str, api_key: str, kind: str) -> None:
     """Import completed torrents into the library folder Seerr asked for.
 
     Network media shares (this house: /media/dlna) often report 0 free space, so
     Radarr/Sonarr skip import and the file sits in downloads/complete. Auto
-    completed-download handling must stay on.
+    completed-download handling must stay on. Do not fail the wait screen if
+    this PUT 400s — quality profiles and Seerr still need to wire.
     """
-    cfg = http("GET", f"{base}/config/mediamanagement", headers=arr_headers(api_key))
+    try:
+        cfg = http("GET", f"{base}/config/mediamanagement", headers=arr_headers(api_key))
+    except RuntimeError as exc:
+        log(f"{kind} media management: {exc}", "WARNING")
+        return
     if not isinstance(cfg, dict):
-        raise RuntimeError(f"{kind} media management missing")
+        log(f"{kind} media management missing", "WARNING")
+        return
     want = {
         "enableCompletedDownloadHandling": True,
         "skipFreeSpaceCheckWhenImporting": True,
-        "minimumFreeSpaceWhenImporting": 0,
+        "minimumFreeSpaceWhenImporting": MIN_IMPORT_FREE_SPACE,
     }
     if all(cfg.get(key) == value for key, value in want.items()):
         return
     updated = dict(cfg)
     updated.update(want)
     ident = cfg.get("id", 1)
-    http(
-        "PUT",
-        f"{base}/config/mediamanagement/{ident}",
-        updated,
-        headers=arr_headers(api_key),
-    )
+    try:
+        http(
+            "PUT",
+            f"{base}/config/mediamanagement/{ident}",
+            updated,
+            headers=arr_headers(api_key),
+        )
+    except RuntimeError as exc:
+        log(f"{kind} media management: {exc}", "WARNING")
+        return
     log(f"{kind} import into library folders (skip NAS free-space check)")
 
 
@@ -1972,6 +1987,10 @@ def main() -> int:
     ensure_root_folder(radarr, rk, movies_kid_dir())
     ensure_download_client(sonarr, sk, secrets, "sonarr")
     ensure_download_client(radarr, rk, secrets, "radarr")
+    # Quality before import settings so a Sonarr media-management 400 cannot
+    # leave Seerr on stock Any / HD-720p and hang the wait screen.
+    sp = household_quality_profile(sonarr, sk, "sonarr")
+    rp = household_quality_profile(radarr, rk, "radarr")
     ensure_media_management(sonarr, sk, "sonarr")
     ensure_media_management(radarr, rk, "radarr")
     ensure_prowlarr_app(prowlarr, pk, "Sonarr", "Sonarr", sonarr_url(), sk)
@@ -1979,8 +1998,6 @@ def main() -> int:
     ensure_indexer(prowlarr, pk)
     sync_prowlarr_indexers(prowlarr, pk)
     log_arr_vs_prowlarr_indexers(radarr, rk, sonarr, sk, prowlarr, pk)
-    sp = household_quality_profile(sonarr, sk, "sonarr")
-    rp = household_quality_profile(radarr, rk, "radarr")
     retry_unfilled_titles(radarr, rk, sonarr, sk)
     refresh_monitored_downloads(radarr, rk, "radarr")
     refresh_monitored_downloads(sonarr, sk, "sonarr")

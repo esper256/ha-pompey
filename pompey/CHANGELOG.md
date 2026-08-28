@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.31
+
+- The wait screen could stay on **Could not finish connecting search** with Sonarr `MinimumFreeSpaceWhenImporting` must be ≥ 100. **0.2.27** set that field to 0 so a NAS that reports no free space would still import; Sonarr rejects 0, and that PUT runs *before* quality profiles, so Max / Default / Anything never applied. The skip-free-space flag stays on (that is what ignores a 0-byte NAS). The number is 100. A media-management 400 no longer fails wiring. Rebuild so the banner says **0.2.31**.
+
 ## 0.2.30
 
 - 0.2.28 could leave the wait screen on **Engines started but wiring failed** and the request quality list on Radarr’s stock names (Any, HD-720p, Ultra-HD). Arr rejects a profile whose quality groups have no id, and it requires every custom format on the profile. Wiring now applies Max / Default / Anything on an existing install, keeps leftover stock names until those three exist, and does not treat a quality-profile hiccup as a full wiring failure. Rebuild so the banner says **0.2.30**.

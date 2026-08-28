@@ -228,6 +228,7 @@ class FakeState:
         self.fail_quality_profiles = False
         self.reject_profile_names: set[str] = set()
         self.quality_post_empty_body = False
+        self.fail_media_management = False
         self.apps: list[dict] = []
         self.indexers: list[dict] = []
         self.radarr_indexers: list[dict] = []
@@ -378,6 +379,23 @@ def handler_for(state: FakeState):
                     return self._send(body=media)
                 if "/config/mediamanagement/" in path and method == "PUT":
                     saved = dict(body or {})
+                    try:
+                        min_free = int(saved.get("minimumFreeSpaceWhenImporting") or 0)
+                    except (TypeError, ValueError):
+                        min_free = 0
+                    if state.fail_media_management or min_free < 100:
+                        return self._send(
+                            400,
+                            [
+                                {
+                                    "propertyName": "MinimumFreeSpaceWhenImporting",
+                                    "errorMessage": (
+                                        "'Minimum Free Space When Importing' "
+                                        "must be greater than or equal to '100'."
+                                    ),
+                                }
+                            ],
+                        )
                     if role == "radarr":
                         state.radarr_media = saved
                     else:
@@ -1271,7 +1289,7 @@ class WireStack(unittest.TestCase):
         self.assertEqual(self.state.qbit_categories.get("sonarr"), "/media/downloads/complete")
         self.assertTrue(self.state.radarr_media.get("skipFreeSpaceCheckWhenImporting"))
         self.assertTrue(self.state.sonarr_media.get("enableCompletedDownloadHandling"))
-        self.assertEqual(self.state.radarr_media.get("minimumFreeSpaceWhenImporting"), 0)
+        self.assertEqual(self.state.radarr_media.get("minimumFreeSpaceWhenImporting"), 100)
         self.assertIn(
             "RefreshMonitoredDownloads",
             [c.get("name") for c in self.state.arr_commands],
@@ -1673,7 +1691,17 @@ class WireStack(unittest.TestCase):
         for cfg in (self.state.radarr_media, self.state.sonarr_media):
             self.assertTrue(cfg.get("enableCompletedDownloadHandling"))
             self.assertTrue(cfg.get("skipFreeSpaceCheckWhenImporting"))
-            self.assertEqual(cfg.get("minimumFreeSpaceWhenImporting"), 0)
+            self.assertEqual(cfg.get("minimumFreeSpaceWhenImporting"), 100)
+
+    def test_media_management_400_does_not_block_wire(self):
+        os.environ["INDEXER_URL"] = ""
+        os.environ["INDEXER_API_KEY"] = ""
+        self.state.fail_media_management = True
+        rc = ws.main()
+        self.assertEqual(rc, 0)
+        self.assertTrue((self.ready / "wired").exists())
+        names = {item.get("name") for item in self.state.radarr_profiles}
+        self.assertEqual(names, {"Max", "Default", "Anything"})
 
     def test_refresh_imports_when_queue_is_stuck(self):
         os.environ["INDEXER_URL"] = ""
