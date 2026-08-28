@@ -16,30 +16,11 @@ fi
 
 LOG_DIR="${POMPEY_CONFIG}/qBittorrent/logs"
 mkdir -p "${LOG_DIR}"
-pompey-svc start "qBittorrent"
+pompey-log start "qBittorrent"
 
-forward_qbit_logs() {
-  local logf="" i
-  for i in $(seq 1 60); do
-    if [[ -f "${LOG_DIR}/qbittorrent.log" ]]; then
-      logf="${LOG_DIR}/qbittorrent.log"
-      break
-    fi
-    logf="$(ls -t "${LOG_DIR}"/*.log 2>/dev/null | head -n1 || true)"
-    [[ -n "${logf}" ]] && break
-    sleep 1
-  done
-  if [[ -z "${logf}" ]]; then
-    bashio::log.warning "qBittorrent has not created a log file after 60s (${LOG_DIR})"
-    return 0
-  fi
-  bashio::log.info "qBittorrent file log ${logf} (warnings also go to this app log)"
-  tail -n +1 -F "${logf}" 2>/dev/null | while IFS= read -r line || [[ -n "${line}" ]]; do
-    pompey-svc qbit-line "${line}"
-  done
-}
-
-forward_qbit_logs &
+# FileLogger is the source of truth; stdout is almost empty. Tail in this
+# script (do not exec) so a restart does not leak a second tailer.
+pompey-log tail "qBittorrent" "${LOG_DIR}/qbittorrent.log" &
 fwd_pid=$!
 "${QBIT}" \
   --profile="${POMPEY_CONFIG}" \

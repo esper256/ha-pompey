@@ -8,5 +8,7 @@ until [[ -f "${POMPEY_READY}/engines-ready" ]]; do
   sleep 2
 done
 
-pompey-svc start "Radarr"
+pompey-log start "Radarr"
+exec > >(pompey-log prefix "Radarr")
+exec 2>&1
 exec "${POMPEY_ENGINES}/Radarr/Radarr" -nobrowser -data="${POMPEY_CONFIG}/radarr"

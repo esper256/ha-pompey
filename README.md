@@ -181,7 +181,7 @@ The journey above is the target. **0.2.23** is a real Home Assistant OS install 
 | Jellyfin | Plex only. |
 | Use this from outside the house | Out of scope. Search is on the LAN at :5055. Sources at :9696. Do not port-forward either. |
 
-If search is a blank page on port 5055, or the Plex button on setup does nothing, that is a bug — send the log. Rebuild so the banner says **0.2.23** if a request does nothing and the app log never mentions qBittorrent, or if you still need a wait-screen fix, household media-folder defaults, **Open sources**, or an older wait screen.
+If search is a blank page on port 5055, or the Plex button on setup does nothing, that is a bug — send the log. Rebuild so the banner says **0.2.23** if a request does nothing and the app log never mentions qBittorrent (or never tags Radarr/Sonarr/Seerr), or if you still need a wait-screen fix, household media-folder defaults, **Open sources**, or an older wait screen.
 
 ## Roadmap
 

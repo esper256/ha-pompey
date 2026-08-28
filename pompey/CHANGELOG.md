@@ -2,7 +2,7 @@
 
 ## 0.2.23
 
-- The app log records when each hidden service **starts** and **stops**. qBittorrent warnings and errors are copied into that log; they used to stay in a file you cannot see from Home Assistant.
+- The app log is the mux for every hidden service (s6 already joins their stdout). Each line is tagged with the service name. You see when a service **starts** and **stops**. qBittorrent’s file log — previously invisible from Home Assistant — is copied in. Radarr, Sonarr, Prowlarr, Seerr, and nginx were already in this log and now carry the same tag so an error is not anonymous.
 
 ## 0.2.22
 

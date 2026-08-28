@@ -407,53 +407,81 @@ echo "== banner allows empty Proton when POMPEY_FAKE_VPN=1 =="
 BASHIO_OPTIONS="${empty}" POMPEY_FAKE_VPN=1 run "${INIT}/00-banner.sh" >/tmp/pompey-banner-fake.log 2>&1
 grep -q "Fake VPN" /tmp/pompey-banner-fake.log
 
-echo "== every s6 service logs start and stop =="
+echo "== every s6 service logs start and stop with a name tag =="
 svc="${ROOT}/pompey/rootfs/etc/services.d"
 missing=0
 for runf in "${svc}"/*/run; do
-  if ! grep -q 'pompey-svc start' "${runf}"; then
-    echo "missing pompey-svc start in ${runf}" >&2
+  if ! grep -q 'pompey-log start' "${runf}"; then
+    echo "missing pompey-log start in ${runf}" >&2
     missing=1
   fi
 done
 for fin in "${svc}"/*/finish; do
-  if ! grep -q 'pompey-svc finish' "${fin}"; then
-    echo "missing pompey-svc finish in ${fin}" >&2
+  if ! grep -q 'pompey-log finish' "${fin}"; then
+    echo "missing pompey-log finish in ${fin}" >&2
     missing=1
   fi
 done
 if [[ "${missing}" -ne 0 ]]; then
   exit 1
 fi
-grep -q 'pompey-svc qbit-line' "${svc}/qbittorrent/run"
+for named in radarr sonarr prowlarr seerr nginx; do
+  if ! grep -q 'pompey-log prefix' "${svc}/${named}/run"; then
+    echo "missing pompey-log prefix in ${svc}/${named}/run" >&2
+    exit 1
+  fi
+done
+grep -q 'pompey-log tail' "${svc}/qbittorrent/run"
 grep -q 'qBittorrent/logs' "${svc}/qbittorrent/run"
-grep -q 'tail' "${svc}/qbittorrent/run"
-test -x "${BIN}/pompey-svc"
-
-echo "== pompey-svc start/finish/qbit-line =="
-out="$(run pompey-svc start "qBittorrent" 2>&1)"
-grep -q "Starting qBittorrent" <<<"${out}"
-out="$(run pompey-svc finish "qBittorrent" 0 0 2>&1)"
-grep -q "qBittorrent stopped" <<<"${out}"
-out="$(run pompey-svc finish "Radarr" 256 15 2>&1)"
-grep -q "Radarr stopped" <<<"${out}"
-out="$(run pompey-svc finish "Sonarr" 1 0 2>&1)"
-grep -q "Sonarr exited (1)" <<<"${out}"
-out="$(run pompey-svc finish "nginx" 256 9 2>&1)"
-grep -q "killed (signal 9)" <<<"${out}"
-out="$(run pompey-svc qbit-line "(I) WebUI started" 2>&1)"
-if grep -q "WebUI started" <<<"${out}"; then
-  echo "info qBittorrent lines must not flood the app log" >&2
+test -x "${BIN}/pompey-log"
+test -x "${BIN}/pompey-log-emit"
+if grep -RIn 'pompey-svc' "${ROOT}/pompey/rootfs"; then
+  echo "pompey-svc was renamed to pompey-log" >&2
   exit 1
 fi
-out="$(run pompey-svc qbit-line "(W) Could not listen on the torrent port" 2>&1)"
-grep -q "\[qBittorrent\]" <<<"${out}"
+
+echo "== pompey-log start/finish/prefix/line =="
+out="$(run pompey-log start "qBittorrent" 2>&1)"
+grep -q "Starting qBittorrent" <<<"${out}"
+out="$(run pompey-log finish "qBittorrent" 0 0 2>&1)"
+grep -q "qBittorrent stopped" <<<"${out}"
+out="$(run pompey-log finish "Radarr" 256 15 2>&1)"
+grep -q "Radarr stopped" <<<"${out}"
+out="$(run pompey-log finish "Sonarr" 1 0 2>&1)"
+grep -q "Sonarr exited (1)" <<<"${out}"
+out="$(run pompey-log finish "nginx" 256 9 2>&1)"
+grep -q "killed (signal 9)" <<<"${out}"
+out="$(printf '%s\n' 'WebUI started' '|Error| disk full' '|Warn| slow disk' | run pompey-log prefix "Radarr" 2>&1)"
+grep -q "\[Radarr\] WebUI started" <<<"${out}"
+grep -q "\[Radarr\] |Error| disk full" <<<"${out}"
+grep -qi "ERROR" <<<"${out}"
+grep -q "\[Radarr\] |Warn| slow disk" <<<"${out}"
 grep -qi "WARNING" <<<"${out}"
-out="$(run pompey-svc qbit-line "(C) Permission denied writing to disk" 2>&1)"
-grep -q "\[qBittorrent\]" <<<"${out}"
+out="$(run pompey-log line "qBittorrent" "(I) listen port 41234" 2>&1)"
+grep -q "\[qBittorrent\] (I) listen port 41234" <<<"${out}"
+out="$(run pompey-log line "qBittorrent" "(C) Permission denied writing to disk" 2>&1)"
 grep -qi "ERROR" <<<"${out}"
 run "${svc}/qbittorrent/finish" 1 0 >/tmp/pompey-qbit-finish.log 2>&1
 grep -q "qBittorrent exited (1)" /tmp/pompey-qbit-finish.log
+
+echo "== pompey-log tail follows a file =="
+tlog="${WORK}/engine.log"
+: > "${tlog}"
+run pompey-log tail "Sonarr" "${tlog}" >"${WORK}/tailed.log" 2>&1 &
+tail_pid=$!
+for _ in 1 2 3 4 5 6 7 8 9 10; do
+  grep -q "file log" "${WORK}/tailed.log" 2>/dev/null && break
+  sleep 0.2
+done
+printf '%s\n' 'scan started' '|Error| unable to access folder' >>"${tlog}"
+for _ in 1 2 3 4 5 6 7 8 9 10; do
+  grep -q "\[Sonarr\] scan started" "${WORK}/tailed.log" 2>/dev/null && break
+  sleep 0.2
+done
+kill "${tail_pid}" 2>/dev/null || true
+wait "${tail_pid}" 2>/dev/null || true
+grep -q "\[Sonarr\] scan started" "${WORK}/tailed.log"
+grep -q "\[Sonarr\] |Error| unable to access folder" "${WORK}/tailed.log"
 
 echo "== write-engine-configs adds FileLogger to an existing qbit conf =="
 python3 - "${POMPEY_CONFIG}/qBittorrent/qBittorrent.conf" <<'PY'
