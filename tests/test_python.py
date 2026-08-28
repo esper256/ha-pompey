@@ -461,8 +461,10 @@ class WireStack(unittest.TestCase):
         )
         self.nginx = nginx
         self.ready = ready
+        self._old_path = os.environ.get("PATH", "")
 
     def tearDown(self):
+        os.environ["PATH"] = self._old_path
         for httpd in self.servers:
             httpd.shutdown()
             httpd.server_close()
@@ -515,7 +517,7 @@ class WireStack(unittest.TestCase):
         self.assertEqual(self.state.local_auth["email"], "pompey@local")
         self.assertEqual(self.state.seerr_radarr[0]["hostname"], "127.0.0.1")
         self.assertEqual(self.state.seerr_sonarr[0]["hostname"], "127.0.0.1")
-        self.assertTrue(self.state.initialized)
+        self.assertFalse(self.state.initialized)
         live = json.loads((self.ready / "status.json").read_text())
         self.assertTrue(live["search"])
 
@@ -542,6 +544,32 @@ class WireStack(unittest.TestCase):
         self.assertTrue((self.ready / "wired").exists())
         self.assertEqual(self.state.indexers, [])
         self.assertEqual(self.state.commands, [])
+
+    def _stub_nginx(self, script: str) -> None:
+        bindir = self.tmp / "bin"
+        bindir.mkdir(exist_ok=True)
+        stub = bindir / "nginx"
+        stub.write_text("#!/bin/sh\n" + script)
+        stub.chmod(0o755)
+        os.environ["PATH"] = f"{bindir}:{self._old_path}"
+
+    def test_nginx_not_running_still_marks_ready(self):
+        self._stub_nginx(
+            'echo \'the "user" directive makes sense only if the master process runs with super-user privileges\' >&2\n'
+            'echo \'signal process started\' >&2\n'
+            'echo \'open() "/run/nginx.pid" failed (2: No such file or directory)\' >&2\n'
+            "exit 1\n"
+        )
+        rc = ws.main()
+        self.assertEqual(rc, 0)
+        self.assertTrue((self.ready / "wired").exists())
+
+    def test_nginx_reload_error_does_not_mark_ready(self):
+        self._stub_nginx('echo "invalid number of arguments in log_format" >&2\nexit 1\n')
+        with self.assertRaises(RuntimeError) as ctx:
+            ws.main()
+        self.assertIn("nginx reload failed", str(ctx.exception))
+        self.assertFalse((self.ready / "wired").exists())
 
 
 class RouteRating(unittest.TestCase):
@@ -580,6 +608,28 @@ class IngressRewrite(unittest.TestCase):
         self.assertNotIn('src="/_next/', out)
         again = ing.rewrite_seerr_body(out, prefix)
         self.assertEqual(out.count(prefix + "/_next"), again.count(prefix + "/_next"))
+
+    def test_quoted_login_and_setup_are_prefixed_regex_literals_are_not(self):
+        """Seerr minified chunks use /login/i. Prefixing that is an invalid regex."""
+        prefix = "/api/hassio_ingress/tok"
+        chunk = (
+            'function n(e){return/login/i.test(e)||/setup/g.test(e)}'
+            'push("/login");goto("/setup");href="/login/plex/loading"'
+        )
+        out = ing.rewrite_seerr_body(chunk, prefix)
+        self.assertIn("/login/i", out)
+        self.assertIn("/setup/g", out)
+        self.assertNotIn(f"{prefix}/login/i", out)
+        self.assertNotIn(f"{prefix}/setup/g", out)
+        self.assertIn(f'push("{prefix}/login")', out)
+        self.assertIn(f'goto("{prefix}/setup")', out)
+        self.assertIn(f'href="{prefix}/login/plex/loading"', out)
+        escaped = r'path:"\/login",next:"\/setup"'
+        escaped_out = ing.rewrite_seerr_body(escaped, prefix)
+        self.assertIn(r'"\/api\/hassio_ingress\/tok\/login"', escaped_out)
+        self.assertIn(r'"\/api\/hassio_ingress\/tok\/setup"', escaped_out)
+        regex_escaped = r"re=/\/login/i"
+        self.assertEqual(ing.rewrite_seerr_body(regex_escaped, prefix), regex_escaped)
 
     def test_empty_prefix_leaves_html(self):
         html = '<script src="/_next/static/x.js"></script>'

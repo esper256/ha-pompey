@@ -24,14 +24,14 @@ def listen_url() -> str:
 def seerr_base() -> str:
     return os.environ.get("SEERR_URL", "http://127.0.0.1:5055").rstrip("/")
 
-# Same substitutions as Seerr's unsupported nginx subfolder example, using the
-# live Ingress prefix instead of a hardcoded /seerr.
+# Unique prefixes — safe to replace globally (Seerr's subfolder nginx example).
+# Do not globally replace /login or /setup: those appear as JS regex literals
+# (`/login/i`) in minified chunks. Prefixing them produces Invalid regular
+# expression and the Plex button on the setup wizard does nothing.
 REWRITE_PATHS = (
     "/_next",
     "/api/v1",
     "/login/plex/loading",
-    "/login",
-    "/setup",
     "/images/",
     "/imageproxy/",
     "/avatarproxy/",
@@ -40,6 +40,12 @@ REWRITE_PATHS = (
     "/favicon",
     "/logo_",
     "/site.webmanifest",
+)
+
+# Short routes: only rewrite when they are quoted URL strings, not /login/i.
+QUOTED_PATHS = (
+    "/login",
+    "/setup",
 )
 
 TEXT_TYPES = (
@@ -79,6 +85,12 @@ def rewrite_seerr_body(text: str, prefix: str) -> str:
         js_old = path.replace("/", "\\/")
         js_new = escaped + js_old
         out = _replace_unprefixed(out, js_old, js_new)
+    for path in QUOTED_PATHS:
+        for quote in ('"', "'", "`"):
+            out = _replace_unprefixed(out, f"{quote}{path}", f"{quote}{prefix}{path}")
+            js_old = quote + path.replace("/", "\\/")
+            js_new = quote + escaped + path.replace("/", "\\/")
+            out = _replace_unprefixed(out, js_old, js_new)
     out = _replace_unprefixed(out, 'href="/"', f'href="{prefix}/"')
     out = _replace_unprefixed(out, "href='/'", f"href='{prefix}/'")
     out = _replace_unprefixed(out, 'href:"/"', f'href:"{prefix}/"')

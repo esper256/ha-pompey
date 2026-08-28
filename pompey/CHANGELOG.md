@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.13
+
+- Seerr's first-run **Plex** button did nothing under Ingress. The rewriter globally replaced `/login` and `/setup` inside minified JS, which turned regex literals like `/login/i` into an invalid regular expression and killed the setup chunk. Those two paths are now rewritten only as quoted URL strings (Seerr's own subfolder nginx example never globally replaced them). Rebuild so the banner says **0.2.13**.
+- Home Assistant **Plex address / token are optional**. They skip Seerr's Plex wizard. Leave them empty and finish Plex on Seerr's first screen. Pompey does not copy Plex settings back out of Seerr — after the wizard, Seerr already has them. Source URL/key go to Prowlarr, not that wizard. A numeric IP is still required in the wizard: Proton DNS will not resolve LAN names.
+- Wiring no longer POSTs `/settings/initialize` when Plex is empty, so the wizard stays up.
+- A missing `nginx.pid` (GitHub Actions has the binary but no addon master) is a warning, not a wiring failure. A real reload error still keeps search off the wait screen.
+
 ## 0.2.12
 
 - Wiring no longer marks search ready after a required step failed. A failed Prowlarr app/indexer add, qBittorrent category (other than "already exists"), Seerr session, or Seerr→Radarr/Sonarr used to be a log line while Ingress still flipped to search. Those now fail the process so s6 retries and the wait screen stays up. Plex login/libraries and Seerr chrome settings (title, trustProxy) stay optional. Rebuild so the banner says **0.2.12**.

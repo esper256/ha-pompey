@@ -565,9 +565,14 @@ def configure_seerr(secrets: dict, radarr_profile, sonarr_profile, sonarr_lang) 
         log(f"seerr network: {exc}", "WARNING")
 
     public = s.call("GET", "/api/v1/settings/public") or {}
-    if not (isinstance(public, dict) and public.get("initialized")):
+    already = isinstance(public, dict) and public.get("initialized")
+    if already:
+        return
+    if have_plex:
         s.call("POST", "/api/v1/settings/initialize")
         log("seerr initialized")
+    else:
+        log("seerr left uninitialized so the Plex setup wizard can run")
 
 
 def reload_nginx() -> None:
@@ -610,12 +615,19 @@ def reload_nginx() -> None:
     with open(path, "w", encoding="utf-8") as fh:
         fh.write(conf)
     nginx = shutil.which("nginx")
-    if nginx:
-        done = subprocess.run([nginx, "-s", "reload"], check=False, capture_output=True, text=True)
-        if done.returncode != 0:
-            raise RuntimeError(f"nginx reload failed: {(done.stderr or done.stdout or '').strip()}")
-    else:
+    if not nginx:
         log("nginx not on PATH; wrote ingress conf only", "WARNING")
+        log("ingress now proxies Seerr")
+        return
+    done = subprocess.run([nginx, "-s", "reload"], check=False, capture_output=True, text=True)
+    if done.returncode != 0:
+        err = (done.stderr or done.stdout or "").strip()
+        # Binary present but no master process (CI / this VM). On HAOS the
+        # nginx service is already up, so a pid miss is not the usual case.
+        if "nginx.pid" in err.lower() and "no such file" in err.lower():
+            log("nginx is not running; wrote ingress conf only", "WARNING")
+        else:
+            raise RuntimeError(f"nginx reload failed: {err}")
     log("ingress now proxies Seerr")
 
 

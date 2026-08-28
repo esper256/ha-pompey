@@ -2,7 +2,7 @@
 
 Search for a movie or TV show from the Home Assistant sidebar. Confirm if we need you. It lands in the right library and Plex notices.
 
-**0.2.12 is the first cut meant for a real Home Assistant OS install.** A title landing in Plex is still unproven. Recyclarr quality profiles, Cloudflare solvers, and picking a specific file are not in this version.
+**0.2.13 is the first cut meant for a real Home Assistant OS install.** A title landing in Plex is still unproven. Recyclarr quality profiles, Cloudflare solvers, and picking a specific file are not in this version.
 
 All internet from this app uses Proton WireGuard. If the tunnel is down, internet is dropped.
 
@@ -11,7 +11,7 @@ This app is **not** published as a container image. Copy `pompey/` into `/addons
 ## Before you start
 
 1. In Proton, create a **WireGuard** certificate. Enable **NAT-PMP (Port Forwarding)** if you want incoming connections for downloads. Download the `.conf` file.
-2. Plex on the LAN (another Docker app is fine) with **port 32400 published on a host IP**, plus a token from that Plex account.
+2. Plex on the LAN (another Docker app is fine) with **port 32400 published on a host IP**. You can finish Plex on Seerr's first-run screen, or skip that wizard by filling address + token in the Home Assistant options.
 3. At least one **source**: a URL plus API key. Pompey does not ship a catalog of sources. Without this, search will not find releases.
 4. Disk that can hold libraries and in-progress downloads on the same filesystem (`/media` is the usual choice). This stack wants a few GB of RAM on top of Home Assistant. A 2 GB Pi is not a target.
 
@@ -19,10 +19,10 @@ This app is **not** published as a container image. Copy `pompey/` into `/addons
 
 Do this **before** you start the app:
 
-1. Current `main` (0.2.12). After adding the GitHub Apps repository, look under **Install app**, not the installed-apps list. If you added the URL while the repo was private, remove it and add it again.
+1. Current `main` (0.2.13). After adding the GitHub Apps repository, look under **Install app**, not the installed-apps list. If you added the URL while the repo was private, remove it and add it again.
 2. A Proton **WireGuard** `.conf` on your computer (create a certificate in Proton, NAT-PMP on if you want incoming download ports). You will paste that file after start — not into the HA options list.
-3. Plex token: open any item on the Plex server in a browser, View Source, search for `X-Plex-Token`, or follow [Plex’s token article](https://support.plex.tv/articles/204059436-finding-an-authentication-token-x-plex-token/).
-4. Plex address is a **numeric IP** (see table below).
+3. Plex at a **numeric IP** (see table below). You can leave the Home Assistant Plex fields empty and complete Plex on Seerr's setup wizard after the wait screen. Filling address + token here only skips that wizard.
+4. If you want to skip the wizard: Plex token from any item on the Plex server in a browser, View Source, search for `X-Plex-Token`, or follow [Plex’s token article](https://support.plex.tv/articles/204059436-finding-an-authentication-token-x-plex-token/).
 5. In Plex, add libraries that point at these folders (create them if Plex does not see them yet):
 
 ```text
@@ -55,10 +55,10 @@ If it still does not appear: Settings → System → Logs → **Supervisor**. Lo
 
 Then:
 
-1. Fill **Plex address** (numeric IP), **Plex token**, **source URL**, and **source key**. Those are the only app options.
+1. Fill **source URL** and **source key**. **Plex address** and **Plex token** are optional (they skip Seerr's Plex wizard). Those four are the only app options.
 2. Start **Pompey**. Open it in the sidebar. Paste the Proton WireGuard `.conf` on the wait screen, then wait for search.
 
-If the wait screen asks for Proton, paste the whole file Proton gave you (it starts with `[Interface]`). If search is a blank page after the wait screen, check the app log for `pompey-ingress` / Seerr.
+If the wait screen asks for Proton, paste the whole file Proton gave you (it starts with `[Interface]`). If search is a blank page after the wait screen, or Seerr's Plex button does nothing, check the app log for `pompey-ingress` / Seerr and rebuild on **0.2.13**.
 
 ## Plex in another Docker app
 
@@ -66,7 +66,7 @@ Pompey cannot see unpublished container-to-container DNS names. Proton’s DNS i
 
 Use a **numeric IP** and a published port:
 
-| Plex setup | Plex address to put in Pompey |
+| Plex setup | Address to use (HA option or Seerr wizard) |
 | --- | --- |
 | Docker on the **same HA machine**, `-p 32400:32400` (or host network) | `http://172.30.32.1:32400` (HA host from the addon network) or the LAN IP of that machine, e.g. `http://192.168.1.10:32400` |
 | Docker on **another machine** on your LAN, port 32400 published | `http://192.168.x.x:32400` |
@@ -84,11 +84,13 @@ There is no country dropdown. The Proton file already chose a server. Generate a
 
 Home Assistant’s option list is only Plex and source. It does not ask for WireGuard internals (filename, DNS, LAN CIDRs, log level). Those are fixed: Proton DNS `10.2.0.1`, RFC1918 LAN plus Supervisor `172.30.32.0/23`, media at `/media`.
 
+Plex in the Home Assistant options is a **shortcut**, not a second source of truth. Seerr’s web setup is the canonical Plex connection. If you leave those fields empty, Pompey still wires Radarr/Sonarr and you finish Plex on Seerr’s first screen. Pompey does not read Plex back out of Seerr afterward — it does not need the token for search. Source URL/key are for Prowlarr; they are not part of that wizard.
+
 | Option | Meaning |
 | --- | --- |
-| Plex address | Numeric IP where Plex listens, usually on the LAN. |
-| Plex token | Lets Pompey sign the household UI into Plex and skip most of the first-run wizard. |
-| Source URL | One indexer/source base URL. |
+| Plex address | Optional. Numeric IP where Plex listens. Same value you would type in Seerr’s wizard. |
+| Plex token | Optional. Signs Seerr into Plex and skips the first-run wizard. |
+| Source URL | One indexer/source base URL (Prowlarr, not Seerr). |
 | Source key | API key for that source. |
 
 Do not publish download peer ports on the Home Assistant host.
@@ -99,7 +101,7 @@ Open **Pompey** in the sidebar. If Proton is not configured yet, paste the `.con
 
 Opening `index.html` as a file in the editor is only that wait screen and will never become search.
 
-If Plex is not filled in yet, Pompey still creates a local search account and wires the TV/movie engines. You will land on that UI’s Plex setup wizard for the library connection.
+If Plex is not filled in yet, Pompey still creates a local search account and wires the TV/movie engines. Seerr stays uninitialized so you land on its Plex setup wizard. Use a **numeric IP** there.
 
 ## Storage
 
