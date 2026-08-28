@@ -604,7 +604,8 @@ def configure_seerr(secrets: dict, radarr_profile, sonarr_profile, sonarr_lang) 
                 if server_id is not None and want and want != have:
                     update = dict(match)
                     update.update(payload)
-                    update["id"] = server_id
+                    # Seerr OpenAPI marks id read-only; it belongs in the URL.
+                    update.pop("id", None)
                     s.call("PUT", f"{path}/{server_id}", update)
                     log(f"seerr {kind} directory {want}")
                 return True
