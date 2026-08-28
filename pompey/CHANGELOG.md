@@ -2,6 +2,7 @@
 
 ## 0.2.14
 
+- Household guide in the root README: install from the Apps repository, first run (Proton paste, Plex wizard, source), which URLs you actually open, how updates should work over years, what this cut does not do yet, and a roadmap to the intended product. Supervisor-only notes stay in `DOCS.md`.
 - Wait screen came back after 0.2.13: `POST /api/v1/auth/local` is **login-only** on real Seerr, and the `settings.json` API key impersonates user id 1, which does not exist until the Plex wizard. Tests used a fake Seerr that accepted both, so they never saw the 403s. Wiring now treats local-login 403 and pre-wizard Arr 403 as expected, hands off to the wizard, and retries Seerr→Radarr/Sonarr once the first admin exists. `tests/run.sh` unpacks the official Seerr image (cached, musl chroot) and runs that contract; Arr/qBittorrent stay fake. Rebuild so the banner says **0.2.14**.
 
 ## 0.2.13
