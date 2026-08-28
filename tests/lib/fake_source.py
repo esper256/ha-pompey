@@ -37,7 +37,7 @@ MAGNET = (
 )
 # Sonarr's indexer test is an empty TV-category search. A movie-only RSS
 # feed makes it reject the source ("no results in configured categories")
-# and Prowlarr ApplicationIndexersSync then 500s.
+# and Prowlarr ApplicationIndexerSync then fails.
 TV_TITLE = "Pompey Test Show S01E01 1080p WEB-DL"
 TV_INFOHASH = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 TV_MAGNET = (
