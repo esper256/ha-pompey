@@ -2,6 +2,8 @@
 # shellcheck shell=bash
 # Copy a Proton .conf into /etc/wireguard, resolve Endpoint, apply kill switch.
 # Exit 2 = no file yet (wait screen). Exit 3 = file present but invalid.
+# A missing iptables filter table does not fail apply: the file is already
+# saved and wg-quick can still bring the tunnel up.
 set -euo pipefail
 # shellcheck source=/dev/null
 source "$(command -v pompey-env)"
@@ -23,6 +25,12 @@ if ! python3 "$(command -v pompey-setup)" --validate "${SRC}"; then
 fi
 
 tr -d '\r' < "${SRC}" > "${DST}"
+chmod 600 "${DST}"
+
+# Proton/router PostUp iptables snippets break wg-quick on hosts with no
+# legacy filter table. We apply our own kill switch.
+grep -viE '^[[:space:]]*(PostUp|PostDown|PreUp|PreDown)[[:space:]]*=' "${DST}" >"${DST}.clean" || true
+mv "${DST}.clean" "${DST}"
 chmod 600 "${DST}"
 
 if ! grep -qi '^[[:space:]]*PersistentKeepalive' "${DST}"; then
@@ -72,8 +80,11 @@ if [[ "${POMPEY_FAKE_VPN:-}" == "1" ]]; then
   bashio::log.info "Fake VPN: skip Proton DNS rewrite and OUTPUT kill switch"
 else
   printf 'nameserver %s\n' "${DNS}" >"${POMPEY_RESOLV}"
-  vpn-killswitch "${DST}"
-  bashio::log.info "iptables kill switch applied (internet OUTPUT only via wg0 once it exists)"
+  ks=0
+  vpn-killswitch "${DST}" || ks=$?
+  if [[ "${ks}" -ne 0 ]]; then
+    bashio::log.warning "Kill switch did not attach (exit ${ks}). The Proton file is in place; the tunnel will still start."
+  fi
 fi
 
 touch "${APPLIED}"

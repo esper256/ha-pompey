@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.5
+
+- Pasting a valid Proton `.conf` no longer fails with “Saved the file, but could not apply it” on Home Assistant OS. The wait screen was treating a kill-switch miss as a bad paste. HAOS has no `/lib/modules` and no legacy `iptables` filter table (`Table does not exist` / `modprobe: can't change directory to '/lib/modules'`). Pompey now probes `iptables-nft`, then `iptables`, then `iptables-legacy`, then `nft`. If none can attach, the Proton file stays saved and the tunnel still starts; the log says the kill switch could not attach.
+- Engines and NAT-PMP no longer countdown a WireGuard handshake (and restart every ~90s) before a Proton file exists.
+
 ## 0.2.4
 
 - Wait screen no longer flickers the Proton paste box. Other boot services were overwriting status every couple of seconds (marking later steps done, then resetting to only the tunnel), which hid the textarea and jumped the progress list. Proton paste stays until the `.conf` is applied.

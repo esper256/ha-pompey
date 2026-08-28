@@ -354,6 +354,11 @@ class Helpers(unittest.TestCase):
         self.assertIn("lastSig", html)
         self.assertIn("protonSubmitted", html)
 
+    def test_paste_apply_does_not_echo_keys(self):
+        setup = (ROOT / "pompey/rootfs/usr/local/bin/pompey-setup").read_text()
+        self.assertIn("do not send the Proton key", setup)
+        self.assertIn("The Proton file was saved", setup)
+
     def test_ha_store_icon_is_square_logo_is_wide(self):
         icon = ROOT / "pompey/icon.png"
         logo = ROOT / "pompey/logo.png"
