@@ -4,7 +4,7 @@ This file is for Cursor cloud agents. Household operators should read [DOCS.md](
 
 ## Short answer (why this file mentions Docker)
 
-PR #2 told agents to start `dockerd` and `docker build` / `docker run`. That is **not** how the household runs Pompey, and it is **not** a stand-in for Home Assistant OS.
+Starting `dockerd` in this Cursor VM is **not** how the household runs Pompey, and it is **not** a stand-in for Home Assistant OS.
 
 In the real world, **Home Assistant Supervisor** is the container host. It builds `pompey/Dockerfile` on the user’s machine and starts **one** addon container. The operator never types `docker`, never starts `dockerd`, and we never publish an image to Docker Hub or GHCR.
 
@@ -51,7 +51,7 @@ If `docker info` fails, start the daemon. This is a quirk of **this cloud box**,
 sudo dockerd >/tmp/dockerd.log 2>&1 &
 ```
 
-This VM may need `/etc/docker/daemon.json` with `storage-driver: fuse-overlayfs` and `features.containerd-snapshotter: false`.
+This VM may need `/etc/docker/daemon.json` with `storage-driver: fuse-overlayfs` and `features.containerd-snapshotter: false`. Do not treat that file as part of the add-on.
 
 ```bash
 docker build --build-arg BUILD_ARCH=amd64 -t local/pompey:dev pompey/
