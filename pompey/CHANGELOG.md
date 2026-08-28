@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.14
+
+- Wait screen came back after 0.2.13: `POST /api/v1/auth/local` is **login-only** on real Seerr. There is no `pompey@local` user until someone finishes the Plex wizard (that is how the first admin is created). Tests always accepted that POST, so they never saw the 403. Wiring now uses Seerr’s own `settings.json` API key and treats local-login 403 as expected. Rebuild so the banner says **0.2.14**.
+
 ## 0.2.13
 
 - Seerr's first-run **Plex** button did nothing under Ingress. The rewriter globally replaced `/login` and `/setup` inside minified JS, which turned regex literals like `/login/i` into an invalid regular expression and killed the setup chunk. Those two paths are now rewritten only as quoted URL strings (Seerr's own subfolder nginx example never globally replaced them). Rebuild so the banner says **0.2.13**.

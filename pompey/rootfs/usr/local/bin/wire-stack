@@ -4,11 +4,13 @@
 Required (must succeed or this process exits non-zero so s6 retries, and
 the wait screen does not flip to search): qBittorrent categories, Arr root
 folders and download clients, Prowlarr↔Radarr/Sonarr apps, the operator
-source indexer when a URL is configured, Seerr session, Seerr→Radarr/Sonarr.
+source indexer when a URL is configured, Seerr API key (from settings.json),
+Seerr→Radarr/Sonarr.
 
-Optional (log and continue): Plex token/login/libraries, Seerr chrome
-settings (title, trustProxy). No source URL yet is also optional — the
-household can finish that from the search screen.
+Optional (log and continue): Plex token/login/libraries, Seerr local login
+(403 is normal until the wizard creates a user), Seerr chrome settings
+(title, trustProxy). No source URL yet is also optional — the household
+can finish that from the search screen.
 """
 from __future__ import annotations
 
@@ -103,6 +105,30 @@ def prowlarr_url() -> str:
 
 def seerr_url() -> str:
     return env("SEERR_URL", "http://127.0.0.1:5055").rstrip("/")
+
+
+def seerr_config_dir() -> str:
+    return env("SEERR_CONFIG") or os.path.join(env("POMPEY_CONFIG", "/config"), "seerr")
+
+
+def seerr_api_key_from_disk() -> str:
+    """Seerr writes main.apiKey on first start. That key is admin; /auth/local is not.
+
+    POST /api/v1/auth/local only signs in an existing local user. The first admin is
+    created by the Plex (or Jellyfin) setup wizard. A generated pompey@local password
+    therefore 403s on a real Seerr, which is why the wait screen came back after 0.2.13.
+    """
+    path = os.path.join(seerr_config_dir(), "settings.json")
+    try:
+        with open(path, encoding="utf-8") as fh:
+            data = json.load(fh)
+    except (OSError, json.JSONDecodeError, TypeError):
+        return ""
+    if not isinstance(data, dict):
+        return ""
+    main = data.get("main") if isinstance(data.get("main"), dict) else data
+    key = main.get("apiKey") if isinstance(main, dict) else None
+    return key.strip() if isinstance(key, str) else ""
 
 
 def ingress_proxy_url() -> str:
@@ -414,8 +440,8 @@ def configure_seerr(secrets: dict, radarr_profile, sonarr_profile, sonarr_lang) 
     else:
         raise RuntimeError("Seerr never became ready")
 
+    s.api_key = seerr_api_key_from_disk()
     have_plex = bool(plex_url() and plex_token())
-    signed_in = False
     if not have_plex:
         log("Plex URL/token missing; Seerr setup wizard will be used for Plex")
 
@@ -423,34 +449,35 @@ def configure_seerr(secrets: dict, radarr_profile, sonarr_profile, sonarr_lang) 
         try:
             s.call("POST", "/api/v1/auth/plex", {"authToken": plex_token()})
             log("seerr signed in with Plex token")
-            signed_in = True
         except RuntimeError as exc:
             log(f"seerr plex login: {exc}", "WARNING")
             have_plex = False
 
-    if not signed_in:
-        email = secrets.get("seerr_email") or "pompey@local"
-        password = secrets.get("seerr_password") or ""
-        if password:
-            try:
-                s.call(
-                    "POST",
-                    "/api/v1/auth/local",
-                    {"email": email, "password": password, "name": "Pompey"},
-                )
-                log("seerr signed in with local account")
-                signed_in = True
-            except RuntimeError as exc:
-                log(f"seerr local login: {exc}", "WARNING")
-    if not signed_in:
-        raise RuntimeError("seerr has no session yet; cannot wire Radarr/Sonarr")
+    email = secrets.get("seerr_email") or "pompey@local"
+    password = secrets.get("seerr_password") or ""
+    if password and not s.cookie:
+        try:
+            s.call(
+                "POST",
+                "/api/v1/auth/local",
+                {"email": email, "password": password, "name": "Pompey"},
+            )
+            log("seerr signed in with local account")
+        except RuntimeError as exc:
+            # Real Seerr: no local user until the wizard (or a later password). 403 is expected.
+            log(f"seerr local login: {exc}", "WARNING")
 
-    try:
-        main = s.call("GET", "/api/v1/settings/main") or {}
-        if isinstance(main, dict) and main.get("apiKey"):
-            s.api_key = main["apiKey"]
-    except RuntimeError as exc:
-        log(f"seerr api key: {exc}", "WARNING")
+    if not s.api_key:
+        try:
+            main = s.call("GET", "/api/v1/settings/main") or {}
+            if isinstance(main, dict) and main.get("apiKey"):
+                s.api_key = main["apiKey"]
+        except RuntimeError as exc:
+            log(f"seerr api key: {exc}", "WARNING")
+        if not s.api_key:
+            s.api_key = seerr_api_key_from_disk()
+    if not s.api_key:
+        raise RuntimeError("seerr has no API key yet; cannot wire Radarr/Sonarr")
 
     if have_plex:
         host, port, ssl = parse_plex(plex_url())
@@ -675,7 +702,7 @@ if __name__ == "__main__":
     try:
         raise SystemExit(main())
     except Exception as exc:  # noqa: BLE001
-        log(str(exc))
+        log(str(exc), "ERROR")
         mark_status(
             "wire",
             "Could not finish connecting search",

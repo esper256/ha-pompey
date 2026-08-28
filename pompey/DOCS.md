@@ -2,7 +2,7 @@
 
 Search for a movie or TV show from the Home Assistant sidebar. Confirm if we need you. It lands in the right library and Plex notices.
 
-**0.2.13 is the first cut meant for a real Home Assistant OS install.** A title landing in Plex is still unproven. Recyclarr quality profiles, Cloudflare solvers, and picking a specific file are not in this version.
+**0.2.14 is the first cut meant for a real Home Assistant OS install.** A title landing in Plex is still unproven. Recyclarr quality profiles, Cloudflare solvers, and picking a specific file are not in this version.
 
 All internet from this app uses Proton WireGuard. If the tunnel is down, internet is dropped.
 
@@ -19,7 +19,7 @@ This app is **not** published as a container image. Copy `pompey/` into `/addons
 
 Do this **before** you start the app:
 
-1. Current `main` (0.2.13). After adding the GitHub Apps repository, look under **Install app**, not the installed-apps list. If you added the URL while the repo was private, remove it and add it again.
+1. Current `main` (0.2.14). After adding the GitHub Apps repository, look under **Install app**, not the installed-apps list. If you added the URL while the repo was private, remove it and add it again.
 2. A Proton **WireGuard** `.conf` on your computer (create a certificate in Proton, NAT-PMP on if you want incoming download ports). You will paste that file after start — not into the HA options list.
 3. Plex at a **numeric IP** (see table below). You can leave the Home Assistant Plex fields empty and complete Plex on Seerr's setup wizard after the wait screen. Filling address + token here only skips that wizard.
 4. If you want to skip the wizard: Plex token from any item on the Plex server in a browser, View Source, search for `X-Plex-Token`, or follow [Plex’s token article](https://support.plex.tv/articles/204059436-finding-an-authentication-token-x-plex-token/).
@@ -58,7 +58,7 @@ Then:
 1. Fill **source URL** and **source key**. **Plex address** and **Plex token** are optional (they skip Seerr's Plex wizard). Those four are the only app options.
 2. Start **Pompey**. Open it in the sidebar. Paste the Proton WireGuard `.conf` on the wait screen, then wait for search.
 
-If the wait screen asks for Proton, paste the whole file Proton gave you (it starts with `[Interface]`). If search is a blank page after the wait screen, or Seerr's Plex button does nothing, check the app log for `pompey-ingress` / Seerr and rebuild on **0.2.13**.
+If the wait screen asks for Proton, paste the whole file Proton gave you (it starts with `[Interface]`). If search is a blank page after the wait screen, or Seerr's Plex button does nothing, check the app log for `pompey-ingress` / Seerr and rebuild on **0.2.14**.
 
 ## Plex in another Docker app
 
@@ -84,7 +84,7 @@ There is no country dropdown. The Proton file already chose a server. Generate a
 
 Home Assistant’s option list is only Plex and source. It does not ask for WireGuard internals (filename, DNS, LAN CIDRs, log level). Those are fixed: Proton DNS `10.2.0.1`, RFC1918 LAN plus Supervisor `172.30.32.0/23`, media at `/media`.
 
-Plex in the Home Assistant options is a **shortcut**, not a second source of truth. Seerr’s web setup is the canonical Plex connection. If you leave those fields empty, Pompey still wires Radarr/Sonarr and you finish Plex on Seerr’s first screen. Pompey does not read Plex back out of Seerr afterward — it does not need the token for search. Source URL/key are for Prowlarr; they are not part of that wizard.
+Plex in the Home Assistant options is a **shortcut**, not a second source of truth. Seerr’s web setup is the canonical Plex connection. If you leave those fields empty, Pompey wires Radarr/Sonarr with Seerr’s own API key (from `settings.json`) and you finish Plex on Seerr’s first screen. That wizard creates the first admin; there is no `pompey@local` password login until then. Pompey does not copy the Plex token back into Home Assistant options. Source URL/key are for Prowlarr; they are not part of that wizard.
 
 | Option | Meaning |
 | --- | --- |
