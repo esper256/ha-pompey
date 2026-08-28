@@ -3,6 +3,7 @@
 ## 0.2.19
 
 - **Home Assistant options are gone.** `plex_url`, `plex_token`, `source_url`, and `source_key` were leftovers: Plex is Seerr's first-run wizard, sources are Prowlarr on :9696, Proton is paste on the wait screen. `config.yaml` now has empty `options` / `schema`. Re-add a field only when the household must answer it in Home Assistant. Supervisor still writes `{}` to `/data/options.json`. Rebuild so the banner says **0.2.19**.
+- CI now runs a **local WireGuard client and server** (generated keys, no Proton) through `apply-vpn-config` and `wg-quick`, so the next “line unrecognized” / resolvconf / sysctl rollback is caught without an HAOS reinstall. No addon rebuild required for this test-only change.
 
 ## 0.2.18
 

@@ -179,6 +179,7 @@ if iface < 0 or table < 0 or table < iface or (peer >= 0 and table > peer):
     print(text, file=sys.stderr)
     raise SystemExit(1)
 PY
+python3 "${ROOT}/tests/lib/wg_quick_contract.py" "${POMPEY_WG_CONF}"
 grep -q "DNS = 10.2.0.1" "${POMPEY_CONFIG}/wireguard/wg0.conf"
 grep -q "10.0.0.0/8" "${POMPEY_LAN_FILE}"
 grep -q "185.159.157.1" "${IPTABLES_LOG}"
