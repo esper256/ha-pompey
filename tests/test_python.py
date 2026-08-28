@@ -351,6 +351,8 @@ class Helpers(unittest.TestCase):
         self.assertIn("setup/proton", html)
         self.assertIn("need_proton", html)
         self.assertIn("Paste the Proton WireGuard file", html)
+        self.assertIn("lastSig", html)
+        self.assertIn("protonSubmitted", html)
 
     def test_ha_store_icon_is_square_logo_is_wide(self):
         icon = ROOT / "pompey/icon.png"
@@ -662,6 +664,31 @@ class ProtonSetup(unittest.TestCase):
         )
         data = json.loads((ready / "status.json").read_text())
         self.assertTrue(data["need_proton"])
+
+        env.pop("POMPEY_STATUS_NEED_PROTON", None)
+        subprocess.run(
+            [sys.executable, str(BIN / "pompey-status"), "start", "Waiting for hidden engines", "65"],
+            check=True,
+            env=env,
+        )
+        stuck = json.loads((ready / "status.json").read_text())
+        self.assertTrue(stuck["need_proton"])
+        self.assertEqual(stuck["step"], "vpn")
+        self.assertIn("Paste", stuck["label"])
+        self.assertEqual(
+            [item["state"] for item in stuck["steps"] if item["id"] in ("vpn", "fetch", "start")],
+            ["active", "pending", "pending"],
+        )
+
+        env["POMPEY_STATUS_NEED_PROTON"] = "0"
+        subprocess.run(
+            [sys.executable, str(BIN / "pompey-status"), "vpn", "Bringing up the Proton tunnel", "10"],
+            check=True,
+            env=env,
+        )
+        cleared = json.loads((ready / "status.json").read_text())
+        self.assertFalse(cleared["need_proton"])
+        self.assertEqual(cleared["label"], "Bringing up the Proton tunnel")
 
 
 class TestsNeverUseBitTorrent(unittest.TestCase):

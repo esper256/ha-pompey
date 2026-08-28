@@ -12,7 +12,7 @@ if [[ "${POMPEY_FAKE_VPN:-}" == "1" ]]; then
   bashio::log.info "Fake wg0 (agent/dev): not Proton"
   pompey-status vpn "Bringing up fake wg0" 10 || true
   pompey-dev-vpn up
-  pompey-status vpn "Fake wg0 is up" 15 || true
+  POMPEY_STATUS_NEED_PROTON=0 pompey-status vpn "Fake wg0 is up" 15 || true
   wait-for-vpn 10
   while wait-for-vpn 1; do
     sleep 30
@@ -28,7 +28,7 @@ until apply-vpn-config; do
 done
 
 bashio::log.info "Bringing up wg0"
-pompey-status vpn "Bringing up the Proton tunnel" 10 || true
+POMPEY_STATUS_NEED_PROTON=0 pompey-status vpn "Bringing up the Proton tunnel" 10 || true
 if ! wg-quick up wg0; then
   bashio::log.warning "Kernel WireGuard failed; trying wireguard-go"
   export WG_QUICK_USERSPACE_IMPLEMENTATION=wireguard-go

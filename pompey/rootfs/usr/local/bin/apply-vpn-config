@@ -77,4 +77,5 @@ else
 fi
 
 touch "${APPLIED}"
+POMPEY_STATUS_NEED_PROTON=0 pompey-status vpn "Starting the Proton tunnel" 10 || true
 exit 0

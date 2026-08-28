@@ -1,6 +1,6 @@
 # https://developers.home-assistant.io/docs/apps/configuration
 name: Pompey
-version: "0.2.3"
+version: "0.2.4"
 slug: pompey
 description: >-
   Search for a movie or TV show. Confirm if we need you. It lands in the
