@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# Record iptables/ip6tables invocations. -C fails so the chain is inserted.
+set -euo pipefail
+log="${IPTABLES_LOG:-/tmp/pompey-iptables.log}"
+printf '%s %s\n' "${0##*/}" "$*" >>"${log}"
+if [[ " $* " == *" -C "* ]]; then
+  exit 1
+fi
+exit 0

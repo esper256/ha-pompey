@@ -1,0 +1,94 @@
+#!/command/with-contenv bashio
+# shellcheck shell=bash
+# Download official engine artifacts after the tunnel is up.
+set -euo pipefail
+# shellcheck source=/dev/null
+source "$(command -v pompey-env)"
+
+arch_cpu="$(uname -m)"
+case "${arch_cpu}" in
+  aarch64|arm64)
+    servarr_arch="arm64"
+    qbit_arch="aarch64"
+    crane_platform="linux/arm64"
+    ;;
+  *)
+    servarr_arch="x64"
+    qbit_arch="x86_64"
+    crane_platform="linux/amd64"
+    ;;
+esac
+
+fetch_tarball() {
+  local name="$1"
+  local url="$2"
+  local dest="${POMPEY_ENGINES}/${name}"
+  if [[ -x "${dest}/${name}" ]]; then
+    bashio::log.info "${name} already present"
+    return 0
+  fi
+
+  bashio::log.info "Downloading hidden engines"
+  pompey-status fetch "Downloading hidden engines" 35 || true
+  local tmp
+  tmp="$(mktemp -d)"
+  curl -fsSL --retry 3 --retry-delay 2 -o "${tmp}/app.tar.gz" "${url}"
+  tar -xzf "${tmp}/app.tar.gz" -C "${tmp}"
+  local inner
+  inner="$(find "${tmp}" -mindepth 1 -maxdepth 1 -type d | head -n1)"
+  if [[ -z "${inner}" || ! -x "${inner}/${name}" ]]; then
+    rm -rf "${tmp}"
+    bashio::exit.nok "Failed to unpack ${name}"
+  fi
+  rm -rf "${dest}"
+  mv "${inner}" "${dest}"
+  chmod -R a+rX "${dest}"
+  rm -rf "${tmp}"
+}
+
+fetch_qbit() {
+  local dest="${POMPEY_ENGINES}/qbittorrent-nox"
+  if [[ -x "${dest}" ]]; then
+    bashio::log.info "qBittorrent-nox already present"
+    return 0
+  fi
+  bashio::log.info "Downloading the download engine"
+  pompey-status fetch "Downloading the download engine" 45 || true
+  curl -fsSL --retry 3 --retry-delay 2 -o "${dest}" \
+    "https://github.com/userdocs/qbittorrent-nox-static/releases/latest/download/${qbit_arch}-qbittorrent-nox"
+  chmod 755 "${dest}"
+}
+
+fetch_seerr() {
+  local dest="${POMPEY_ENGINES}/seerr"
+  if [[ -f "${dest}/app/dist/index.js" ]]; then
+    bashio::log.info "Seerr already present"
+    return 0
+  fi
+  bashio::log.info "Unpacking the household UI"
+  pompey-status fetch "Downloading the household UI" 55 || true
+  local tmp
+  tmp="$(mktemp -d)"
+  crane export --platform "${crane_platform}" ghcr.io/seerr-team/seerr:latest | tar -x -C "${tmp}"
+  if [[ ! -f "${tmp}/app/dist/index.js" ]]; then
+    rm -rf "${tmp}"
+    bashio::exit.nok "Seerr image did not contain /app/dist/index.js"
+  fi
+  rm -rf "${dest}"
+  mv "${tmp}" "${dest}"
+  mkdir -p "${POMPEY_CONFIG}/seerr"
+  touch "${POMPEY_CONFIG}/seerr/DOCKER"
+  rm -rf "${dest}/app/config"
+  ln -sfn "${POMPEY_CONFIG}/seerr" "${dest}/app/config"
+}
+
+fetch_tarball "Prowlarr" \
+  "https://prowlarr.servarr.com/v1/update/master/updatefile?os=linuxmusl&runtime=netcore&arch=${servarr_arch}"
+fetch_tarball "Sonarr" \
+  "https://services.sonarr.tv/v1/download/main/latest?version=4&os=linuxmusl&arch=${servarr_arch}"
+fetch_tarball "Radarr" \
+  "https://radarr.servarr.com/v1/update/master/updatefile?os=linuxmusl&runtime=netcore&arch=${servarr_arch}"
+fetch_qbit
+fetch_seerr
+
+bashio::log.info "Engines ready under ${POMPEY_ENGINES}"

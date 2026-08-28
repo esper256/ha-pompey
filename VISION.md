@@ -69,4 +69,4 @@ Hardware: this stack wants a few GB of RAM on top of Home Assistant. A 2 GB Pi i
 
 ## This repo
 
-`pompey/` is the Home Assistant app for the whole stack. Right now: Proton handshake, kill switch, and a placeholder screen. Next: fetch and wire Seerr as Ingress, engines on localhost.
+`pompey/` is the Home Assistant app for the whole stack. `0.2.0` is the first stab: Proton handshake, kill switch, then a runtime fetch of Seerr (Ingress) and the hidden engines on localhost. Recyclarr/TRaSH quality profiles are not in this cut — engines use their defaults.

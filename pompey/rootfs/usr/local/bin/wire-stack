@@ -1,0 +1,581 @@
+#!/usr/bin/env python3
+"""Wire localhost engines and Seerr. Idempotent. Secrets never logged."""
+from __future__ import annotations
+
+import json
+import os
+import shutil
+import subprocess
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+
+def secrets_path() -> str:
+    return os.environ.get("POMPEY_SECRETS", "/data/pompey/secrets.json")
+
+
+def ready_dir() -> str:
+    return os.environ.get("POMPEY_READY", "/tmp/pompey")
+
+
+def wait_tries() -> int:
+    return int(os.environ.get("POMPEY_WAIT_TRIES", "90"))
+
+
+def wait_sleep() -> float:
+    return float(os.environ.get("POMPEY_WAIT_SLEEP", "2"))
+
+
+def env(name: str, default: str = "") -> str:
+    return os.environ.get(name, default).strip()
+
+
+def media_root() -> str:
+    return env("MEDIA_ROOT", "/media").rstrip("/")
+
+
+def plex_url() -> str:
+    return env("PLEX_URL")
+
+
+def plex_token() -> str:
+    return env("PLEX_TOKEN")
+
+
+def indexer_url() -> str:
+    return env("INDEXER_URL")
+
+
+def indexer_api_key() -> str:
+    return env("INDEXER_API_KEY")
+
+
+def qbit_url() -> str:
+    return env("QBIT_URL", "http://127.0.0.1:8080").rstrip("/")
+
+
+def sonarr_url() -> str:
+    return env("SONARR_URL", "http://127.0.0.1:8989").rstrip("/")
+
+
+def radarr_url() -> str:
+    return env("RADARR_URL", "http://127.0.0.1:7878").rstrip("/")
+
+
+def prowlarr_url() -> str:
+    return env("PROWLARR_URL", "http://127.0.0.1:9696").rstrip("/")
+
+
+def seerr_url() -> str:
+    return env("SEERR_URL", "http://127.0.0.1:5055").rstrip("/")
+
+# Seerr: REQUEST + AUTO_APPROVE + AUTO_APPROVE_MOVIE + AUTO_APPROVE_TV
+SEERR_HOUSEHOLD_PERMS = 32 + 128 + 256 + 512
+
+
+def log(msg: str) -> None:
+    print(f"[wire-stack] {msg}", flush=True)
+
+
+def mark_status(step: str, label: str, percent: int, error: str = "") -> None:
+    script = shutil.which("pompey-status")
+    if not script:
+        return
+    cmd = [script, step, label, str(percent)]
+    if error:
+        cmd.append(error)
+    subprocess.run(cmd, check=False)
+
+
+def load_secrets() -> dict:
+    with open(secrets_path(), encoding="utf-8") as fh:
+        return json.load(fh)
+
+
+def http(method: str, url: str, body=None, headers=None, timeout=30):
+    data = None
+    hdrs = dict(headers or {})
+    if body is not None:
+        if isinstance(body, (bytes, bytearray)):
+            data = body
+            hdrs.setdefault("Content-Type", "application/x-www-form-urlencoded")
+        elif isinstance(body, str):
+            data = body.encode()
+        else:
+            data = json.dumps(body).encode()
+            hdrs.setdefault("Content-Type", "application/json")
+    req = urllib.request.Request(url, data=data, method=method, headers=hdrs)
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            raw = resp.read()
+            if not raw:
+                return None
+            text = raw.decode(errors="replace")
+            try:
+                return json.loads(text)
+            except json.JSONDecodeError:
+                return text
+    except urllib.error.HTTPError as exc:
+        err = exc.read().decode(errors="replace")
+        raise RuntimeError(f"{method} {url} -> {exc.code} {err[:300]}") from exc
+
+
+def wait_http(url: str, tries: int | None = None):
+    last = None
+    n = wait_tries() if tries is None else tries
+    for _ in range(n):
+        try:
+            req = urllib.request.Request(url, method="GET")
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                return resp.read()
+        except urllib.error.HTTPError as exc:
+            if exc.code < 500:
+                return b""
+            last = exc
+        except Exception as exc:  # noqa: BLE001
+            last = exc
+        time.sleep(wait_sleep())
+    raise RuntimeError(f"timeout {url}: {last}")
+
+
+def arr_headers(api_key: str) -> dict:
+    return {"X-Api-Key": api_key, "Content-Type": "application/json"}
+
+
+def ensure_root_folder(base: str, api_key: str, path: str) -> None:
+    existing = http("GET", f"{base}/rootfolder", headers=arr_headers(api_key)) or []
+    if any(item.get("path", "").rstrip("/") == path.rstrip("/") for item in existing):
+        return
+    http("POST", f"{base}/rootfolder", {"path": path}, headers=arr_headers(api_key))
+    log(f"root folder {path}")
+
+
+def schema_impl(schema, name: str):
+    for item in schema or []:
+        if item.get("implementation") == name:
+            return json.loads(json.dumps(item))
+    raise RuntimeError(f"schema missing {name}")
+
+
+def fill_fields(resource: dict, values: dict) -> dict:
+    for field in resource.get("fields") or []:
+        n = field.get("name")
+        if n in values:
+            field["value"] = values[n]
+    return resource
+
+
+def ensure_download_client(base: str, api_key: str, secrets: dict, kind: str) -> None:
+    existing = http("GET", f"{base}/downloadclient", headers=arr_headers(api_key)) or []
+    if any(item.get("implementation") == "QBittorrent" for item in existing):
+        return
+    schema = http("GET", f"{base}/downloadclient/schema", headers=arr_headers(api_key))
+    client = schema_impl(schema, "QBittorrent")
+    cat = "radarr" if kind == "radarr" else "sonarr"
+    values = {
+        "host": "127.0.0.1",
+        "port": 8080,
+        "username": secrets["qbit_user"],
+        "password": secrets["qbit_password"],
+        "movieCategory": cat,
+        "tvCategory": cat,
+        "category": cat,
+        "useSsl": False,
+    }
+    fill_fields(client, values)
+    client["name"] = "qBittorrent"
+    client["enable"] = True
+    client["priority"] = 1
+    http("POST", f"{base}/downloadclient", client, headers=arr_headers(api_key))
+    log(f"{kind} download client")
+
+
+def first_profile(base: str, api_key: str):
+    profiles = http("GET", f"{base}/qualityprofile", headers=arr_headers(api_key)) or []
+    if not profiles:
+        raise RuntimeError(f"no quality profiles at {base}")
+    return int(profiles[0]["id"]), profiles[0].get("name") or "Default"
+
+
+def language_profile_id(base: str, api_key: str):
+    try:
+        langs = http("GET", f"{base}/languageprofile", headers=arr_headers(api_key)) or []
+    except Exception:  # noqa: BLE001
+        return None
+    if not langs:
+        return None
+    return int(langs[0]["id"])
+
+
+def ensure_prowlarr_app(prowlarr: str, pkey: str, name: str, impl: str, base_url: str, api_key: str) -> None:
+    apps = http("GET", f"{prowlarr}/api/v1/applications", headers=arr_headers(pkey)) or []
+    if any(a.get("name") == name for a in apps):
+        return
+    schema = http("GET", f"{prowlarr}/api/v1/applications/schema", headers=arr_headers(pkey))
+    app = schema_impl(schema, impl)
+    fill_fields(
+        app,
+        {
+            "prowlarrUrl": f"{prowlarr_url()}",
+            "baseUrl": base_url,
+            "apiKey": api_key,
+        },
+    )
+    app["name"] = name
+    app["syncLevel"] = "fullSync"
+    http("POST", f"{prowlarr}/api/v1/applications", app, headers=arr_headers(pkey))
+    log(f"prowlarr app {name}")
+
+
+def ensure_indexer(prowlarr: str, pkey: str) -> None:
+    if not indexer_url():
+        log("no source URL configured yet")
+        return
+    indexers = http("GET", f"{prowlarr}/api/v1/indexer", headers=arr_headers(pkey)) or []
+    if indexers:
+        return
+    schema = http("GET", f"{prowlarr}/api/v1/indexer/schema", headers=arr_headers(pkey))
+    impl = "Newznab" if "newznab" in indexer_url().lower() else "Torznab"
+    try:
+        indexer = schema_impl(schema, impl)
+    except RuntimeError:
+        indexer = schema_impl(schema, "Newznab" if impl == "Torznab" else "Torznab")
+    fill_fields(
+        indexer,
+        {
+            "baseUrl": indexer_url().rstrip("/"),
+            "apiPath": "/api",
+            "apiKey": indexer_api_key(),
+        },
+    )
+    indexer["name"] = "Source"
+    indexer["enable"] = True
+    indexer["priority"] = 25
+    indexer["appProfileId"] = 1
+    indexer["tags"] = []
+    http("POST", f"{prowlarr}/api/v1/indexer", indexer, headers=arr_headers(pkey))
+    log("added source")
+
+
+def qbit_category(name: str) -> None:
+    data = urllib.parse.urlencode({"category": name, "savePath": ""}).encode()
+    try:
+        http("POST", f"{qbit_url()}/api/v2/torrents/createCategory", data)
+        log(f"qbit category {name}")
+    except RuntimeError as exc:
+        if "409" not in str(exc) and "already" not in str(exc).lower():
+            log(f"qbit category {name}: {exc}")
+
+
+class Seerr:
+    def __init__(self, base: str | None = None):
+        self.base = (base or seerr_url()).rstrip("/")
+        self.cookie = ""
+        self.api_key = ""
+
+    def _headers(self) -> dict:
+        headers = {"Content-Type": "application/json"}
+        if self.cookie:
+            headers["Cookie"] = self.cookie
+        if self.api_key:
+            headers["X-Api-Key"] = self.api_key
+        return headers
+
+    def call(self, method: str, path: str, body=None):
+        req = urllib.request.Request(
+            self.base + path,
+            data=None if body is None else json.dumps(body).encode(),
+            method=method,
+            headers=self._headers(),
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=45) as resp:
+                cookies = []
+                if hasattr(resp.headers, "get_all"):
+                    cookies = resp.headers.get_all("Set-Cookie") or []
+                elif resp.headers.get("Set-Cookie"):
+                    cookies = [resp.headers.get("Set-Cookie")]
+                for cookie in cookies:
+                    self.cookie = cookie.split(";", 1)[0]
+                raw = resp.read()
+                if not raw:
+                    return None
+                text = raw.decode(errors="replace")
+                try:
+                    return json.loads(text)
+                except json.JSONDecodeError:
+                    return text
+        except urllib.error.HTTPError as exc:
+            err = exc.read().decode(errors="replace")
+            raise RuntimeError(f"seerr {method} {path} -> {exc.code} {err[:400]}") from exc
+
+
+def parse_plex(url: str):
+    u = urllib.parse.urlparse(url)
+    host = u.hostname or "127.0.0.1"
+    port = u.port or (443 if u.scheme == "https" else 32400)
+    ssl = u.scheme == "https"
+    return host, port, ssl
+
+
+def pick_plex_server(servers, host: str):
+    candidates = []
+    for srv in servers or []:
+        provides = srv.get("provides") or []
+        if isinstance(provides, str):
+            provides = [provides]
+        if "server" not in provides and provides:
+            continue
+        candidates.append(srv)
+    owned = [s for s in candidates if s.get("owned")]
+    pool = owned or candidates
+    host_l = (host or "").lower()
+    for srv in pool:
+        for conn in srv.get("connection") or srv.get("connections") or []:
+            addr = (conn.get("address") or "").lower()
+            if addr == host_l:
+                return srv
+    return pool[0] if pool else None
+
+
+def configure_seerr(secrets: dict, radarr_profile, sonarr_profile, sonarr_lang) -> None:
+    s = Seerr()
+    for _ in range(wait_tries()):
+        try:
+            s.call("GET", "/api/v1/settings/public")
+            break
+        except Exception:  # noqa: BLE001
+            time.sleep(wait_sleep())
+    else:
+        raise RuntimeError("Seerr never became ready")
+
+    if not plex_url() or not plex_token():
+        log("Plex URL/token missing; Seerr setup wizard will be used")
+        return
+
+    try:
+        s.call("POST", "/api/v1/auth/plex", {"authToken": plex_token()})
+        log("seerr signed in with Plex token")
+    except RuntimeError as exc:
+        log(f"seerr plex login: {exc}")
+        return
+
+    try:
+        main = s.call("GET", "/api/v1/settings/main") or {}
+        if isinstance(main, dict) and main.get("apiKey"):
+            s.api_key = main["apiKey"]
+    except RuntimeError as exc:
+        log(f"seerr api key: {exc}")
+
+    host, port, ssl = parse_plex(plex_url())
+    try:
+        servers = s.call("GET", "/api/v1/settings/plex/devices/servers") or []
+        chosen = pick_plex_server(servers, host)
+        payload = {
+            "ip": host,
+            "port": port,
+            "useSsl": ssl,
+            "webAppUrl": plex_url().rstrip("/"),
+        }
+        if chosen:
+            payload["name"] = chosen.get("name") or "Plex"
+            payload["machineId"] = chosen.get("clientIdentifier") or ""
+        else:
+            payload["name"] = "Plex"
+            payload["machineId"] = "unknown"
+        s.call("POST", "/api/v1/settings/plex", payload)
+        log("plex settings")
+    except RuntimeError as exc:
+        log(f"plex settings: {exc}")
+
+    try:
+        s.call("POST", "/api/v1/settings/plex/library/sync")
+        libs = s.call("GET", "/api/v1/settings/plex/library") or []
+        for lib in libs:
+            lib_id = lib.get("id")
+            if not lib_id:
+                continue
+            try:
+                s.call("PUT", f"/api/v1/settings/plex/library/{lib_id}", {"enabled": True})
+            except RuntimeError:
+                pass
+        log("plex libraries enabled")
+    except RuntimeError as exc:
+        log(f"plex libraries: {exc}")
+
+    radarr_id, radarr_name = radarr_profile
+    sonarr_id, sonarr_name = sonarr_profile
+    radarr_payload = {
+        "name": "Radarr",
+        "hostname": "127.0.0.1",
+        "port": 7878,
+        "apiKey": secrets["radarr_api_key"],
+        "useSsl": False,
+        "activeProfileId": radarr_id,
+        "activeProfileName": radarr_name,
+        "activeDirectory": f"{media_root()}/Movies",
+        "isDefault": True,
+        "is4k": False,
+        "minimumAvailability": "released",
+        "syncEnabled": True,
+        "preventSearch": False,
+        "tagRequests": True,
+    }
+    sonarr_payload = {
+        "name": "Sonarr",
+        "hostname": "127.0.0.1",
+        "port": 8989,
+        "apiKey": secrets["sonarr_api_key"],
+        "useSsl": False,
+        "activeProfileId": sonarr_id,
+        "activeProfileName": sonarr_name,
+        "activeDirectory": f"{media_root()}/TV",
+        "isDefault": True,
+        "is4k": False,
+        "enableSeasonFolders": True,
+        "syncEnabled": True,
+        "preventSearch": False,
+        "tagRequests": True,
+    }
+    if sonarr_lang is not None:
+        sonarr_payload["activeLanguageProfileId"] = sonarr_lang
+
+    def upsert_arr(kind: str, payload: dict) -> None:
+        path = f"/api/v1/settings/{kind}"
+        try:
+            existing = s.call("GET", path) or []
+        except RuntimeError:
+            existing = []
+        if any(item.get("hostname") == "127.0.0.1" for item in existing):
+            return
+        s.call("POST", path, payload)
+        log(f"seerr {kind}")
+
+    try:
+        upsert_arr("radarr", radarr_payload)
+    except RuntimeError as exc:
+        log(f"seerr radarr: {exc}")
+    try:
+        upsert_arr("sonarr", sonarr_payload)
+    except RuntimeError as exc:
+        log(f"seerr sonarr: {exc}")
+
+    try:
+        s.call(
+            "POST",
+            "/api/v1/settings/main",
+            {
+                "applicationTitle": "Pompey",
+                "applicationUrl": "",
+                "defaultPermissions": SEERR_HOUSEHOLD_PERMS,
+                "hideAvailable": False,
+                "localLogin": True,
+                "newPlexLogin": True,
+            },
+        )
+    except RuntimeError as exc:
+        log(f"seerr main settings: {exc}")
+
+    try:
+        s.call("POST", "/api/v1/settings/network", {"trustProxy": True})
+    except RuntimeError as exc:
+        log(f"seerr network: {exc}")
+
+    try:
+        public = s.call("GET", "/api/v1/settings/public") or {}
+        if not (isinstance(public, dict) and public.get("initialized")):
+            s.call("POST", "/api/v1/settings/initialize")
+            log("seerr initialized")
+    except RuntimeError as exc:
+        log(f"seerr initialize: {exc}")
+
+
+def reload_nginx() -> None:
+    port = os.environ.get("INGRESS_PORT", "8099")
+    conf = f"""server {{
+    listen {port} default_server;
+    allow 172.30.32.2;
+    deny all;
+    client_max_body_size 0;
+
+    location / {{
+        proxy_pass {seerr_url()};
+        proxy_http_version 1.1;
+        proxy_set_header Host $http_host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-Host $http_host;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
+        proxy_set_header X-Forwarded-Prefix $http_x_ingress_path;
+        proxy_read_timeout 86400;
+        proxy_buffering off;
+    }}
+}}
+"""
+    path = os.environ.get("NGINX_INGRESS_CONF", "/etc/nginx/http.d/ingress.conf")
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write(conf)
+    os.system("nginx -s reload >/dev/null 2>&1 || true")
+    log("ingress now proxies Seerr")
+
+
+def main() -> int:
+    secrets = load_secrets()
+    wait_http(f"{qbit_url()}/api/v2/app/version")
+    wait_http(f"{prowlarr_url()}/ping")
+    wait_http(f"{sonarr_url()}/ping")
+    wait_http(f"{radarr_url()}/ping")
+
+    sonarr = f"{sonarr_url()}/api/v3"
+    radarr = f"{radarr_url()}/api/v3"
+    prowlarr = prowlarr_url()
+    sk, rk, pk = secrets["sonarr_api_key"], secrets["radarr_api_key"], secrets["prowlarr_api_key"]
+
+    qbit_category("sonarr")
+    qbit_category("radarr")
+    ensure_root_folder(sonarr, sk, f"{media_root()}/TV")
+    ensure_root_folder(sonarr, sk, f"{media_root()}/Kid Friendly TV")
+    ensure_root_folder(radarr, rk, f"{media_root()}/Movies")
+    ensure_root_folder(radarr, rk, f"{media_root()}/Kid Friendly Movies")
+    ensure_download_client(sonarr, sk, secrets, "sonarr")
+    ensure_download_client(radarr, rk, secrets, "radarr")
+    try:
+        ensure_prowlarr_app(prowlarr, pk, "Sonarr", "Sonarr", sonarr_url(), sk)
+        ensure_prowlarr_app(prowlarr, pk, "Radarr", "Radarr", radarr_url(), rk)
+    except RuntimeError as exc:
+        log(f"prowlarr apps: {exc}")
+    try:
+        ensure_indexer(prowlarr, pk)
+    except RuntimeError as exc:
+        log(f"source: {exc}")
+
+    sp = first_profile(sonarr, sk)
+    rp = first_profile(radarr, rk)
+    sl = language_profile_id(sonarr, sk)
+
+    os.makedirs(ready_dir(), exist_ok=True)
+    open(os.path.join(ready_dir(), "arr-wired"), "w").close()
+
+    configure_seerr(secrets, rp, sp, sl)
+    mark_status("ready", "Ready", 100)
+    reload_nginx()
+    open(os.path.join(ready_dir(), "wired"), "w").close()
+    log("done")
+    return 0
+
+
+if __name__ == "__main__":
+    try:
+        raise SystemExit(main())
+    except Exception as exc:  # noqa: BLE001
+        log(str(exc))
+        mark_status(
+            "wire",
+            "Could not finish connecting search",
+            80,
+            str(exc)[:240],
+        )
+        raise SystemExit(1)

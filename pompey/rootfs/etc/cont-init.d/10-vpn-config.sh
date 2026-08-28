@@ -1,11 +1,15 @@
 #!/command/with-contenv bashio
 # shellcheck shell=bash
 set -euo pipefail
+# shellcheck source=/dev/null
+source "$(command -v pompey-env)"
 
 CONF_NAME="$(bashio::config 'wireguard_config')"
-SRC="/config/wireguard/${CONF_NAME}"
-DST=/etc/wireguard/wg0.conf
+SRC="${POMPEY_CONFIG}/wireguard/${CONF_NAME}"
+DST="${POMPEY_WG_CONF}"
 DNS="$(bashio::config 'wireguard_dns')"
+
+mkdir -p "$(dirname "${DST}")" "$(dirname "${POMPEY_LAN_FILE}")" "$(dirname "${POMPEY_RESOLV}")"
 
 if [[ -s "${SRC}" ]]; then
   tr -d '\r' < "${SRC}" > "${DST}"
@@ -29,8 +33,8 @@ fi
 chmod 600 "${DST}"
 
 # Proton DNS lives on the tunnel. Fail closed if wg0 is down.
-printf 'nameserver %s\n' "${DNS}" >/etc/resolv.conf
+printf 'nameserver %s\n' "${DNS}" >"${POMPEY_RESOLV}"
 
-printf '%s\n' "$(bashio::config 'lan_networks')" >/etc/pompey-lan-networks
+printf '%s\n' "$(bashio::config 'lan_networks')" >"${POMPEY_LAN_FILE}"
 vpn-killswitch "${DST}"
 bashio::log.info "iptables kill switch applied (internet OUTPUT only via wg0 once it exists)"

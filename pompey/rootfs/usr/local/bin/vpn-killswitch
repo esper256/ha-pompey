@@ -4,15 +4,24 @@
 # Allowed: loopback, wg0, established, HA/LAN CIDRs, UDP handshake to Proton.
 set -euo pipefail
 
-WG_CONF="${1:-/etc/wireguard/wg0.conf}"
-LAN_FILE=/etc/pompey-lan-networks
+WG_CONF="${1:-${POMPEY_WG_CONF:-/etc/wireguard/wg0.conf}}"
+LAN_FILE="${POMPEY_LAN_FILE:-/etc/pompey-lan-networks}"
 HASS_NET="172.30.32.0/23"
 
 if [[ ! -f "${WG_CONF}" ]]; then
   bashio::exit.nok "vpn-killswitch: missing ${WG_CONF}"
 fi
 
-ENDPOINT="$(awk -F'= *' 'tolower($1) ~ /^endpoint$/ { gsub(/ /,"",$2); print $2; exit }' "${WG_CONF}")"
+ENDPOINT="$(awk -F'=' '{
+  key=$1
+  gsub(/[[:space:]]/, "", key)
+  if (tolower(key) == "endpoint") {
+    val=$2
+    gsub(/[[:space:]]/, "", val)
+    print val
+    exit
+  }
+}' "${WG_CONF}")"
 ENDPOINT_IP="${ENDPOINT%%:*}"
 ENDPOINT_PORT="${ENDPOINT##*:}"
 if [[ -z "${ENDPOINT_IP}" || -z "${ENDPOINT_PORT}" || "${ENDPOINT_IP}" == "${ENDPOINT_PORT}" ]]; then

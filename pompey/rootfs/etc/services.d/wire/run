@@ -1,0 +1,39 @@
+#!/command/with-contenv bashio
+# shellcheck shell=bash
+set -euo pipefail
+# shellcheck source=/dev/null
+source "$(command -v pompey-env)"
+
+until [[ -f "${POMPEY_READY}/engines-ready" ]]; do
+  pompey-status start "Waiting for hidden engines" 65 || true
+  sleep 2
+done
+
+pompey-status wire "Connecting search to your library" 80 || true
+
+wait-for-http http://127.0.0.1:8080/api/v2/app/version 90 || true
+wait-for-http http://127.0.0.1:9696/ping 90
+wait-for-http http://127.0.0.1:8989/ping 90
+wait-for-http http://127.0.0.1:7878/ping 90
+
+export POMPEY_SECRETS MEDIA_ROOT
+export PLEX_URL="$(bashio::config 'plex_url')"
+export PLEX_TOKEN="$(bashio::config 'plex_token')"
+export INDEXER_URL="$(bashio::config 'indexer_url')"
+export INDEXER_API_KEY="$(bashio::config 'indexer_api_key')"
+export INGRESS_PORT="$(bashio::addon.ingress_port)"
+
+# Retry until Seerr is up and wiring succeeds.
+i=0
+until python3 /usr/local/bin/wire-stack; do
+  i=$((i + 1))
+  if [[ "${i}" -ge 30 ]]; then
+    bashio::log.error "Wiring failed; household UI may stay on the wait screen"
+    pompey-status wire "Could not finish connecting search" 80 "Engines started but wiring failed. Check Plex address/token and the source URL." || true
+    exec sleep infinity
+  fi
+  bashio::log.warning "Wiring not ready yet (attempt ${i})"
+  sleep 8
+done
+
+exec sleep infinity

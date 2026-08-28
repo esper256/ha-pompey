@@ -7,6 +7,7 @@ if [[ ! -f /etc/wireguard/wg0.conf ]]; then
 fi
 
 bashio::log.info "Bringing up wg0"
+pompey-status vpn "Bringing up the Proton tunnel" 10 || true
 if ! wg-quick up wg0; then
   bashio::log.warning "Kernel WireGuard failed; trying wireguard-go"
   export WG_QUICK_USERSPACE_IMPLEMENTATION=wireguard-go
@@ -17,6 +18,7 @@ fi
 printf 'nameserver %s\n' "$(bashio::config 'wireguard_dns')" >/etc/resolv.conf
 
 bashio::log.info "Waiting for Proton handshake on wg0"
+pompey-status vpn "Waiting for Proton handshake" 15 || true
 wait-for-vpn 45
 
 # Stay in the foreground. A stale handshake is a crash (kill switch).

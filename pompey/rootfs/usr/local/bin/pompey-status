@@ -1,0 +1,95 @@
+#!/usr/bin/env python3
+"""Write household-facing boot status for the wait screen."""
+from __future__ import annotations
+
+import json
+import os
+import sys
+import time
+
+STATUS_PATH = os.environ.get("POMPEY_STATUS", "")
+READY = os.environ.get("POMPEY_READY", "/tmp/pompey")
+if not STATUS_PATH:
+    STATUS_PATH = os.path.join(READY, "status.json")
+
+STEPS = (
+    ("vpn", "Proton tunnel"),
+    ("fetch", "Download household UI and engines"),
+    ("start", "Start hidden engines"),
+    ("wire", "Connect search to your library"),
+    ("ready", "Ready"),
+)
+
+
+def load() -> dict:
+    if os.path.isfile(STATUS_PATH) and os.path.getsize(STATUS_PATH) > 0:
+        try:
+            with open(STATUS_PATH, encoding="utf-8") as fh:
+                return json.load(fh)
+        except json.JSONDecodeError:
+            pass
+    return {
+        "updated": 0,
+        "step": "vpn",
+        "label": "Starting",
+        "percent": 5,
+        "error": "",
+        "steps": [{"id": i, "label": lab, "state": "pending"} for i, lab in STEPS],
+    }
+
+
+def save(data: dict) -> None:
+    os.makedirs(os.path.dirname(STATUS_PATH) or ".", exist_ok=True)
+    tmp = STATUS_PATH + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as fh:
+        json.dump(data, fh, indent=2)
+        fh.write("\n")
+    os.replace(tmp, STATUS_PATH)
+
+
+def main(argv: list[str]) -> int:
+    if len(argv) < 3:
+        print("usage: pompey-status STEP LABEL [PERCENT] [error message]", file=sys.stderr)
+        return 2
+    step, label = argv[1], argv[2]
+    percent = None
+    error = ""
+    rest = argv[3:]
+    if rest and rest[0].isdigit():
+        percent = int(rest[0])
+        rest = rest[1:]
+    if rest:
+        error = " ".join(rest)
+
+    order = [s[0] for s in STEPS]
+    data = load()
+    data["updated"] = int(time.time())
+    data["step"] = step
+    data["label"] = label
+    data["error"] = error
+    data["handoff"] = bool(step == "ready" and not error)
+    if percent is not None:
+        data["percent"] = max(0, min(100, percent))
+    elif step in order:
+        data["percent"] = int((order.index(step) / (len(order) - 1)) * 100)
+
+    seen = False
+    for item in data.get("steps") or []:
+        sid = item.get("id")
+        if sid == step:
+            item["state"] = "error" if error else ("done" if step == "ready" else "active")
+            seen = True
+        elif not error and step in order and sid in order and order.index(sid) < order.index(step):
+            item["state"] = "done"
+        elif step in order and sid in order and order.index(sid) > order.index(step):
+            item["state"] = "pending"
+    if not seen:
+        data.setdefault("steps", []).append(
+            {"id": step, "label": label, "state": "error" if error else "active"}
+        )
+    save(data)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv))

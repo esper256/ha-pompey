@@ -1,13 +1,17 @@
 #!/command/with-contenv bashio
 # shellcheck shell=bash
 set -euo pipefail
+# shellcheck source=/dev/null
+source "$(command -v pompey-env)"
 
-bashio::log.info "Pompey ${BUILD_VERSION:-0.1.1} starting"
+bashio::log.info "Pompey ${BUILD_VERSION:-0.2.0} starting"
+pompey-status vpn "Starting" 5 || true
 
-mkdir -p /config/wireguard /etc/wireguard /tmp/vpn /run/nginx
-chmod 700 /config/wireguard /etc/wireguard
+mkdir -p "${POMPEY_CONFIG}/wireguard" "${POMPEY_WG_ETC}" "${POMPEY_VPN_TMP}" "${POMPEY_NGINX_RUN}"
+chmod 700 "${POMPEY_CONFIG}/wireguard" "${POMPEY_WG_ETC}"
+pompey-secrets >/dev/null
 
-WG_FILE="/config/wireguard/$(bashio::config 'wireguard_config')"
+WG_FILE="${POMPEY_CONFIG}/wireguard/$(bashio::config 'wireguard_config')"
 HAS_FILE=false
 HAS_FIELDS=false
 
@@ -22,5 +26,18 @@ if bashio::config.has_value 'wireguard_private_key' \
 fi
 
 if [[ "${HAS_FILE}" != "true" && "${HAS_FIELDS}" != "true" ]]; then
+  pompey-status vpn "Need a Proton WireGuard config" 5 "Put a Proton WireGuard file in the app config share, or fill private key, address, peer public key, and endpoint." || true
   bashio::exit.nok "Need a Proton WireGuard config: put it at ${WG_FILE} or fill private key, address, peer public key, and endpoint."
 fi
+
+plex_token="$(bashio::config 'plex_token')"
+if [[ -z "${plex_token}" ]]; then
+  bashio::log.warning "Plex token is empty. Search can still start; you will finish Plex from that screen."
+fi
+
+indexer_url="$(bashio::config 'indexer_url')"
+if [[ -z "${indexer_url}" ]]; then
+  bashio::log.warning "No source URL yet. Add a source (URL plus key) so titles can be found."
+fi
+
+bashio::log.info "After the tunnel is up, Pompey fetches the household UI and hidden engines. First start can take several minutes."

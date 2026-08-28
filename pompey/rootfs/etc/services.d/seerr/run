@@ -1,0 +1,27 @@
+#!/command/with-contenv bashio
+# shellcheck shell=bash
+set -euo pipefail
+# shellcheck source=/dev/null
+source "$(command -v pompey-env)"
+
+until [[ -f "${POMPEY_READY}/engines-ready" ]]; do
+  sleep 2
+done
+
+NODE="${POMPEY_ENGINES}/seerr/usr/local/bin/node"
+APP="${POMPEY_ENGINES}/seerr/app"
+if [[ ! -x "${NODE}" ]]; then
+  NODE="$(find "${POMPEY_ENGINES}/seerr" -type f -name node -perm -111 | head -n1)"
+fi
+if [[ -z "${NODE}" || ! -d "${APP}" ]]; then
+  bashio::exit.nok "Seerr unpack missing node or /app"
+fi
+
+mkdir -p "${POMPEY_CONFIG}/seerr"
+touch "${POMPEY_CONFIG}/seerr/DOCKER"
+ln -sfn "${POMPEY_CONFIG}/seerr" "${APP}/config"
+export NODE_ENV=production
+export PORT=5055
+export CONFIG_DIRECTORY="${POMPEY_CONFIG}/seerr"
+cd "${APP}"
+exec "${NODE}" dist/index.js

@@ -1,0 +1,12 @@
+#!/command/with-contenv bashio
+# shellcheck shell=bash
+set -euo pipefail
+# shellcheck source=/dev/null
+source "$(command -v pompey-env)"
+
+until [[ -f "${POMPEY_READY}/wired" ]]; do
+  sleep 5
+done
+
+export POMPEY_SECRETS MEDIA_ROOT
+exec python3 /usr/local/bin/route-rating

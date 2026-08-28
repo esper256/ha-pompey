@@ -1,0 +1,127 @@
+#!/usr/bin/env python3
+"""Move titles into kid vs general folders from Radarr/Sonarr certification."""
+from __future__ import annotations
+
+import json
+import os
+import time
+import urllib.request
+
+def secrets_path() -> str:
+    return os.environ.get("POMPEY_SECRETS", "/data/pompey/secrets.json")
+
+
+def media_root() -> str:
+    return os.environ.get("MEDIA_ROOT", "/media").rstrip("/")
+
+
+def radarr_url() -> str:
+    return os.environ.get("RADARR_URL", "http://127.0.0.1:7878").rstrip("/")
+
+
+def sonarr_url() -> str:
+    return os.environ.get("SONARR_URL", "http://127.0.0.1:8989").rstrip("/")
+
+KID_MOVIE = {"G", "PG", "PG-13"}
+KID_TV = {"TV-Y", "TV-Y7", "TV-G", "TV-PG"}
+
+
+def log(msg: str) -> None:
+    print(f"[route-rating] {msg}", flush=True)
+
+
+def http_json(method: str, url: str, body=None, headers=None):
+    data = None if body is None else json.dumps(body).encode()
+    hdrs = dict(headers or {})
+    if data is not None:
+        hdrs.setdefault("Content-Type", "application/json")
+    req = urllib.request.Request(url, data=data, method=method, headers=hdrs)
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        raw = resp.read()
+        return json.loads(raw.decode()) if raw else None
+
+
+def headers(key: str) -> dict:
+    return {"X-Api-Key": key}
+
+
+def kid_cert(cert: str, kid_set: set[str]) -> bool:
+    raw = (cert or "").strip()
+    if not raw:
+        return False
+    return raw in kid_set or raw.upper() in kid_set
+
+
+def in_root(path: str, root: str) -> bool:
+    path = (path or "").rstrip("/")
+    root = root.rstrip("/")
+    return path == root or path.startswith(root + "/")
+
+
+def route_movies(key: str) -> None:
+    movies = http_json("GET", f"{radarr_url()}/api/v3/movie", headers=headers(key)) or []
+    kid_root = f"{media_root()}/Kid Friendly Movies"
+    gen_root = f"{media_root()}/Movies"
+    for movie in movies:
+        cert = movie.get("certification") or ""
+        path = movie.get("path") or movie.get("rootFolderPath") or ""
+        if not path:
+            continue
+        want = kid_root if kid_cert(cert, KID_MOVIE) else gen_root
+        if in_root(path, want):
+            continue
+        payload = dict(movie)
+        payload["rootFolderPath"] = want
+        payload["moveFiles"] = True
+        try:
+            http_json(
+                "PUT",
+                f"{radarr_url()}/api/v3/movie/{movie['id']}?moveFiles=true",
+                payload,
+                headers=headers(key),
+            )
+            log(f"movie {movie.get('title')} -> {want} ({cert or 'unknown'})")
+        except Exception as exc:  # noqa: BLE001
+            log(f"movie skip {movie.get('title')}: {exc}")
+
+
+def route_series(key: str) -> None:
+    series = http_json("GET", f"{sonarr_url()}/api/v3/series", headers=headers(key)) or []
+    kid_root = f"{media_root()}/Kid Friendly TV"
+    gen_root = f"{media_root()}/TV"
+    for show in series:
+        cert = show.get("certification") or ""
+        path = show.get("path") or ""
+        if not path:
+            continue
+        want = kid_root if kid_cert(cert, KID_TV) else gen_root
+        if in_root(path, want):
+            continue
+        payload = dict(show)
+        payload["rootFolderPath"] = want
+        payload["moveFiles"] = True
+        try:
+            http_json(
+                "PUT",
+                f"{sonarr_url()}/api/v3/series/{show['id']}?moveFiles=true",
+                payload,
+                headers=headers(key),
+            )
+            log(f"series {show.get('title')} -> {want} ({cert or 'unknown'})")
+        except Exception as exc:  # noqa: BLE001
+            log(f"series skip {show.get('title')}: {exc}")
+
+
+def main() -> None:
+    while True:
+        try:
+            secrets = json.load(open(secrets_path(), encoding="utf-8"))
+            route_movies(secrets["radarr_api_key"])
+            route_series(secrets["sonarr_api_key"])
+        except Exception as exc:  # noqa: BLE001
+            log(str(exc))
+        time.sleep(60)
+
+
+if __name__ == "__main__":
+    main()

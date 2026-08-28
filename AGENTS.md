@@ -8,7 +8,7 @@ Starting `dockerd` in this Cursor VM is **not** how the household runs Pompey, a
 
 In the real world, **Home Assistant Supervisor** is the container host. It builds `pompey/Dockerfile` on the user’s machine and starts **one** addon container. The operator never types `docker`, never starts `dockerd`, and we never publish an image to Docker Hub or GHCR.
 
-In this Cursor VM there is no Supervisor. Starting Docker here is only so an agent can **compile the same Dockerfile** Supervisor will compile (syntax, packages, `COPY` paths). A full `docker run` of that image still dies without bashio + Proton.
+In this Cursor VM there is no Supervisor. Starting Docker here is only so an agent can **compile the same Dockerfile** Supervisor will compile (syntax, packages, `COPY` paths). A full `docker run` of that image still dies without bashio + Proton. Prefer the no-Docker tests below for day-to-day agent work.
 
 ## Real product vs agent testability
 
@@ -17,23 +17,33 @@ In this Cursor VM there is no Supervisor. Starting Docker here is only so an age
 | Who builds the image | Supervisor, from `/addons/pompey` | Optional `docker build`. GitHub Actions Builder does the same compile with `push: false`. |
 | Who starts the container | Supervisor (one container, `NET_ADMIN`, `/dev/net/tun`) | Nobody, unless an agent is checking the Dockerfile. The operator never starts it. |
 | `dockerd` | Already the HAOS host. Not something Pompey starts. | Optional, this VM only. Packages persist; the daemon process does not. |
-| Config | Supervisor writes `/data/options.json` from the app options UI | Supply a fake `/data/options.json` yourself if you need one. Later work uses `tests/options.json`. |
+| Config | Supervisor writes `/data/options.json` from the app options UI | We supply [`tests/options.json`](tests/options.json) ourselves |
 | VPN / internet | All traffic on Proton `wg0`, else dropped | No Proton, no `/dev/net/tun` — the real stack will not boot |
-| What the household sees | Wait screen, then Seerr on Ingress | nginx serving `index.html` here is **only the wait screen**, not search |
+| What the household sees | Wait screen, then Seerr on Ingress | [`tests/preview.py`](tests/preview.py) is the wait screen only. Seerr is Alpine/musl and does not run on this Ubuntu VM. |
+| Engines | Fetched at runtime onto `/data` after the tunnel is up | Fake HTTP stubs in [`tests/run.sh`](tests/run.sh) |
 
 Shipping path: copy `pompey/` into `/addons`. Supervisor builds locally. That is the only delivery path.
 
-Day-to-day agent checks that do **not** need Docker (bash tests + wait-screen preview) live on later branches of this repo. Prefer those over `docker run`.
-
 ## What the real add-on does
 
-1. Supervisor builds `pompey/Dockerfile` (WireGuard, nginx, our scripts).
+1. Supervisor builds `pompey/Dockerfile` (WireGuard, nginx, crane, our scripts). Engines are **not** in that image.
 2. Supervisor starts one container and writes `/data/options.json`.
-3. Our scripts bring up Proton, apply the kill switch, then serve Ingress.
+3. Our scripts bring up Proton, apply the kill switch, fetch Seerr + hidden engines onto `/data`, wire them on localhost, then flip Ingress from the wait screen to Seerr.
 
 s6-overlay: `rootfs/etc/cont-init.d/*` once, then `rootfs/etc/services.d/*`.
 
-## Optional: compile the Dockerfile (not a product boot)
+## What agents should run here (no HAOS)
+
+Preferred — no Docker, no Supervisor:
+
+```bash
+bash tests/run.sh              # options.json + bashio stub + fake engines
+python3 tests/preview.py       # wait-screen progress UI at http://127.0.0.1:8099/
+```
+
+That is enough to test wiring, status, and the wait screen. It is **not** Seerr and **not** a Proton tunnel. Opening `index.html` as a file is also only the wait screen.
+
+### Optional: compile the Dockerfile (not a product boot)
 
 If `docker info` fails, start the daemon. This is a quirk of **this cloud box**, not of Pompey:
 

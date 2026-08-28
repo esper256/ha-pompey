@@ -36,9 +36,9 @@ profile pompey flags=(attach_disconnected,mediate_deleted) {
   /usr/lib/bashio/** ix,
   /tmp/** rwk,
 
-  # HA options and addon config
-  /data/** rw,
-  /config/** rw,
+  # HA options, addon config, fetched engines
+  /data/** rwlix,
+  /config/** rwlix,
   /share/** rw,
   /media/** rw,
 
@@ -52,7 +52,7 @@ profile pompey flags=(attach_disconnected,mediate_deleted) {
 
   # nginx
   /usr/sbin/nginx ix,
-  /etc/nginx/** r,
+  /etc/nginx/** rw,
   /var/lib/nginx/** rw,
   /var/log/nginx/** rw,
   /run/nginx/** rwk,

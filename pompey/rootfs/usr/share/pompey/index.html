@@ -12,6 +12,7 @@
       --muted: #9a948a;
       --line: #2a2d36;
       --focus: #e8c07a;
+      --err: #e08a7a;
     }
 
     * { box-sizing: border-box; }
@@ -42,73 +43,126 @@
       margin: 0 0 1.25rem;
     }
 
-    form {
-      position: relative;
-    }
-
-    input[type="search"] {
-      width: 100%;
-      appearance: none;
-      font: inherit;
-      font-size: 1.35rem;
-      line-height: 1.4;
-      color: var(--fg);
-      background: transparent;
-      border: 0;
-      border-bottom: 1px solid var(--line);
-      padding: 0.4rem 0 0.7rem;
-      outline: none;
-    }
-
-    input[type="search"]::placeholder {
-      color: var(--muted);
-    }
-
-    input[type="search"]:focus {
-      border-bottom-color: var(--focus);
-    }
-
-    .hint, .status {
-      margin: 1rem 0 0;
+    p, li {
+      margin: 0;
       font-family: ui-sans-serif, system-ui, sans-serif;
-      font-size: 0.9rem;
-      line-height: 1.5;
+      font-size: 0.95rem;
+      line-height: 1.55;
       color: var(--muted);
     }
 
-    .status[hidden] {
-      display: none;
+    .bar {
+      height: 0.35rem;
+      background: var(--line);
+      border-radius: 99px;
+      overflow: hidden;
+      margin: 0 0 1.25rem;
+    }
+
+    .bar > span {
+      display: block;
+      height: 100%;
+      width: 0%;
+      background: var(--focus);
+      transition: width 0.4s ease;
+    }
+
+    ol {
+      list-style: none;
+      padding: 0;
+      margin: 0 0 1.25rem;
+    }
+
+    li {
+      display: grid;
+      grid-template-columns: 1.25rem 1fr;
+      gap: 0.6rem;
+      margin-top: 0.45rem;
+    }
+
+    li .mark {
+      color: var(--line);
+    }
+
+    li.active { color: var(--fg); }
+    li.active .mark { color: var(--focus); }
+    li.done { color: var(--fg); }
+    li.done .mark { color: var(--focus); }
+    li.error { color: var(--err); }
+    li.error .mark { color: var(--err); }
+
+    .now {
+      color: var(--fg);
+    }
+
+    .error {
+      color: var(--err);
+      margin-top: 0.75rem;
     }
   </style>
 </head>
 <body>
   <main>
     <h1>Pompey</h1>
-    <form id="search" action="#" method="get">
-      <input
-        type="search"
-        name="q"
-        placeholder="A movie or TV show"
-        aria-label="Search for a movie or TV show"
-        autocomplete="off"
-        autofocus
-      >
-    </form>
-    <p class="hint">Type a title. We’ll help you pick the right one, get it, and put it where it belongs.</p>
-    <p class="status" id="status" hidden></p>
+    <div class="bar" aria-hidden="true"><span id="fill"></span></div>
+    <ol id="steps"></ol>
+    <p class="now" id="now">Bringing the fleet to heel…</p>
+    <p id="file-hint" hidden>This file is only the wait screen. On Home Assistant it lives in the sidebar after Proton is up. In this repo run <code>python3 tests/preview.py</code> to watch progress here.</p>
+    <p class="error" id="err" hidden></p>
   </main>
   <script>
-    const form = document.getElementById("search");
-    const status = document.getElementById("status");
-    form.addEventListener("submit", (event) => {
-      event.preventDefault();
-      const q = new FormData(form).get("q");
-      const title = typeof q === "string" ? q.trim() : "";
-      status.hidden = false;
-      status.textContent = title
-        ? "Search isn’t connected yet. This screen is the starting point."
-        : "Type a title to search.";
-    });
+    const fileHint = document.getElementById("file-hint");
+    const fill = document.getElementById("fill");
+    const now = document.getElementById("now");
+    const err = document.getElementById("err");
+    const stepsEl = document.getElementById("steps");
+    const marks = { pending: "·", active: "›", done: "✓", error: "!" };
+
+    if (location.protocol === "file:") {
+      fileHint.hidden = false;
+    }
+
+    function render(data) {
+      fill.style.width = Math.max(0, Math.min(100, data.percent || 0)) + "%";
+      now.textContent = data.label || "Bringing the fleet to heel…";
+      if (data.error) {
+        err.hidden = false;
+        err.textContent = data.error;
+      } else {
+        err.hidden = true;
+        err.textContent = "";
+      }
+      stepsEl.replaceChildren();
+      (data.steps || []).forEach((step) => {
+        const li = document.createElement("li");
+        li.className = step.state || "pending";
+        const mark = document.createElement("span");
+        mark.className = "mark";
+        mark.textContent = marks[step.state] || "·";
+        const lab = document.createElement("span");
+        lab.textContent = step.label || step.id;
+        li.append(mark, lab);
+        stepsEl.append(li);
+      });
+      if (data.handoff && !sessionStorage.getItem("pompey-handoff")) {
+        sessionStorage.setItem("pompey-handoff", "1");
+        setTimeout(() => location.reload(), 400);
+      }
+    }
+
+    async function tick() {
+      if (location.protocol === "file:") return;
+      try {
+        const res = await fetch("status.json", { cache: "no-store" });
+        if (!res.ok) return;
+        render(await res.json());
+      } catch (_exc) {
+        now.textContent = "Waiting for the box to start…";
+      }
+    }
+
+    tick();
+    setInterval(tick, 1000);
   </script>
 </body>
 </html>

@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# Run a script with the bashio stub and exported bashio::* functions.
+set -euo pipefail
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+# shellcheck source=/dev/null
+source "${ROOT}/tests/lib/bashio.sh"
+while IFS= read -r fn; do
+  export -f "${fn}"
+done < <(compgen -A function | grep '^bashio::' || true)
+exec bash "$@"
