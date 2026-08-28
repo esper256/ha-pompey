@@ -410,6 +410,8 @@ def configure_seerr(secrets: dict, radarr_profile, sonarr_profile, sonarr_lang) 
                 signed_in = True
             except RuntimeError as exc:
                 log(f"seerr local login: {exc}")
+    if not signed_in:
+        log("seerr has no session yet; TV/movie wiring may wait for the setup wizard")
 
     try:
         main = s.call("GET", "/api/v1/settings/main") or {}

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import http.client
 import os
+import select
 import socket
 import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -208,8 +209,6 @@ class Handler(BaseHTTPRequestHandler):
         conns = [self.connection, upstream]
         try:
             while True:
-                import select
-
                 readable, _, err = select.select(conns, [], conns, 60)
                 if err:
                     break
