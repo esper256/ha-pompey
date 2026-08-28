@@ -70,6 +70,7 @@ export POMPEY_NGINX_RUN="${WORK}/run/nginx"
 export NGINX_INGRESS_CONF="${WORK}/etc/nginx/http.d/ingress.conf"
 export MEDIA_ROOT="${WORK}/media"
 export INGRESS_PORT=8099
+mkdir -p "$(dirname "${NGINX_INGRESS_CONF}")"
 
 # Addon scripts use #!/command/with-contenv bashio.
 for f in "${BIN}"/*; do
@@ -96,7 +97,7 @@ ns() {
 
 wait_url() {
   local url="$1" n="${2:-60}" i=0
-  until ns curl -fsS -o /dev/null --max-time 3 "${url}"; do
+  until ns curl -fsS -o /dev/null --max-time 3 "${url}" 2>/dev/null; do
     i=$((i + 1))
     if [[ "${i}" -ge "${n}" ]]; then
       echo "timeout waiting for ${url}" >&2
@@ -164,9 +165,10 @@ log "HTTP stubs (download-engine WebUI + Seerr); no torrent client"
 ns python3 - "${WORK}" >"${WORK}/http-stub.log" 2>&1 <<'PY' &
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json, os, sys, threading
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 work = sys.argv[1]
+CATEGORIES = {}
 
 
 class Qbit(BaseHTTPRequestHandler):
@@ -176,6 +178,9 @@ class Qbit(BaseHTTPRequestHandler):
     def _send(self, code, body, ctype, cookie=None):
         if isinstance(body, str):
             body = body.encode()
+        elif not isinstance(body, (bytes, bytearray)):
+            body = json.dumps(body).encode()
+            ctype = "application/json"
         self.send_response(code)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(body)))
@@ -184,6 +189,11 @@ class Qbit(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _form(self):
+        n = int(self.headers.get("Content-Length") or 0)
+        raw = self.rfile.read(n).decode() if n else ""
+        return {k: (v[0] if v else "") for k, v in parse_qs(raw).items()}
+
     def do_GET(self):
         path = urlparse(self.path).path
         if path.endswith("/version") or path.endswith("/webapiVersion"):
@@ -191,20 +201,28 @@ class Qbit(BaseHTTPRequestHandler):
         if path.endswith("/preferences"):
             return self._send(
                 200,
-                json.dumps({"current_network_interface": "wg0", "listen_port": 0}),
+                {
+                    "current_network_interface": "wg0",
+                    "listen_port": 0,
+                    "save_path": "/tmp/downloads",
+                },
                 "application/json",
             )
         if path.endswith("/categories"):
-            return self._send(200, "{}", "application/json")
-        return self._send(200, "[]", "application/json")
+            return self._send(200, CATEGORIES, "application/json")
+        return self._send(200, [], "application/json")
 
     def do_POST(self):
-        n = int(self.headers.get("Content-Length") or 0)
-        if n:
-            self.rfile.read(n)
         path = urlparse(self.path).path
-        cookie = "SID=pompey-dev; path=/" if path.endswith("/login") else None
-        return self._send(200, "Ok.", "text/plain", cookie=cookie)
+        form = self._form()
+        if path.endswith("/login"):
+            return self._send(200, "Ok.", "text/plain", cookie="SID=pompey-dev; path=/")
+        if path.endswith("/createCategory") or path.endswith("/editCategory"):
+            name = form.get("category") or form.get("name") or ""
+            if name:
+                CATEGORIES[name] = {"name": name, "savePath": form.get("savePath", "")}
+            return self._send(200, "Ok.", "text/plain")
+        return self._send(200, "Ok.", "text/plain")
 
 
 class Seerr(BaseHTTPRequestHandler):
@@ -301,18 +319,36 @@ profile="$(arr "${RADARR}" "${RADARR_KEY}" GET "/api/v3/qualityprofile" | jq '.[
 root="${MEDIA_ROOT}/Movies"
 add="$(python3 - "${movie}" "${profile}" "${root}" <<'PY'
 import json, sys
-movie = json.loads(sys.argv[1])
-movie["qualityProfileId"] = int(sys.argv[2])
-movie["rootFolderPath"] = sys.argv[3]
-movie["monitored"] = True
-movie["minimumAvailability"] = "announced"
-movie["addOptions"] = {"searchForMovie": False, "monitor": "movieOnly"}
+src = json.loads(sys.argv[1])
+movie = {
+    "title": src.get("title"),
+    "tmdbId": src.get("tmdbId"),
+    "year": src.get("year"),
+    "titleSlug": src.get("titleSlug"),
+    "images": src.get("images") or [],
+    "qualityProfileId": int(sys.argv[2]),
+    "rootFolderPath": sys.argv[3],
+    "monitored": True,
+    "minimumAvailability": "announced",
+    "addOptions": {"searchForMovie": False},
+}
 print(json.dumps(movie))
 PY
 )"
 
 log "add movie (library only — no search, no download)"
-arr "${RADARR}" "${RADARR_KEY}" POST "/api/v3/movie" "${add}" >/dev/null
+add_resp="$(ns curl -sS -w '\n%{http_code}' --max-time 60 -X POST \
+  -H "X-Api-Key: ${RADARR_KEY}" -H "Content-Type: application/json" \
+  -d "${add}" "${RADARR}/api/v3/movie")"
+add_code="$(echo "${add_resp}" | tail -n1)"
+add_body="$(echo "${add_resp}" | sed '$d')"
+if [[ "${add_code}" != "200" && "${add_code}" != "201" ]]; then
+  echo "add movie HTTP ${add_code}: ${add_body}" >&2
+  echo "payload: ${add}" >&2
+  echo "---- radarr.log (tail) ----" >&2
+  tail -n 40 "${WORK}/radarr.log" >&2 || true
+  exit 1
+fi
 
 found=""
 movies="[]"

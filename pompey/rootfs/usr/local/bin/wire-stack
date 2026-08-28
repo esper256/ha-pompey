@@ -524,6 +524,7 @@ def reload_nginx() -> None:
 }}
 """
     path = os.environ.get("NGINX_INGRESS_CONF", "/etc/nginx/http.d/ingress.conf")
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     with open(path, "w", encoding="utf-8") as fh:
         fh.write(conf)
     os.system("nginx -s reload >/dev/null 2>&1 || true")
