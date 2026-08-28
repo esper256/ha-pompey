@@ -19,7 +19,7 @@ This app is **not** published as a container image. Copy `pompey/` into `/addons
 
 Do this **before** you start the app:
 
-1. Use the **0.2.1** tree (the first-install PR), not an older copy of `main`.
+1. Use **0.2.1** (current `main`). If you add this GitHub URL as an Apps repository and Git asks for a username, the repo is still private — copy `pompey/` into `/addons` instead (see Install).
 2. Proton WireGuard `.conf` in the app config share as `wireguard/wg0.conf`.
 3. Plex token: open any item on the Plex server in a browser, View Source, search for `X-Plex-Token`, or follow [Plex’s token article](https://support.plex.tv/articles/204059436-finding-an-authentication-token-x-plex-token/).
 4. Plex address is a **numeric IP** (see table below).
@@ -40,11 +40,18 @@ Do this **before** you start the app:
 
 ## Install
 
-1. Copy the `pompey/` folder into `/addons` on the Home Assistant OS machine (USB/Samba/SSH).
-2. Settings → Apps → ⋮ → Check for updates. Open **Pompey** and install. Supervisor builds the image locally.
-3. Put the Proton `.conf` in the app config share as `wireguard/wg0.conf` (see VPN below).
-4. Fill **Plex address** (numeric IP), **Plex token**, **source URL**, and **source key**.
-5. Start **Pompey**. Open it in the sidebar. First boot shows a wait screen, then should reload into search.
+Home Assistant clones app repositories with **no GitHub login**. This GitHub repo is private, so adding `https://github.com/esper256/ha-pompey` as an Apps repository fails with `could not read Username for 'https://github.com'`. That is expected. You did not use the wrong URL.
+
+Pick one:
+
+1. **Copy the folder (works while the repo is private).** Copy `pompey/` onto the Home Assistant OS machine as `/addons/pompey` (USB/Samba/SSH). Settings → Apps → ⋮ → Check for updates. Open **Pompey** and install. Supervisor builds locally. We still do not publish a container image.
+2. **Add this GitHub repo as an Apps repository.** Only works if the repo is **public**. Then Settings → Apps → ⋮ → Repositories → `https://github.com/esper256/ha-pompey`.
+
+Then:
+
+1. Put the Proton `.conf` in the app config share as `wireguard/wg0.conf` (see VPN below).
+2. Fill **Plex address** (numeric IP), **Plex token**, **source URL**, and **source key**.
+3. Start **Pompey**. Open it in the sidebar. First boot shows a wait screen, then should reload into search.
 
 If the bar stays on the tunnel step, Proton is not up (missing/invalid WireGuard file is the usual cause). If search is a blank page, check the app log for `pompey-ingress` / Seerr.
 
