@@ -19,7 +19,7 @@ This app is **not** published as a container image. Copy `pompey/` into `/addons
 
 Do this **before** you start the app:
 
-1. Use **0.2.1** (current `main`). If you add this GitHub URL as an Apps repository and Git asks for a username, the repo is still private — copy `pompey/` into `/addons` instead (see Install).
+1. Current `main` (0.2.1). After adding the GitHub Apps repository, look under **Install app**, not the installed-apps list. If you added the URL while the repo was private, remove it and add it again.
 2. Proton WireGuard `.conf` in the app config share as `wireguard/wg0.conf`.
 3. Plex token: open any item on the Plex server in a browser, View Source, search for `X-Plex-Token`, or follow [Plex’s token article](https://support.plex.tv/articles/204059436-finding-an-authentication-token-x-plex-token/).
 4. Plex address is a **numeric IP** (see table below).
@@ -40,12 +40,18 @@ Do this **before** you start the app:
 
 ## Install
 
-Home Assistant clones app repositories with **no GitHub login**. This GitHub repo is private, so adding `https://github.com/esper256/ha-pompey` as an Apps repository fails with `could not read Username for 'https://github.com'`. That is expected. You did not use the wrong URL.
+The GitHub repo can be public. Home Assistant still **does not publish or pull a Docker image**; Supervisor builds `pompey/` on the machine.
 
-Pick one:
+**Add as an Apps repository (now that the repo is public):**
 
-1. **Copy the folder (works while the repo is private).** Copy `pompey/` onto the Home Assistant OS machine as `/addons/pompey` (USB/Samba/SSH). Settings → Apps → ⋮ → Check for updates. Open **Pompey** and install. Supervisor builds locally. We still do not publish a container image.
-2. **Add this GitHub repo as an Apps repository.** Only works if the repo is **public**. Then Settings → Apps → ⋮ → Repositories → `https://github.com/esper256/ha-pompey`.
+1. Settings → Apps → **Install app** (the store, not the list of already-installed apps).
+2. ⋮ → Repositories → add `https://github.com/esper256/ha-pompey`.
+3. If you added it **while the repo was still private**, remove that repository and add it again. Supervisor keeps the failed clone and will not pick up Pompey until you do.
+4. ⋮ → Check for updates. Search the store for **Pompey**. Custom repositories are often at the **bottom**, under a heading named Pompey. It is marked experimental.
+
+**Or copy the folder:** put `pompey/` on the machine as `/addons/pompey` (USB/Samba/SSH), then Check for updates.
+
+If it still does not appear: Settings → System → Logs → **Supervisor**. Look for `Can't read` / `pompey`. Pompey only lists on **aarch64** and **amd64** (not 32-bit Raspberry Pi).
 
 Then:
 
