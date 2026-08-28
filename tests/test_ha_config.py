@@ -319,9 +319,15 @@ class SupervisorConfigSchema(unittest.TestCase):
                 "movies_kid_folder",
                 "tv_folder",
                 "tv_kid_folder",
+                "after_download",
             },
         )
         self.assertEqual(set(self.raw["schema"]), set(self.raw["options"]))
+        self.assertEqual(self.raw["options"]["after_download"], "stop_sharing")
+        self.assertEqual(
+            self.raw["schema"]["after_download"],
+            "list(stop_sharing|share_to_ratio|share_one_day)",
+        )
         for leaked in (
             "wireguard_config",
             "wireguard_private_key",

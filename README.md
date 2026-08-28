@@ -60,8 +60,11 @@ Open **Settings → Apps → Pompey → Configuration**. The defaults already ma
 | Kid movies | `Movies/Kid Friendly` |
 | TV | `TV/Not Kid Friendly` |
 | Kid TV | `TV/Kid Friendly` |
+| After a title is in the library | Stop sharing |
 
-Those four must be **siblings** (neither library folder sits inside another). In-progress downloads go in `downloads/` under the media folder. Do not add `downloads` as a Plex library.
+Those four library folders must be **siblings** (neither library folder sits inside another). In-progress downloads go in `downloads/` under the media folder. Do not add `downloads` as a Plex library.
+
+**After a title is in the library** is not a hidden default. Sharing finished torrents uses RAM and CPU in this app. **Stop sharing** (the default) removes the torrent from qBittorrent once the file is in your library. You can instead share until a 1.0 ratio, or for one day. The library file is kept either way.
 
 If you already saved older defaults (`/media` plus `Movies` / `Kid Friendly Movies`), update the five fields and **restart** so engines pick up the folders.
 
@@ -99,7 +102,7 @@ Daily use is two places: **search** (`http://<home-assistant>:5055`) and **Plex*
 | Search, posters, requests | Everyone in the house | `http://<this-home-assistant-ip>:5055` — Seerr, on the LAN. Do not put this on the public internet. |
 | Sources (indexers) | Whoever manages what we can grab | `http://<this-home-assistant-ip>:9696` — Prowlarr. Seerr cannot do this. First visit sets a login. Do not put this on the public internet. |
 | Pompey (Proton, status, Open search, Open sources) | Whoever installed the app | Home Assistant sidebar → **Pompey**. Always this UI, never rewritten into Seerr. |
-| Media folders | Whoever installed the app | **Settings → Apps → Pompey → Configuration** |
+| Media folders and after-download | Whoever installed the app | **Settings → Apps → Pompey → Configuration** |
 | Watching | Everyone | Your Plex apps. On the LAN, Plex itself is typically `http://<plex-ip>:32400`. Pompey does not run Plex. |
 | Proton account / new WireGuard file | Whoever owns the VPN | Proton’s site, then paste into Pompey if you rotate the file |
 | App log | When something is stuck | **Settings → Apps → Pompey → Log** |
@@ -123,6 +126,7 @@ If a download is stuck, the **intended** product is still: handle that in Pompey
 
 - **Search and request** at `http://<home-assistant>:5055`. The sidebar is the box, not an iframe of search. Household members should not see a ticket queue. Seerr can have more than one user; the first admin is whoever completed the Plex wizard.
 - **Kid vs general** is a rule after the request, from TMDB certification. G / PG / PG-13 and TV-Y / TV-G / TV-PG go to the kid folders. Anything else, **including unknown**, goes to general. Pompey does not guess kid, and it does not stop the request to ask.
+- **After a title is in the library** is in **Settings → Apps → Pompey → Configuration**. Stop sharing is the default so finished torrents do not sit in RAM. Share to a 1.0 ratio or for one day if you want to give a little back. The library file is kept.
 - **Already on Plex** is Seerr’s job. If it is already there, you should see that before you request it.
 - **Confirm if we need you** is for the cases the stack cannot decide — not for every request. Picking a specific torrent by hand is not the default path.
 - **Open sources → History.** Empty Query is not always the Seerr title. Click the row: **top100** (or similar browse) means the source was asked with no name — that is not the request. **Parameters** with IMDb/TMDb is an ID search. The movie name in Query is a title search. RSS is empty Query, empty Parameters, event type RSS. After **0.2.25**, Arr is told to title-search so a request should show the movie name on every source that actually synced into Radarr/Sonarr. A source that fails Prowlarr’s category test (or is blocked by CloudFlare) never becomes an Arr indexer — the app log warns when that happens.

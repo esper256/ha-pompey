@@ -28,3 +28,10 @@ configuration:
     name: Kid TV
     description: >-
       Kid TV, relative to the media folder. Default TV/Kid Friendly.
+  after_download:
+    name: After a title is in the library
+    description: >-
+      Sharing finished torrents uses RAM and CPU in this app. Stop sharing
+      (the default) removes the torrent once the file is in your library.
+      Share to 1.0 ratio or for one day if you want to give a little back.
+      The library file is kept either way.

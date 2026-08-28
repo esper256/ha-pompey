@@ -3,6 +3,7 @@
 ## 0.2.26
 
 - Auto-grab prefers **1080p WEB-DL / BluRay encodes**, not remux or 4K. A 26 GB remux was Radarr’s default ranking, not a bad source. The household profile also prefers x265 and WEB-DL, rejects CAM/TS, and caps 1080p size (about 10–15 GB for a two-hour movie). Already-queued grabs are not cancelled. Search still uses this profile after a rebuild.
+- **After a title is in the library** is a Home Assistant option (default **stop sharing**). Finished torrents are removed from qBittorrent so they do not sit in RAM forever. You can share to a 1.0 ratio or for one day instead. The library file is kept.
 
 ## 0.2.25
 

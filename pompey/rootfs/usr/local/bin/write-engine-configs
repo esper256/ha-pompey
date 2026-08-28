@@ -7,6 +7,8 @@ set -euo pipefail
 # shellcheck source=/dev/null
 source "$(command -v pompey-env)"
 pompey-secrets >/dev/null
+export AFTER_DOWNLOAD="${AFTER_DOWNLOAD:-stop_sharing}"
+bashio::log.info "After a title is in the library: ${AFTER_DOWNLOAD}"
 
 python3 - "${POMPEY_SECRETS}" "${MEDIA_ROOT}" <<'PY'
 import json, os, re, sys
@@ -91,6 +93,71 @@ complete = f"{media}/downloads/complete"
 log_dir = f"{config}/qBittorrent/logs"
 
 
+def after_download_policy() -> str:
+    raw = (os.environ.get("AFTER_DOWNLOAD") or "stop_sharing").strip().lower()
+    raw = raw.replace("-", "_").replace(" ", "_")
+    if raw in {"share_to_ratio", "ratio"}:
+        return "share_to_ratio"
+    if raw in {"share_one_day", "one_day"}:
+        return "share_one_day"
+    return "stop_sharing"
+
+
+def qbit_seed_settings(policy: str) -> dict:
+    # MaxRatioAct 1 = remove torrent, keep files. Never 3 (delete data) —
+    # library files may be hardlinked.
+    if policy == "share_to_ratio":
+        return {
+            r"Session\MaxRatioEnabled": "true",
+            r"Session\MaxRatio": "1",
+            r"Session\MaxSeedingTimeEnabled": "false",
+            r"Session\MaxSeedingTime": "-1",
+            r"Session\MaxRatioAct": "1",
+        }
+    if policy == "share_one_day":
+        return {
+            r"Session\MaxRatioEnabled": "false",
+            r"Session\MaxRatio": "1",
+            r"Session\MaxSeedingTimeEnabled": "true",
+            r"Session\MaxSeedingTime": "1440",
+            r"Session\MaxRatioAct": "1",
+        }
+    return {
+        r"Session\MaxRatioEnabled": "false",
+        r"Session\MaxRatio": "1",
+        r"Session\MaxSeedingTimeEnabled": "true",
+        r"Session\MaxSeedingTime": "2880",
+        r"Session\MaxRatioAct": "1",
+    }
+
+
+def patch_qbit_seed(text: str, settings: dict) -> str:
+    for key, value in settings.items():
+        pat = rf"(?m)^{re.escape(key)}=.*$"
+        line = f"{key}={value}"
+        if re.search(pat, text):
+            text = re.sub(pat, line, text, count=1)
+            continue
+        if re.search(r"(?m)^Session\\DisableAutoTMMByDefault=.*$", text):
+            text = re.sub(
+                r"(?m)^(Session\\DisableAutoTMMByDefault=.*)$",
+                lambda m, ln=line: f"{m.group(1)}\n{ln}",
+                text,
+                count=1,
+            )
+            continue
+        if re.search(r"(?m)^\[BitTorrent\]\s*$", text):
+            text = re.sub(
+                r"(?m)^(\[BitTorrent\])\s*$",
+                lambda m, ln=line: f"{m.group(1)}\n{ln}",
+                text,
+                count=1,
+            )
+            continue
+        text += f"\n[BitTorrent]\n{line}\n"
+    return text
+
+
 def patch_qbit_paths(text: str) -> str:
     for key, value in (
         (r"Session\DefaultSavePath", complete),
@@ -136,6 +203,15 @@ def patch_qbit_paths(text: str) -> str:
             count=1,
         )
     return text
+
+
+seed = qbit_seed_settings(after_download_policy())
+# Locals: f-string expressions cannot contain backslashes on older Python.
+ratio_on = seed[r"Session\MaxRatioEnabled"]
+ratio = seed[r"Session\MaxRatio"]
+time_on = seed[r"Session\MaxSeedingTimeEnabled"]
+time_min = seed[r"Session\MaxSeedingTime"]
+ratio_act = seed[r"Session\MaxRatioAct"]
 qbit_text = f"""[Application]
 FileLogger\\Enabled=true
 FileLogger\\Path={config}/qBittorrent/logs
@@ -153,6 +229,11 @@ Session\\InterfaceAddress=
 Session\\Port=6881
 Session\\UPnP=false
 Session\\DisableAutoTMMByDefault=false
+Session\\MaxRatioEnabled={ratio_on}
+Session\\MaxRatio={ratio}
+Session\\MaxSeedingTimeEnabled={time_on}
+Session\\MaxSeedingTime={time_min}
+Session\\MaxRatioAct={ratio_act}
 
 [LegalNotice]
 Accepted=true
@@ -188,7 +269,7 @@ for qconf in (
 ):
     os.makedirs(os.path.dirname(qconf), exist_ok=True)
     if os.path.isfile(qconf):
-        body = patch_qbit_paths(open(qconf, encoding="utf-8").read())
+        body = patch_qbit_seed(patch_qbit_paths(open(qconf, encoding="utf-8").read()), seed)
         with open(qconf, "w", encoding="utf-8") as fh:
             fh.write(body)
         os.chmod(qconf, 0o600)

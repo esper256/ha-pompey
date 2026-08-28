@@ -26,12 +26,14 @@ if declare -F bashio::config >/dev/null 2>&1; then
   : "${MEDIA_MOVIES_KID:=$(bashio::config 'movies_kid_folder')}"
   : "${MEDIA_TV:=$(bashio::config 'tv_folder')}"
   : "${MEDIA_TV_KID:=$(bashio::config 'tv_kid_folder')}"
+  : "${AFTER_DOWNLOAD:=$(bashio::config 'after_download')}"
 fi
 MEDIA_ROOT="${MEDIA_ROOT:-/media/dlna}"
 MEDIA_MOVIES="${MEDIA_MOVIES:-Movies/Not Kid Friendly}"
 MEDIA_MOVIES_KID="${MEDIA_MOVIES_KID:-Movies/Kid Friendly}"
 MEDIA_TV="${MEDIA_TV:-TV/Not Kid Friendly}"
 MEDIA_TV_KID="${MEDIA_TV_KID:-TV/Kid Friendly}"
+AFTER_DOWNLOAD="${AFTER_DOWNLOAD:-stop_sharing}"
 MEDIA_ROOT="${MEDIA_ROOT%/}"
 MEDIA_MOVIES="${MEDIA_MOVIES#/}"
 MEDIA_MOVIES="${MEDIA_MOVIES%/}"
@@ -41,6 +43,7 @@ MEDIA_TV="${MEDIA_TV#/}"
 MEDIA_TV="${MEDIA_TV%/}"
 MEDIA_TV_KID="${MEDIA_TV_KID#/}"
 MEDIA_TV_KID="${MEDIA_TV_KID%/}"
+export MEDIA_ROOT MEDIA_MOVIES MEDIA_MOVIES_KID MEDIA_TV MEDIA_TV_KID AFTER_DOWNLOAD
 
 mkdir -p \
   "${POMPEY_DATA}" \

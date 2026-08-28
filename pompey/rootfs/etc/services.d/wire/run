@@ -18,7 +18,7 @@ wait-for-http http://127.0.0.1:8989/ping 90
 wait-for-http http://127.0.0.1:7878/ping 90
 wait-for-http http://127.0.0.1:5055/api/v1/settings/public 90
 
-export POMPEY_SECRETS MEDIA_ROOT MEDIA_MOVIES MEDIA_MOVIES_KID MEDIA_TV MEDIA_TV_KID
+export POMPEY_SECRETS MEDIA_ROOT MEDIA_MOVIES MEDIA_MOVIES_KID MEDIA_TV MEDIA_TV_KID AFTER_DOWNLOAD
 export INGRESS_PORT="$(bashio::addon.ingress_port)"
 
 # Retry until Seerr is up and wiring succeeds.

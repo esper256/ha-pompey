@@ -123,6 +123,8 @@ class FakeState:
         self.radarr_folders: list[str] = []
         self.sonarr_folders: list[str] = []
         self.download_clients: list[dict] = []
+        self.radarr_clients: list[dict] = []
+        self.sonarr_clients: list[dict] = []
         radarr_q = any_quality_bundle(1, "Any")
         sonarr_q = any_quality_bundle(1, "Any")
         self.radarr_profiles: list[dict] = [radarr_q["profile"]]
@@ -229,7 +231,8 @@ def handler_for(state: FakeState):
                     folders.append((body or {}).get("path"))
                     return self._send(201, body)
                 if path.endswith("/downloadclient") and method == "GET":
-                    return self._send(body=[])
+                    clients = state.radarr_clients if role == "radarr" else state.sonarr_clients
+                    return self._send(body=clients)
                 if path.endswith("/downloadclient/schema"):
                     return self._send(
                         body=[
@@ -244,8 +247,25 @@ def handler_for(state: FakeState):
                         ]
                     )
                 if path.endswith("/downloadclient") and method == "POST":
-                    state.download_clients.append(body)
-                    return self._send(201, body)
+                    clients = state.radarr_clients if role == "radarr" else state.sonarr_clients
+                    posted = dict(body or {})
+                    posted.setdefault("id", len(clients) + 1)
+                    clients.append(posted)
+                    state.download_clients.append(posted)
+                    return self._send(201, posted)
+                if "/downloadclient/" in path and method == "PUT":
+                    clients = state.radarr_clients if role == "radarr" else state.sonarr_clients
+                    try:
+                        idx = int(path.rsplit("/", 1)[-1])
+                    except ValueError:
+                        return self._send(404, {"error": path})
+                    for i, item in enumerate(clients):
+                        if item.get("id") == idx:
+                            saved = dict(body or item)
+                            saved["id"] = idx
+                            clients[i] = saved
+                            return self._send(body=saved)
+                    return self._send(404, {"error": path})
                 if path.endswith("/qualityprofile") and method == "GET":
                     return self._send(body=profiles)
                 if "/qualityprofile/" in path and method == "PUT":
@@ -808,6 +828,15 @@ PersistentKeepalive = 25
         self.assertEqual(fields["prowlarrUrl"], "http://127.0.0.1:9698")
         self.assertEqual(fields["syncCategories"], [2000])
 
+    def test_after_download_defaults_to_stop_sharing(self):
+        os.environ.pop("AFTER_DOWNLOAD", None)
+        self.assertEqual(ws.after_download(), "stop_sharing")
+        os.environ["AFTER_DOWNLOAD"] = "share_to_ratio"
+        self.assertEqual(ws.after_download(), "share_to_ratio")
+        os.environ["AFTER_DOWNLOAD"] = "share-one-day"
+        self.assertEqual(ws.after_download(), "share_one_day")
+        os.environ.pop("AFTER_DOWNLOAD", None)
+
     def test_rebuild_hd_items_disallows_remux_and_4k(self):
         catalog = ws.quality_catalog(any_quality_bundle()["profile"])
         items = ws.rebuild_hd_items(catalog)
@@ -892,6 +921,7 @@ class WireStack(unittest.TestCase):
                 "MEDIA_MOVIES_KID": "Movies/Kid Friendly",
                 "MEDIA_TV": "TV/Not Kid Friendly",
                 "MEDIA_TV_KID": "TV/Kid Friendly",
+                "AFTER_DOWNLOAD": "stop_sharing",
                 "PLEX_URL": "http://172.30.32.1:32400",
                 "PLEX_TOKEN": "test-plex-token",
                 "INDEXER_URL": "https://example-source.test",
@@ -929,6 +959,9 @@ class WireStack(unittest.TestCase):
             {"/media/Movies/Not Kid Friendly", "/media/Movies/Kid Friendly"},
         )
         self.assertEqual(len(self.state.download_clients), 2)
+        for client in self.state.download_clients:
+            self.assertTrue(client.get("removeCompletedDownloads"))
+            self.assertTrue(client.get("removeFailedDownloads"))
         self.assertEqual({a["name"] for a in self.state.apps}, {"Sonarr", "Radarr"})
         for app in self.state.apps:
             fields = {f["name"]: f.get("value") for f in app.get("fields") or []}
@@ -1130,6 +1163,35 @@ class WireStack(unittest.TestCase):
         self.assertEqual(bluray["maxSize"], 130.0)
         self.assertEqual(self.state.seerr_radarr[0]["activeProfileName"], "HD")
         self.assertEqual(self.state.sonarr_profiles[0]["name"], "HD")
+
+    def test_share_to_ratio_leaves_torrent_until_ratio(self):
+        os.environ["INDEXER_URL"] = ""
+        os.environ["INDEXER_API_KEY"] = ""
+        os.environ["AFTER_DOWNLOAD"] = "share_to_ratio"
+        rc = ws.main()
+        self.assertEqual(rc, 0)
+        for client in self.state.download_clients:
+            self.assertFalse(client.get("removeCompletedDownloads"))
+            self.assertTrue(client.get("removeFailedDownloads"))
+
+    def test_updates_existing_download_client_remove_flag(self):
+        os.environ["INDEXER_URL"] = ""
+        os.environ["INDEXER_API_KEY"] = ""
+        os.environ["AFTER_DOWNLOAD"] = "stop_sharing"
+        self.state.radarr_clients = [
+            {
+                "id": 7,
+                "name": "qBittorrent",
+                "implementation": "QBittorrent",
+                "removeCompletedDownloads": False,
+                "removeFailedDownloads": False,
+            }
+        ]
+        rc = ws.main()
+        self.assertEqual(rc, 0)
+        self.assertTrue(self.state.radarr_clients[0]["removeCompletedDownloads"])
+        self.assertTrue(self.state.radarr_clients[0]["removeFailedDownloads"])
+        self.assertEqual(self.state.radarr_clients[0]["id"], 7)
 
     def test_retries_monitored_titles_still_missing_a_file(self):
         os.environ["INDEXER_URL"] = ""
