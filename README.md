@@ -4,7 +4,7 @@ Search for a movie or TV show in Home Assistant. Confirm if we need you. It land
 
 Pompey is one Home Assistant OS app. The sidebar is the box: Proton, status, a button to search. Search itself is [Seerr](https://seerr.dev/) on this machine’s port **5055**, not an iframe. Downloads, matching, and the VPN stay inside Pompey. All internet from this app uses Proton WireGuard. If the tunnel is down, internet is dropped. **Plex is a separate Home Assistant app** (or another machine). Pompey does not run Plex.
 
-This is the user guide for the product we are building. It describes the journey as it should feel. [What is not ready yet](#what-is-not-ready-yet) is honest about the current cut (**0.2.32**). The [roadmap](#roadmap) is how we close the gap.
+This is the user guide for the product we are building. It describes the journey as it should feel. [What is not ready yet](#what-is-not-ready-yet) is honest about the current cut (**0.2.33**). The [roadmap](#roadmap) is how we close the gap.
 
 ## How a day with it should feel
 
@@ -169,7 +169,7 @@ A private tracker with a stable API key is set-and-forget. Prowlarr copies that 
 
 ## What is not ready yet
 
-The journey above is the target. **0.2.32** is a real Home Assistant OS install of that box, not the finished household app.
+The journey above is the target. **0.2.33** is a real Home Assistant OS install of that box, not the finished household app.
 
 | In the guide | On the machine today |
 | --- | --- |
@@ -187,7 +187,7 @@ The journey above is the target. **0.2.32** is a real Home Assistant OS install 
 | Jellyfin | Plex only. |
 | Use this from outside the house | Out of scope. Search is on the LAN at :5055. Sources at :9696. Do not port-forward either. |
 
-If search is a blank page on port 5055, or the Plex button on setup does nothing, that is a bug — send the log. Rebuild so the banner says **0.2.32** if a finished file is still under `downloads/complete` (new grabs in `complete/` itself, or older leftovers in `complete/radarr`). Rebuild to **0.2.31** if the wait screen says wiring failed (including Sonarr minimum free space ≥ 100) and the request quality list is still Any / HD-720p / Ultra-HD. Rebuild to **0.2.29** if you moved a file by hand and worry qBittorrent will grab it again. Also rebuild if auto-grab picked a huge remux on Default, a Seerr request only title-searched two Prowlarr sources, or you still need tagged app logs, household media-folder defaults, **Open sources**, or an older wait screen.
+If search is a blank page on port 5055, or the Plex button on setup does nothing, that is a bug — send the log. Rebuild so the banner says **0.2.33** if `downloads/complete` still has folders after a title is on Plex — leftover extras are not the movie; look in the Kid / Not Kid library folder. Rebuild to **0.2.32** if a finished **video** is still under `downloads/complete` (new grabs in `complete/` itself, or older leftovers in `complete/radarr`). Rebuild to **0.2.31** if the wait screen says wiring failed (including Sonarr minimum free space ≥ 100) and the request quality list is still Any / HD-720p / Ultra-HD. Rebuild to **0.2.29** if you moved a file by hand and worry qBittorrent will grab it again. Also rebuild if auto-grab picked a huge remux on Default, a Seerr request only title-searched two Prowlarr sources, or you still need tagged app logs, household media-folder defaults, **Open sources**, or an older wait screen.
 
 ## Roadmap
 
@@ -229,7 +229,7 @@ App config lives in `/addon_configs/<id>_pompey/`. Fetched engines live in the a
 - Search warns that `/config/seerr` is not a volume: you need **0.2.17**. The data was already persisted; Seerr was looking at a leftover `DOCKER` sentinel.
 - Search never finds releases: add a source in **Open sources**, and give wiring a minute after the Plex wizard.
 - New titles land on the Home Assistant disk, not the NAS: Media folder should be `/media/<network-storage-name>` (default `/media/dlna`) and the four library fields should be folders Plex already scans. If you installed 0.2.20 with the old `/media` defaults, change Configuration and restart.
-- Download finished but the file is still under `downloads/complete` (including a leftover `complete/radarr` folder, or a new grab that never left `complete/`): rebuild to **0.2.32**. qBittorrent only saves into `complete/`; Seerr already stored Kid vs Not Kid on the Radarr/Sonarr title. Housekeeping imports using that stored folder — it does not guess from the filename. If that import never starts there is no failed-move error — the app log should show the title’s library path and `qbit=…/complete/…`. Do not drag files out of `complete/` yourself. Do not use Seerr’s red Remove / Clear Data buttons for this. Plex only sees files that made it into the library folders.
+- Download finished but the file is still under `downloads/complete` (including a leftover `complete/radarr` folder, or a new grab that never left `complete/`): rebuild to **0.2.33**. qBittorrent only saves into `complete/`; Seerr already stored Kid vs Not Kid on the Radarr/Sonarr title. Housekeeping imports using that stored folder — it does not guess from the filename. Subtitle files (including a `Subs` folder) come with the video into the movie folder; torrent junk stays out of Plex. Leftover `.nfo` folders after the video left are extras, not a failed move — look in `Movies/` or `TV/` (Kid vs Not Kid). Seerr still showing a request as active is waiting on Plex (and Arr) to notice the library file; **0.2.33** asks Seerr to check. If a **video** never starts the import there is no failed-move error — the app log should show the title’s library path and `qbit=…/complete/…`. Do not drag files out of `complete/` yourself. Do not use Seerr’s red Remove / Clear Data buttons for this. Plex only sees files that made it into the library folders.
 - Plex wizard cannot see the server: numeric IP of **your Plex app**, port 32400 published, LAN not blocked. Pompey does not contain Plex.
 
 More Home Assistant-specific notes (Supervisor skip reasons, copy-to-`/addons`): [pompey/DOCS.md](pompey/DOCS.md).
