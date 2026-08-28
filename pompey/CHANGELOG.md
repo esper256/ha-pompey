@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.9
+
+- `wg-quick` no longer dies on `sysctl: error setting key 'net.ipv4.conf.all.src_valid_mark': Read-only file system`. Kernel WireGuard still created `wg0`; Proton `AllowedIPs = 0.0.0.0/0` makes `wg-quick` set that sysctl, HAOS `/proc/sys` is read-only, and the rollback deleted `wg0` (then the same thing with wireguard-go). Runtime conf uses `Table = off` (we add the default route ourselves) and a PATH helper ignores that one sysctl key.
+- Every `wg-quick` `[#]` line is stamped `[HH:MM:SS] INFO:` so the app log is readable. Engines and NAT-PMP wait until the handshake exists (`vpn-up`), not merely until the Proton file is on disk — that was why they logged `WireGuard wg0 has no fresh handshake` and `engine fetch service exited` while the tunnel was still retrying.
+- Writing `status.json` no longer crashes with `FileNotFoundError` if `/tmp/pompey` is missing mid-write.
+
+Rebuild so the banner says **0.2.9**.
+
 ## 0.2.8
 
 - `wg-quick` no longer dies on `resolvconf: signature mismatch` for `/etc/resolv.conf` (Proton `DNS=` plus our rewrite of that file). Kernel WireGuard was actually working; resolvconf rolled `wg0` back and the WireGuard service **halted the whole container**, which took Ingress nginx with it (Home Assistant then showed an nginx error). Runtime conf strips `DNS=` (we still set Proton `10.2.0.1` ourselves); `wg-quick` gets a no-op resolvconf; a failed tunnel **leaves the wait screen up**. Kill switch is OUTPUT only — Supervisor Ingress to 8099 is INPUT and was never blocked.

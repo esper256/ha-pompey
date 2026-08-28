@@ -155,6 +155,11 @@ if grep -qiE '^[[:space:]]*DNS[[:space:]]*=' "${POMPEY_WG_CONF}"; then
   cat "${POMPEY_WG_CONF}" >&2
   exit 1
 fi
+if ! grep -qiE '^[[:space:]]*Table[[:space:]]*=[[:space:]]*off' "${POMPEY_WG_CONF}"; then
+  echo "Table=off must reach wg-quick (HAOS src_valid_mark is read-only)" >&2
+  cat "${POMPEY_WG_CONF}" >&2
+  exit 1
+fi
 grep -q "DNS = 10.2.0.1" "${POMPEY_CONFIG}/wireguard/wg0.conf"
 grep -q "10.0.0.0/8" "${POMPEY_LAN_FILE}"
 grep -q "185.159.157.1" "${IPTABLES_LOG}"
@@ -188,8 +193,29 @@ if grep -E 'basedir/bin/halt|/run/s6/.*/halt' "${ROOT}/pompey/rootfs/etc/service
   echo "wireguard/finish must not halt the container (that kills nginx/Ingress)" >&2
   exit 1
 fi
-grep -q 'resolvconf' "${ROOT}/pompey/rootfs/etc/services.d/wireguard/run"
+grep -q 'pompey-wg' "${ROOT}/pompey/rootfs/etc/services.d/wireguard/run"
+grep -q 'log_wg_quick' "${ROOT}/pompey/rootfs/etc/services.d/wireguard/run"
+grep -q 'pompey-wg-routes' "${ROOT}/pompey/rootfs/etc/services.d/wireguard/run"
+grep -q 'vpn-up' "${ROOT}/pompey/rootfs/etc/services.d/wireguard/run"
 grep -q 'Ingress stays up' "${ROOT}/pompey/rootfs/etc/services.d/wireguard/run"
+
+echo "== wg-quick helpers ignore HAOS resolvconf and read-only src_valid_mark =="
+WG_HELPERS="${ROOT}/pompey/rootfs/usr/local/bin/pompey-wg"
+chmod +x "${WG_HELPERS}/resolvconf" "${WG_HELPERS}/sysctl"
+"${WG_HELPERS}/resolvconf" -a wg0 -m 0 -x
+"${WG_HELPERS}/sysctl" -q net.ipv4.conf.all.src_valid_mark=1
+failing_sysctl="${WORK}/bin/failing-sysctl"
+printf '%s\n' '#!/bin/sh' 'echo "sysctl: error setting key: Read-only file system" >&2' 'exit 1' >"${failing_sysctl}"
+chmod +x "${failing_sysctl}"
+if ! POMPEY_REAL_SYSCTL="${failing_sysctl}" "${WG_HELPERS}/sysctl" -q net.ipv4.conf.all.src_valid_mark=1; then
+  echo "src_valid_mark must succeed when /proc/sys is read-only" >&2
+  exit 1
+fi
+if POMPEY_REAL_SYSCTL="${failing_sysctl}" "${WG_HELPERS}/sysctl" net.ipv4.ip_forward=1 >/dev/null 2>&1; then
+  echo "sysctl wrapper must still fail other keys when the real sysctl fails" >&2
+  exit 1
+fi
+grep -q 'src_valid_mark' "${WG_HELPERS}/sysctl"
 
 echo "== vpn kill switch uses nft/iptables when legacy filter table is missing =="
 cp "${ROOT}/tests/stubs/iptables-fail" "${WORK}/bin/iptables-legacy"
@@ -230,9 +256,9 @@ for name in iptables ip6tables iptables-nft ip6tables-nft iptables-legacy ip6tab
 done
 rm -f "${WORK}/bin/nft"
 
-echo "== engines and NAT-PMP wait for a Proton file before handshake countdown =="
-grep -q 'vpn-applied' "${ROOT}/pompey/rootfs/etc/services.d/engines/run"
-grep -q 'vpn-applied' "${ROOT}/pompey/rootfs/etc/services.d/natpmp/run"
+echo "== engines and NAT-PMP wait until wg0 has a handshake =="
+grep -q 'vpn-up' "${ROOT}/pompey/rootfs/etc/services.d/engines/run"
+grep -q 'vpn-up' "${ROOT}/pompey/rootfs/etc/services.d/natpmp/run"
 grep -q 'iptables-nft' "${ROOT}/pompey/rootfs/usr/local/bin/vpn-killswitch"
 
 echo "== vpn config resolves Endpoint hostname before kill switch =="
@@ -260,8 +286,9 @@ grep -q "access_log off" "${NGINX_INGRESS_CONF}"
 grep -q "access_log off" "${ROOT}/pompey/rootfs/etc/nginx/http.d/ingress.conf"
 grep -q '/status.json' "${ROOT}/pompey/rootfs/etc/nginx/nginx.conf"
 grep -q 'if=$pompey_accesslog' "${ROOT}/pompey/rootfs/etc/nginx/nginx.conf"
-grep -q 'WAIT_FOR_VPN_QUIET' "${ROOT}/pompey/rootfs/etc/services.d/engines/run"
-grep -q 'WAIT_FOR_VPN_QUIET' "${ROOT}/pompey/rootfs/etc/services.d/natpmp/run"
+grep -q 'vpn-up' "${ROOT}/pompey/rootfs/etc/services.d/engines/run"
+grep -q 'vpn-up' "${ROOT}/pompey/rootfs/etc/services.d/natpmp/run"
+grep -q -- '--quiet' "${ROOT}/pompey/rootfs/usr/local/bin/wait-for-vpn"
 grep -q '%H:%M:%S' "${ROOT}/pompey/rootfs/usr/local/bin/pompey-setup"
 grep -q '%H:%M:%S' "${ROOT}/pompey/rootfs/usr/local/bin/pompey-ingress"
 grep -q '%H:%M:%S' "${ROOT}/pompey/rootfs/usr/local/bin/wire-stack"
@@ -282,6 +309,9 @@ test "$(jq -r .step "${POMPEY_READY}/status.json")" = vpn
 python3 "${BIN}/pompey-status" ready "Ready" 100
 test "$(jq -r .handoff "${POMPEY_READY}/status.json")" = true
 test "$(jq -r .search "${POMPEY_READY}/status.json")" = true
+rm -rf "${POMPEY_READY}"
+python3 "${BIN}/pompey-status" vpn "Starting" 5
+test -f "${POMPEY_READY}/status.json"
 
 echo "== fetch URL construction (range GET, not a full download) =="
 urls="$(run "${BIN}/fetch-engines" --print-urls)"

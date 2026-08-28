@@ -1,0 +1,5 @@
+#!/bin/sh
+# wg-quick calls resolvconf when the conf has DNS=. HAOS /etc/resolv.conf is
+# not an openresolv file ("signature mismatch"), and that rollback deletes wg0.
+# Pompey writes Proton DNS after the interface is up.
+exit 0
