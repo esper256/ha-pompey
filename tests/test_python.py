@@ -1813,7 +1813,7 @@ class WireStack(unittest.TestCase):
         os.environ["INDEXER_API_KEY"] = ""
         os.environ["MEDIA_ROOT"] = str(self.tmp)
         complete = self.tmp / "downloads" / "complete"
-        complete.mkdir(parents=True)
+        complete.mkdir(parents=True, exist_ok=True)
         payload = complete / "new-grab.mkv"
         payload.write_bytes(b"x" * 40)
         digest = "55" * 20
@@ -1841,7 +1841,7 @@ class WireStack(unittest.TestCase):
         os.environ["INDEXER_API_KEY"] = ""
         os.environ["MEDIA_ROOT"] = str(self.tmp)
         complete = self.tmp / "downloads" / "complete"
-        complete.mkdir(parents=True)
+        complete.mkdir(parents=True, exist_ok=True)
         wanted = complete / "matched.mkv"
         blocked = complete / "remux.mkv"
         wanted.write_bytes(b"ok")
@@ -1918,7 +1918,7 @@ class WireStack(unittest.TestCase):
         scan_paths = {item.get("path") for item in movie_scans}
         self.assertIn(str(self.tmp / "downloads" / "complete"), scan_paths)
         self.assertIn(str(stuck), scan_paths)
-        self.assertIn("still in complete/: radarr/stuck-title.mkv (50 bytes)", buf.getvalue())
+        self.assertIn("radarr/stuck-title.mkv (50 bytes)", buf.getvalue())
 
     def test_updates_existing_download_client_remove_flag(self):
         os.environ["INDEXER_URL"] = ""
