@@ -4,7 +4,7 @@ set -euo pipefail
 # shellcheck source=/dev/null
 source "$(command -v pompey-env)"
 
-bashio::log.info "Pompey ${BUILD_VERSION:-0.2.11} starting"
+bashio::log.info "Pompey ${BUILD_VERSION:-0.2.12} starting"
 pompey-status vpn "Starting" 5 || true
 
 mkdir -p "${POMPEY_CONFIG}/wireguard" "${POMPEY_WG_ETC}" "${POMPEY_VPN_TMP}" "${POMPEY_NGINX_RUN}"
@@ -44,9 +44,6 @@ if [[ -z "${plex_token}" ]]; then
 fi
 
 source_url="$(bashio::config 'source_url')"
-if [[ -z "${source_url}" ]]; then
-  source_url="$(bashio::config 'indexer_url')"
-fi
 if [[ -z "${source_url}" ]]; then
   bashio::log.warning "No source URL yet. Add a source (URL plus key) so titles can be found."
 fi
