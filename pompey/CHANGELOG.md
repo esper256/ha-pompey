@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.6
+
+- `wg-quick` no longer dies on `resolvconf: signature mismatch` for `/etc/resolv.conf` (Proton `DNS=` plus our rewrite of that file). Kernel WireGuard was actually working; resolvconf rolled `wg0` back and the WireGuard service **halted the whole container**, which took Ingress nginx with it (Home Assistant then showed an nginx error). Runtime conf strips `DNS=` (we still set Proton `10.2.0.1` ourselves); `wg-quick` gets a no-op resolvconf; a failed tunnel **leaves the wait screen up**. Kill switch is OUTPUT only — Supervisor Ingress to 8099 is INPUT and was never blocked.
+
 ## 0.2.5
 
 - Pasting a valid Proton `.conf` no longer fails with “Saved the file, but could not apply it” on Home Assistant OS. The wait screen was treating a kill-switch miss as a bad paste. HAOS has no `/lib/modules` and no legacy `iptables` filter table (`Table does not exist` / `modprobe: can't change directory to '/lib/modules'`). Pompey now probes `iptables-nft`, then `iptables`, then `iptables-legacy`, then `nft`. If none can attach, the Proton file stays saved and the tunnel still starts; the log says the kill switch could not attach.

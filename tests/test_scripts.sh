@@ -150,6 +150,12 @@ grep -q "FILEPRIVATEKEY" "${POMPEY_WG_CONF}"
 grep -q "185.159.157.1:51820" "${POMPEY_WG_CONF}"
 grep -q "PersistentKeepalive = 25" "${POMPEY_WG_CONF}"
 grep -q "nameserver 10.2.0.1" "${POMPEY_RESOLV}"
+if grep -qiE '^[[:space:]]*DNS[[:space:]]*=' "${POMPEY_WG_CONF}"; then
+  echo "DNS= must not reach wg-quick (resolvconf signature mismatch on HAOS)" >&2
+  cat "${POMPEY_WG_CONF}" >&2
+  exit 1
+fi
+grep -q "DNS = 10.2.0.1" "${POMPEY_CONFIG}/wireguard/wg0.conf"
 grep -q "10.0.0.0/8" "${POMPEY_LAN_FILE}"
 grep -q "185.159.157.1" "${IPTABLES_LOG}"
 grep -q "51820" "${IPTABLES_LOG}"
@@ -176,6 +182,14 @@ if grep -qiE '^[[:space:]]*(PostUp|PostDown)[[:space:]]*=' "${POMPEY_WG_CONF}"; 
   cat "${POMPEY_WG_CONF}" >&2
   exit 1
 fi
+
+echo "== WireGuard failure must not halt Ingress =="
+if grep -E 'basedir/bin/halt|/run/s6/.*/halt' "${ROOT}/pompey/rootfs/etc/services.d/wireguard/finish"; then
+  echo "wireguard/finish must not halt the container (that kills nginx/Ingress)" >&2
+  exit 1
+fi
+grep -q 'resolvconf' "${ROOT}/pompey/rootfs/etc/services.d/wireguard/run"
+grep -q 'Ingress stays up' "${ROOT}/pompey/rootfs/etc/services.d/wireguard/run"
 
 echo "== vpn kill switch uses nft/iptables when legacy filter table is missing =="
 cp "${ROOT}/tests/stubs/iptables-fail" "${WORK}/bin/iptables-legacy"
