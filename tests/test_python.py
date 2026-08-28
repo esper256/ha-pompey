@@ -461,8 +461,10 @@ class WireStack(unittest.TestCase):
         )
         self.nginx = nginx
         self.ready = ready
+        self._old_path = os.environ.get("PATH", "")
 
     def tearDown(self):
+        os.environ["PATH"] = self._old_path
         for httpd in self.servers:
             httpd.shutdown()
             httpd.server_close()
@@ -542,6 +544,32 @@ class WireStack(unittest.TestCase):
         self.assertTrue((self.ready / "wired").exists())
         self.assertEqual(self.state.indexers, [])
         self.assertEqual(self.state.commands, [])
+
+    def _stub_nginx(self, script: str) -> None:
+        bindir = self.tmp / "bin"
+        bindir.mkdir(exist_ok=True)
+        stub = bindir / "nginx"
+        stub.write_text("#!/bin/sh\n" + script)
+        stub.chmod(0o755)
+        os.environ["PATH"] = f"{bindir}:{self._old_path}"
+
+    def test_nginx_not_running_still_marks_ready(self):
+        self._stub_nginx(
+            'echo \'the "user" directive makes sense only if the master process runs with super-user privileges\' >&2\n'
+            'echo \'signal process started\' >&2\n'
+            'echo \'open() "/run/nginx.pid" failed (2: No such file or directory)\' >&2\n'
+            "exit 1\n"
+        )
+        rc = ws.main()
+        self.assertEqual(rc, 0)
+        self.assertTrue((self.ready / "wired").exists())
+
+    def test_nginx_reload_error_does_not_mark_ready(self):
+        self._stub_nginx('echo "invalid number of arguments in log_format" >&2\nexit 1\n')
+        with self.assertRaises(RuntimeError) as ctx:
+            ws.main()
+        self.assertIn("nginx reload failed", str(ctx.exception))
+        self.assertFalse((self.ready / "wired").exists())
 
 
 class RouteRating(unittest.TestCase):
