@@ -388,17 +388,23 @@ while IFS= read -r url; do
     if [[ "${out}" == "200" || "${out}" == "206" ]]; then
       break
     fi
+    # Cloudflare/Servarr origin failures are not a bad URL. Do not retry 40s×4.
+    case "${out}" in
+      ""|000|502|503|520|521|522|523|524) break ;;
+    esac
     sleep "${attempt}"
   done
   if [[ "${out}" == "200" || "${out}" == "206" ]]; then
     echo "${out} ${url%%\?*}"
     continue
   fi
-  # Servarr/GitHub range-GET 521/timeout is upstream, not a bad URL we built.
-  if [[ -z "${out}" || "${out}" == "000" || "${out}" == "502" || "${out}" == "503" || "${out}" == "521" ]]; then
-    echo "skip live fetch ${out:-timeout} ${url%%\?*}" >&2
-    continue
-  fi
+  # Servarr/GitHub range-GET 5xx/timeout is upstream, not a bad URL we built.
+  case "${out}" in
+    ""|000|502|503|520|521|522|523|524)
+      echo "skip live fetch ${out:-timeout} ${url%%\?*}" >&2
+      continue
+      ;;
+  esac
   echo "bad ${out} ${url}" >&2
   exit 1
 done <<<"${urls}"
