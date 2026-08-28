@@ -13,4 +13,7 @@ bash tests/test_scripts.sh
 echo "== wait-screen preview (--once) =="
 python3 tests/preview.py --once --port 18099
 
+echo "== fake wg0 smoke (skip if this VM cannot create veth) =="
+bash tests/test_dev_vpn.sh
+
 echo "all tests passed"
