@@ -30,14 +30,17 @@ chmod 600 "${DST}"
 # Proton/router PostUp iptables snippets break wg-quick on hosts with no
 # legacy filter table. DNS= makes wg-quick call resolvconf, which aborts on
 # Docker/HAOS /etc/resolv.conf ("signature mismatch") and deletes wg0.
-# We write Proton DNS ourselves and apply our own kill switch.
-grep -viE '^[[:space:]]*(PostUp|PostDown|PreUp|PreDown|DNS)[[:space:]]*=' "${DST}" >"${DST}.clean" || true
+# Table=auto (AllowedIPs 0.0.0.0/0) makes wg-quick sysctl src_valid_mark;
+# HAOS /proc/sys is read-only, and that rollback deletes wg0. Table=off:
+# we add routes after the iface is up. Proton DNS is written by us.
+grep -viE '^[[:space:]]*(PostUp|PostDown|PreUp|PreDown|DNS|Table)[[:space:]]*=' "${DST}" >"${DST}.clean" || true
 mv "${DST}.clean" "${DST}"
 chmod 600 "${DST}"
 
 if ! grep -qi '^[[:space:]]*PersistentKeepalive' "${DST}"; then
   printf '\nPersistentKeepalive = 25\n' >>"${DST}"
 fi
+printf '\nTable = off\n' >>"${DST}"
 
 resolved="$(python3 - "${DST}" <<'PY'
 import re

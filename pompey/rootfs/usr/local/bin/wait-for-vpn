@@ -7,8 +7,17 @@ if ! command -v ip >/dev/null 2>&1; then
 fi
 
 IFACE="${WG_IFACE:-wg0}"
-TRIES="${1:-60}"
 MAX_AGE="${WG_HANDSHAKE_MAX_AGE:-180}"
+
+quiet=0
+if [[ "${1:-}" == "--quiet" ]]; then
+  quiet=1
+  shift
+fi
+if [[ "${WAIT_FOR_VPN_QUIET:-}" == "1" ]]; then
+  quiet=1
+fi
+TRIES="${1:-60}"
 
 iface_up() {
   local ns="${POMPEY_FAKE_VPN_NETNS:-pompey-dev}"
@@ -48,9 +57,9 @@ i=0
 until handshake_ok; do
   i=$((i + 1))
   if [[ "${i}" -ge "${TRIES}" ]]; then
-    # TRIES=1 is the monitor loop; the caller logs. Engines/NAT-PMP set QUIET
-    # so only the WireGuard service reports a missing handshake.
-    if [[ "${TRIES}" -gt 1 && "${WAIT_FOR_VPN_QUIET:-}" != "1" ]]; then
+    # TRIES=1 is the monitor loop; the caller logs. --quiet so engines/NAT-PMP
+    # do not duplicate the WireGuard service (with-contenv drops env flags).
+    if [[ "${TRIES}" -gt 1 && "${quiet}" -ne 1 ]]; then
       bashio::log.error "WireGuard ${IFACE} has no fresh handshake"
       if [[ "${POMPEY_FAKE_VPN:-}" == "1" ]]; then
         pompey-status vpn "Waiting for fake wg0" 15 "POMPEY_FAKE_VPN is set but ${IFACE} is not up. Run pompey-dev-vpn up." || true

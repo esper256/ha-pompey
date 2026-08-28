@@ -155,6 +155,11 @@ if grep -qiE '^[[:space:]]*DNS[[:space:]]*=' "${POMPEY_WG_CONF}"; then
   cat "${POMPEY_WG_CONF}" >&2
   exit 1
 fi
+if ! grep -qiE '^[[:space:]]*Table[[:space:]]*=[[:space:]]*off' "${POMPEY_WG_CONF}"; then
+  echo "Table=off must reach wg-quick (HAOS src_valid_mark is read-only)" >&2
+  cat "${POMPEY_WG_CONF}" >&2
+  exit 1
+fi
 grep -q "DNS = 10.2.0.1" "${POMPEY_CONFIG}/wireguard/wg0.conf"
 grep -q "10.0.0.0/8" "${POMPEY_LAN_FILE}"
 grep -q "185.159.157.1" "${IPTABLES_LOG}"
@@ -189,6 +194,9 @@ if grep -E 'basedir/bin/halt|/run/s6/.*/halt' "${ROOT}/pompey/rootfs/etc/service
   exit 1
 fi
 grep -q 'pompey-wg' "${ROOT}/pompey/rootfs/etc/services.d/wireguard/run"
+grep -q 'log_wg_quick' "${ROOT}/pompey/rootfs/etc/services.d/wireguard/run"
+grep -q 'pompey-wg-routes' "${ROOT}/pompey/rootfs/etc/services.d/wireguard/run"
+grep -q 'vpn-up' "${ROOT}/pompey/rootfs/etc/services.d/wireguard/run"
 grep -q 'Ingress stays up' "${ROOT}/pompey/rootfs/etc/services.d/wireguard/run"
 
 echo "== wg-quick helpers ignore HAOS resolvconf and read-only src_valid_mark =="
@@ -248,9 +256,9 @@ for name in iptables ip6tables iptables-nft ip6tables-nft iptables-legacy ip6tab
 done
 rm -f "${WORK}/bin/nft"
 
-echo "== engines and NAT-PMP wait for a Proton file before handshake countdown =="
-grep -q 'vpn-applied' "${ROOT}/pompey/rootfs/etc/services.d/engines/run"
-grep -q 'vpn-applied' "${ROOT}/pompey/rootfs/etc/services.d/natpmp/run"
+echo "== engines and NAT-PMP wait until wg0 has a handshake =="
+grep -q 'vpn-up' "${ROOT}/pompey/rootfs/etc/services.d/engines/run"
+grep -q 'vpn-up' "${ROOT}/pompey/rootfs/etc/services.d/natpmp/run"
 grep -q 'iptables-nft' "${ROOT}/pompey/rootfs/usr/local/bin/vpn-killswitch"
 
 echo "== vpn config resolves Endpoint hostname before kill switch =="
@@ -300,6 +308,9 @@ test "$(jq -r .step "${POMPEY_READY}/status.json")" = vpn
 python3 "${BIN}/pompey-status" ready "Ready" 100
 test "$(jq -r .handoff "${POMPEY_READY}/status.json")" = true
 test "$(jq -r .search "${POMPEY_READY}/status.json")" = true
+rm -rf "${POMPEY_READY}"
+python3 "${BIN}/pompey-status" vpn "Starting" 5
+test -f "${POMPEY_READY}/status.json"
 
 echo "== fetch URL construction (range GET, not a full download) =="
 urls="$(run "${BIN}/fetch-engines" --print-urls)"

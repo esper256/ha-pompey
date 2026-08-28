@@ -9,10 +9,9 @@ if [[ "${POMPEY_FAKE_VPN:-}" == "1" ]]; then
   exec sleep infinity
 fi
 
-until [[ -f "${POMPEY_READY}/vpn-applied" ]]; do
+until [[ -f "${POMPEY_READY}/vpn-up" ]]; do
   sleep 2
 done
-WAIT_FOR_VPN_QUIET=1 wait-for-vpn 45
 bashio::log.info "NAT-PMP renew loop against ${POMPEY_WG_DNS}"
 mkdir -p "${POMPEY_VPN_TMP}"
 

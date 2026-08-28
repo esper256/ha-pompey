@@ -8,10 +8,27 @@ need_proton() {
   POMPEY_STATUS_NEED_PROTON=1 pompey-status vpn "Paste the Proton WireGuard file you downloaded" 8 || true
 }
 
+# Stamp every wg-quick line. Home Assistant's app log otherwise shows a wall
+# of untimed [#] commands, then one bashio ERROR much later.
+log_wg_quick() {
+  local out rc=0
+  set +e
+  out="$(PATH="/usr/local/bin/pompey-wg:${PATH}" "$@" 2>&1)"
+  rc=$?
+  set -e
+  if [[ -n "${out}" ]]; then
+    while IFS= read -r line || [[ -n "${line}" ]]; do
+      bashio::log.info "${line}"
+    done <<<"${out}"
+  fi
+  return "${rc}"
+}
+
 # wg-quick will delete wg0 if resolvconf or src_valid_mark fails on HAOS.
-# PATH helpers no-op those two; Proton DNS is written after the iface is up.
+# PATH helpers no-op those two; runtime conf uses Table=off so sysctl is not
+# called. Proton DNS is written after the iface is up.
 wg_quick_up() {
-  PATH="/usr/local/bin/pompey-wg:${PATH}" wg-quick up wg0
+  log_wg_quick wg-quick up wg0
 }
 
 bring_up_wg0() {
@@ -26,12 +43,18 @@ bring_up_wg0() {
   wg_quick_up
 }
 
+mark_vpn_up() {
+  mkdir -p "${POMPEY_READY}"
+  touch "${POMPEY_READY}/vpn-up"
+}
+
 if [[ "${POMPEY_FAKE_VPN:-}" == "1" ]]; then
   bashio::log.info "Fake wg0 (agent/dev): not Proton"
   pompey-status vpn "Bringing up fake wg0" 10 || true
   pompey-dev-vpn up
   POMPEY_STATUS_NEED_PROTON=0 pompey-status vpn "Fake wg0 is up" 15 || true
   wait-for-vpn 10
+  mark_vpn_up
   while wait-for-vpn 1; do
     sleep 30
   done
@@ -52,6 +75,7 @@ until bring_up_wg0; do
   sleep 5
 done
 
+pompey-wg-routes || bashio::log.warning "Could not point the default route at wg0"
 printf 'nameserver %s\n' "${POMPEY_WG_DNS}" >/etc/resolv.conf
 # Filter tables sometimes appear only after the interface exists. Retry once.
 if [[ "${POMPEY_FAKE_VPN:-}" != "1" ]]; then
@@ -61,6 +85,7 @@ fi
 bashio::log.info "Waiting for Proton handshake on wg0"
 pompey-status vpn "Waiting for Proton handshake" 15 || true
 wait-for-vpn 45
+mark_vpn_up
 
 while wait-for-vpn 1; do
   sleep 30

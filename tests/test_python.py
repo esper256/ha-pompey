@@ -365,8 +365,12 @@ class Helpers(unittest.TestCase):
         self.assertIn("/status.json", nginx)
         setup = (ROOT / "pompey/rootfs/usr/local/bin/pompey-setup").read_text()
         ingress = (ROOT / "pompey/rootfs/usr/local/bin/pompey-ingress").read_text()
+        status = (ROOT / "pompey/rootfs/usr/local/bin/pompey-status").read_text()
+        wg = (ROOT / "pompey/rootfs/etc/services.d/wireguard/run").read_text()
         self.assertIn("%H:%M:%S", setup)
         self.assertIn("%H:%M:%S", ingress)
+        self.assertIn("%H:%M:%S", status)
+        self.assertIn("log_wg_quick", wg)
         self.assertIn('code in {"200", "304"}', ingress)
 
     def test_ha_store_icon_is_square_logo_is_wide(self):

@@ -1,0 +1,54 @@
+#!/command/with-contenv bashio
+# shellcheck shell=bash
+# wg-quick Table=off does not install a default route (that path is what
+# sysctl src_valid_mark on HAOS). Keep the Proton endpoint and LAN on the
+# original gateway; send default via wg0.
+set -euo pipefail
+# shellcheck source=/dev/null
+source "$(command -v pompey-env)"
+
+WG_CONF="${1:-${POMPEY_WG_CONF:-/etc/wireguard/wg0.conf}}"
+LAN_FILE="${POMPEY_LAN_FILE:-/etc/pompey-lan-networks}"
+
+if ! command -v ip >/dev/null 2>&1; then
+  export PATH="/usr/sbin:/sbin:${PATH}"
+fi
+
+ENDPOINT_IP="$(awk -F'=' '{
+  key=$1
+  gsub(/[[:space:]]/, "", key)
+  if (tolower(key) == "endpoint") {
+    val=$2
+    gsub(/[[:space:]]/, "", val)
+    print val
+    exit
+  }
+}' "${WG_CONF}")"
+ENDPOINT_IP="${ENDPOINT_IP%%:*}"
+if [[ -z "${ENDPOINT_IP}" ]]; then
+  bashio::log.error "pompey-wg-routes: no Endpoint in ${WG_CONF}"
+  exit 1
+fi
+
+orig_gw="$(ip -4 route show default 2>/dev/null | awk '{for (i = 1; i <= NF; i++) if ($i == "via") { print $(i + 1); exit }}')"
+orig_dev="$(ip -4 route show default 2>/dev/null | awk '{for (i = 1; i <= NF; i++) if ($i == "dev") { print $(i + 1); exit }}')"
+
+if [[ -n "${orig_gw}" && -n "${orig_dev}" && "${orig_dev}" != "wg0" ]]; then
+  bashio::log.info "Proton endpoint ${ENDPOINT_IP} stays via ${orig_gw} on ${orig_dev}"
+  ip -4 route replace "${ENDPOINT_IP}/32" via "${orig_gw}" dev "${orig_dev}"
+  if [[ -f "${LAN_FILE}" ]]; then
+    IFS=',' read -r -a cidrs <"${LAN_FILE}" || true
+    for cidr in "${cidrs[@]+"${cidrs[@]}"}"; do
+      cidr="${cidr// /}"
+      [[ -n "${cidr}" ]] || continue
+      ip -4 route replace "${cidr}" via "${orig_gw}" dev "${orig_dev}" || true
+    done
+  fi
+else
+  bashio::log.warning "No original default route; Proton handshake still has to reach ${ENDPOINT_IP}"
+fi
+
+ip -4 route replace "${POMPEY_WG_DNS}/32" dev wg0 || true
+ip -4 route replace default dev wg0
+bashio::log.info "Default route is wg0"
+exit 0
