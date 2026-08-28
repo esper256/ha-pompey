@@ -15,6 +15,29 @@ This app is **not** published as a container image. Copy `pompey/` into `/addons
 3. At least one **source**: a URL plus API key. Pompey does not ship a catalog of sources. Without this, search will not find releases.
 4. Disk that can hold libraries and in-progress downloads on the same filesystem (`/media` is the usual choice). This stack wants a few GB of RAM on top of Home Assistant. A 2 GB Pi is not a target.
 
+## First boot checklist
+
+Do this **before** you start the app:
+
+1. Use the **0.2.1** tree (the first-install PR), not an older copy of `main`.
+2. Proton WireGuard `.conf` in the app config share as `wireguard/wg0.conf`.
+3. Plex token: open any item on the Plex server in a browser, View Source, search for `X-Plex-Token`, or follow [Plex’s token article](https://support.plex.tv/articles/204059436-finding-an-authentication-token-x-plex-token/).
+4. Plex address is a **numeric IP** (see table below).
+5. In Plex, add libraries that point at these folders (create them if Plex does not see them yet):
+
+```text
+/media/Movies
+/media/TV
+/media/Kid Friendly Movies
+/media/Kid Friendly TV
+```
+
+6. One source URL + API key.
+
+**Success** is: wait screen finishes, sidebar reloads into search, you can find a title and request it. Whether that file shows up in Plex is what this install is meant to prove.
+
+**If it fails**, send the app log (Settings → Apps → Pompey → Log) plus which wait-screen step it stuck on. Do not send the Proton private key or Plex token.
+
 ## Install
 
 1. Copy the `pompey/` folder into `/addons` on the Home Assistant OS machine (USB/Samba/SSH).
