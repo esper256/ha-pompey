@@ -525,6 +525,10 @@ def refresh_monitored_downloads(base: str, api_key: str, kind: str) -> None:
 
 
 def log_stuck_imports(base: str, api_key: str, kind: str) -> None:
+    """Arr only warns on a failed move. A finished torrent still in complete/ with
+    status ok is the silent case: Seerr already handed Radarr the library folder,
+    qBittorrent never gets that path, and Arr has not started the import yet.
+    """
     try:
         payload = http(
             "GET",
@@ -538,15 +542,9 @@ def log_stuck_imports(base: str, api_key: str, kind: str) -> None:
     records = as_list(payload)
     if isinstance(payload, dict) and not records:
         records = as_list(payload.get("records"))
+    shown = 0
     for item in records:
-        state = str(item.get("trackedDownloadState") or "")
-        status = str(item.get("trackedDownloadStatus") or "").lower()
-        if status not in {"warning", "error"} and state not in {
-            "importPending",
-            "importBlocked",
-            "failed",
-            "failedPending",
-        }:
+        if not queue_needs_import_log(item):
             continue
         bits = []
         for msg in item.get("statusMessages") or []:
@@ -556,11 +554,75 @@ def log_stuck_imports(base: str, api_key: str, kind: str) -> None:
                 if title:
                     bits.append(str(title))
                 bits.extend(str(part) for part in messages if part)
-        extra = "; ".join(bits) or item.get("errorMessage") or state or status
+        extra = (
+            "; ".join(bits)
+            or item.get("errorMessage")
+            or item.get("trackedDownloadState")
+            or item.get("trackedDownloadStatus")
+            or item.get("status")
+            or "still in the download folder"
+        )
+        dest = item.get("outputPath") or ""
+        where = f" qbit={dest}" if dest else ""
         log(
-            f"{kind} download not in the library yet: {item.get('title')} ({extra})",
+            f"{kind} download not in the library yet: {item.get('title')} ({extra}){where}",
             "WARNING",
         )
+        shown += 1
+        if shown >= 15:
+            break
+
+
+def title_library_path(item: dict) -> str:
+    path = item.get("path") or item.get("rootFolderPath") or ""
+    if isinstance(path, str) and path.strip():
+        return path.strip()
+    return ""
+
+
+def log_titles_waiting_for_library(base: str, api_key: str, kind: str) -> None:
+    """Show the folder Seerr/Arr already stored. Empty path means the handoff never landed."""
+    endpoint = "movie" if kind == "radarr" else "series"
+    try:
+        rows = as_list(http("GET", f"{base}/{endpoint}", headers=arr_headers(api_key)))
+    except RuntimeError as exc:
+        log(f"{kind} library list: {exc}", "WARNING")
+        return
+    waiting: list[str] = []
+    for item in rows:
+        if item.get("monitored") is not True:
+            continue
+        if kind == "radarr":
+            if item.get("hasFile") is not False:
+                continue
+        else:
+            stats = item.get("statistics") if isinstance(item.get("statistics"), dict) else {}
+            if int(stats.get("episodeFileCount") or 0) > 0:
+                continue
+        dest = title_library_path(item) or "NO PATH (Seerr/Arr never stored a library folder)"
+        waiting.append(f"{item.get('title')} -> {dest}")
+        if len(waiting) >= 10:
+            break
+    if waiting:
+        log(f"{kind} titles with no library file yet: {'; '.join(waiting)}", "WARNING")
+
+
+def queue_needs_import_log(item: dict) -> bool:
+    if not isinstance(item, dict):
+        return False
+    state = str(item.get("trackedDownloadState") or "")
+    tracked = str(item.get("trackedDownloadStatus") or "").lower()
+    if tracked in {"warning", "error"} or state in {
+        "importPending",
+        "importBlocked",
+        "failed",
+        "failedPending",
+    }:
+        return True
+    output = str(item.get("outputPath") or "")
+    if output.strip() and path_under_complete(output):
+        return True
+    return False
 
 
 def first_profile(base: str, api_key: str):
@@ -2284,6 +2346,8 @@ def main() -> int:
     log_complete_drop_contents()
     log_stuck_imports(radarr, rk, "radarr")
     log_stuck_imports(sonarr, sk, "sonarr")
+    log_titles_waiting_for_library(radarr, rk, "radarr")
+    log_titles_waiting_for_library(sonarr, sk, "sonarr")
     log_recent_prowlarr_searches(prowlarr, pk)
 
     sl = language_profile_id(sonarr, sk)
@@ -2321,6 +2385,8 @@ def housekeep() -> int:
     log_complete_drop_contents()
     log_stuck_imports(radarr, rk, "radarr")
     log_stuck_imports(sonarr, sk, "sonarr")
+    log_titles_waiting_for_library(radarr, rk, "radarr")
+    log_titles_waiting_for_library(sonarr, sk, "sonarr")
     return 0
 
 

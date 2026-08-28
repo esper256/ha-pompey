@@ -2,7 +2,7 @@
 
 ## 0.2.32
 
-- Finished files on a NAS share were staying in `downloads/complete` instead of the Plex library folder. qBittorrent was still seeding (and locking the file), and Arr’s default is to hardlink then copy — CIFS cannot hardlink, so that “move” was a slow second write or a failure. Housekeeping now **stops** a finished torrent (files kept), tells Arr to **rename** on the same share, and logs why a file is rejected (wrong quality stays in `complete/`; do not drag it by hand). Older leftover `complete/radarr` folders are scanned too. Rebuild so the banner says **0.2.32**.
+- Finished files on a NAS share were staying in `downloads/complete` instead of the Plex library folder. qBittorrent never receives that library path — Seerr tells Radarr/Sonarr the Movies/TV folder, qBittorrent only saves into `complete/`, and Arr is supposed to import. If Arr never starts that import there is no “failed move” line (a 100% torrent still seeding looks like a normal download). Housekeeping now **stops** a finished torrent so Arr will treat it as ready, tells Arr to **rename** on the same share (hardlinks off — a network share cannot hardlink), and the app log lists each title’s **library folder** plus anything still under `complete/`. A Default remux stays in `complete/` on purpose. Older leftover `complete/radarr` folders are scanned too. Rebuild so the banner says **0.2.32**.
 
 ## 0.2.31
 

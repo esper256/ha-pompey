@@ -1265,6 +1265,42 @@ PersistentKeepalive = 25
             "Not a wanted quality",
         )
 
+    def test_queue_logs_finished_drop_even_without_arr_warning(self):
+        os.environ["MEDIA_ROOT"] = "/media/dlna"
+        self.assertTrue(
+            ws.queue_needs_import_log(
+                {
+                    "title": "Silent",
+                    "status": "downloading",
+                    "trackedDownloadStatus": "ok",
+                    "trackedDownloadState": "downloading",
+                    "outputPath": "/media/dlna/downloads/complete/Silent",
+                }
+            )
+        )
+        self.assertFalse(
+            ws.queue_needs_import_log(
+                {
+                    "title": "Active",
+                    "status": "downloading",
+                    "trackedDownloadStatus": "ok",
+                    "trackedDownloadState": "downloading",
+                    "outputPath": "/media/dlna/downloads/incomplete/Silent",
+                }
+            )
+        )
+        self.assertTrue(
+            ws.queue_needs_import_log(
+                {
+                    "title": "Warned",
+                    "trackedDownloadStatus": "warning",
+                    "trackedDownloadState": "importPending",
+                    "outputPath": "",
+                }
+            )
+        )
+        os.environ.pop("MEDIA_ROOT", None)
+
     def test_qbit_payload_gone_treats_empty_dir_as_moved(self):
         empty = Path(os.environ.get("TEST_TMP") or "/tmp") / f"pompey-gone-{os.getpid()}"
         empty.mkdir(parents=True, exist_ok=True)
@@ -1982,6 +2018,47 @@ class WireStack(unittest.TestCase):
         self.assertGreaterEqual(
             [c.get("name") for c in self.state.arr_commands].count("RefreshMonitoredDownloads"),
             2,
+        )
+
+    def test_housekeep_logs_library_path_when_file_never_imported(self):
+        os.environ["INDEXER_URL"] = ""
+        os.environ["INDEXER_API_KEY"] = ""
+        os.environ["MEDIA_ROOT"] = "/media/dlna"
+        self.state.movies = [
+            {
+                "id": 1,
+                "title": "Marty Supreme",
+                "monitored": True,
+                "hasFile": False,
+                "path": "/media/dlna/Movies/Not Kid Friendly/Marty Supreme (2025)",
+            }
+        ]
+        self.state.queue = [
+            {
+                "title": "Marty Supreme",
+                "status": "downloading",
+                "trackedDownloadStatus": "ok",
+                "trackedDownloadState": "downloading",
+                "outputPath": "/media/dlna/downloads/complete/Marty Supreme",
+            }
+        ]
+        from io import StringIO
+        from contextlib import redirect_stdout
+
+        buf = StringIO()
+        with redirect_stdout(buf):
+            rc = ws.housekeep()
+        self.assertEqual(rc, 0)
+        out = buf.getvalue()
+        self.assertIn(
+            "radarr download not in the library yet: Marty Supreme (downloading) "
+            "qbit=/media/dlna/downloads/complete/Marty Supreme",
+            out,
+        )
+        self.assertIn(
+            "radarr titles with no library file yet: Marty Supreme -> "
+            "/media/dlna/Movies/Not Kid Friendly/Marty Supreme (2025)",
+            out,
         )
 
     def test_retries_monitored_titles_still_missing_a_file(self):
