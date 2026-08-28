@@ -441,8 +441,10 @@ def ensure_media_management(base: str, api_key: str, kind: str) -> None:
 
     Network media shares (this house: /media/dlna) often report 0 free space, so
     Radarr/Sonarr skip import and the file sits in downloads/complete. Auto
-    completed-download handling must stay on. Do not fail the wait screen if
-    this PUT 400s — quality profiles and Seerr still need to wire.
+    completed-download handling must stay on. Hardlinks do not work on CIFS, and
+    the copy fallback is a slow second write — same-share rename (Move) is the
+    household path. Do not fail the wait screen if this PUT 400s — quality
+    profiles and Seerr still need to wire.
     """
     try:
         cfg = http("GET", f"{base}/config/mediamanagement", headers=arr_headers(api_key))
@@ -456,6 +458,7 @@ def ensure_media_management(base: str, api_key: str, kind: str) -> None:
         "enableCompletedDownloadHandling": True,
         "skipFreeSpaceCheckWhenImporting": True,
         "minimumFreeSpaceWhenImporting": MIN_IMPORT_FREE_SPACE,
+        "copyUsingHardlinks": False,
     }
     if all(cfg.get(key) == value for key, value in want.items()):
         return
@@ -472,7 +475,43 @@ def ensure_media_management(base: str, api_key: str, kind: str) -> None:
     except RuntimeError as exc:
         log(f"{kind} media management: {exc}", "WARNING")
         return
-    log(f"{kind} import into library folders (skip NAS free-space check)")
+    log(f"{kind} import into library folders (rename on the NAS, skip free-space check)")
+
+
+def ensure_download_client_handling(base: str, api_key: str, kind: str) -> None:
+    """Keep completed-download handling on. Do not grab the same title again if
+    a torrent was dropped before the file was renamed into the library.
+    """
+    try:
+        cfg = http("GET", f"{base}/config/downloadclient", headers=arr_headers(api_key))
+    except RuntimeError as exc:
+        log(f"{kind} download-client config: {exc}", "WARNING")
+        return
+    if not isinstance(cfg, dict):
+        log(f"{kind} download-client config missing", "WARNING")
+        return
+    want = {
+        "enableCompletedDownloadHandling": True,
+        "autoRedownloadFailed": False,
+    }
+    if "autoRedownloadFailedFromInteractiveSearch" in cfg:
+        want["autoRedownloadFailedFromInteractiveSearch"] = False
+    if all(cfg.get(key) == value for key, value in want.items()):
+        return
+    updated = dict(cfg)
+    updated.update(want)
+    ident = cfg.get("id", 1)
+    try:
+        http(
+            "PUT",
+            f"{base}/config/downloadclient/{ident}",
+            updated,
+            headers=arr_headers(api_key),
+        )
+    except RuntimeError as exc:
+        log(f"{kind} download-client config: {exc}", "WARNING")
+        return
+    log(f"{kind} completed-download handling on (no auto re-download)")
 
 
 def refresh_monitored_downloads(base: str, api_key: str, kind: str) -> None:
@@ -1563,6 +1602,14 @@ def qbit_delete_url() -> str:
     return f"{qbit_url()}/api/v2/torrents/delete"
 
 
+def qbit_stop_url() -> str:
+    return f"{qbit_url()}/api/v2/torrents/{'stop'}"
+
+
+def qbit_pause_url() -> str:
+    return f"{qbit_url()}/api/v2/torrents/{'pause'}"
+
+
 # Recheck/move is transient. missingFiles means the payload left (Arr import or a
 # hand move). Leaving that torrent in qBittorrent is what re-downloads it.
 QBIT_TRANSIENT = {
@@ -1572,6 +1619,12 @@ QBIT_TRANSIENT = {
     "checkingResumeData",
     "allocating",
     "metaDL",
+}
+QBIT_STOPPED = {
+    "pausedUP",
+    "pausedDL",
+    "stoppedUP",
+    "stoppedDL",
 }
 
 
@@ -1592,6 +1645,18 @@ def qbit_payload_gone(item: dict) -> bool:
     return False
 
 
+def qbit_is_finished(item: dict) -> bool:
+    try:
+        progress = float(item.get("progress") or 0)
+    except (TypeError, ValueError):
+        progress = 0.0
+    try:
+        left = float(item.get("amount_left") or 1)
+    except (TypeError, ValueError):
+        left = 1.0
+    return progress >= 0.999 or left == 0
+
+
 def qbit_should_forget(item: dict, gone: bool | None = None) -> bool:
     """Drop the qBittorrent row only. Never delete files (library may be a hardlink)."""
     if not isinstance(item, dict):
@@ -1603,16 +1668,32 @@ def qbit_should_forget(item: dict, gone: bool | None = None) -> bool:
         gone = qbit_payload_gone(item)
     if state == "missingFiles":
         return True
-    try:
-        progress = float(item.get("progress") or 0)
-    except (TypeError, ValueError):
-        progress = 0.0
-    try:
-        left = float(item.get("amount_left") or 1)
-    except (TypeError, ValueError):
-        left = 1.0
-    finished = progress >= 0.999 or left == 0
-    return bool(gone and finished)
+    return bool(gone and qbit_is_finished(item))
+
+
+def path_under_complete(path: str) -> bool:
+    root = os.path.normpath(downloads_complete())
+    full = os.path.normpath(path.strip())
+    if not os.path.isabs(full):
+        full = os.path.normpath(os.path.join(root, full))
+    return full == root or full.startswith(root + os.sep)
+
+
+def qbit_should_unlock(item: dict) -> bool:
+    """Stop a finished torrent whose files still sit in complete/ so Arr can rename."""
+    if not isinstance(item, dict):
+        return False
+    state = str(item.get("state") or "")
+    if state in QBIT_TRANSIENT or state in QBIT_STOPPED:
+        return False
+    if state == "missingFiles" or qbit_payload_gone(item):
+        return False
+    if not qbit_is_finished(item):
+        return False
+    path = item.get("content_path") or item.get("save_path") or ""
+    if not isinstance(path, str) or not path.strip():
+        return False
+    return path_under_complete(path)
 
 
 def qbit_forget_torrents(hashes: list[str]) -> None:
@@ -1622,6 +1703,46 @@ def qbit_forget_torrents(hashes: list[str]) -> None:
         {"hashes": "|".join(hashes), "deleteFiles": "false"}
     ).encode()
     http("POST", qbit_delete_url(), data)
+
+
+def qbit_stop_torrents(hashes: list[str]) -> None:
+    """qBittorrent 5 uses stop; 4.x still has pause. Never delete files."""
+    if not hashes:
+        return
+    data = urllib.parse.urlencode({"hashes": "|".join(hashes)}).encode()
+    try:
+        http("POST", qbit_stop_url(), data)
+        return
+    except RuntimeError:
+        http("POST", qbit_pause_url(), data)
+
+
+def unlock_completed_torrents() -> None:
+    """Release the CIFS lock on finished files so Arr can rename them into the library."""
+    try:
+        payload = http("GET", qbit_torrents_url())
+    except RuntimeError as exc:
+        log(f"qbit torrents: {exc}", "WARNING")
+        return
+    rows = payload if isinstance(payload, list) else []
+    hashes: list[str] = []
+    for item in rows:
+        if not qbit_should_unlock(item):
+            continue
+        digest = item.get("hash")
+        if digest:
+            hashes.append(str(digest))
+    if not hashes:
+        return
+    try:
+        qbit_stop_torrents(hashes)
+    except RuntimeError as exc:
+        log(f"qbit stop completed: {exc}", "WARNING")
+        return
+    log(
+        f"qbit stopped {len(hashes)} finished torrent(s) so Arr can rename "
+        "into the library (torrent kept; files kept)"
+    )
 
 
 def forget_moved_torrents() -> None:
@@ -1666,6 +1787,108 @@ def scan_download_drop(base: str, api_key: str, kind: str) -> None:
             log(f"{kind} scanning {path} for files to import")
         except RuntimeError as exc:
             log(f"{kind} complete-folder scan {path}: {exc}", "WARNING")
+
+
+def import_rejection_text(item: dict) -> str:
+    bits = []
+    for rej in item.get("rejections") or []:
+        if isinstance(rej, dict):
+            bits.append(str(rej.get("reason") or rej.get("message") or rej))
+        elif rej:
+            bits.append(str(rej))
+    return "; ".join(bit for bit in bits if bit)
+
+
+def manual_import_file(item: dict, kind: str) -> dict | None:
+    path = item.get("path")
+    if not isinstance(path, str) or not path.strip():
+        return None
+    quality = item.get("quality")
+    if not isinstance(quality, dict):
+        return None
+    languages = item.get("languages") if isinstance(item.get("languages"), list) else []
+    row = {
+        "path": path,
+        "quality": quality,
+        "languages": languages,
+        "downloadId": item.get("downloadId") or "",
+        "releaseGroup": item.get("releaseGroup") or "",
+    }
+    if kind == "radarr":
+        movie = item.get("movie") if isinstance(item.get("movie"), dict) else {}
+        movie_id = item.get("movieId") or movie.get("id")
+        if not movie_id:
+            return None
+        row["movieId"] = movie_id
+        return row
+    series = item.get("series") if isinstance(item.get("series"), dict) else {}
+    series_id = item.get("seriesId") or series.get("id")
+    episode_ids = item.get("episodeIds")
+    if not isinstance(episode_ids, list):
+        episode_ids = [
+            ep.get("id")
+            for ep in item.get("episodes") or []
+            if isinstance(ep, dict) and ep.get("id")
+        ]
+    episode_ids = [eid for eid in episode_ids if eid]
+    if not series_id or not episode_ids:
+        return None
+    row["seriesId"] = series_id
+    row["episodeIds"] = episode_ids
+    return row
+
+
+def import_matched_drop(base: str, api_key: str, kind: str) -> None:
+    """Rename matched files Arr already approved. Log why the rest stay in complete/."""
+    seen: set[str] = set()
+    files: list[dict] = []
+    for folder in download_scan_paths():
+        if not os.path.isdir(folder):
+            continue
+        query = urllib.parse.urlencode(
+            {"folder": folder, "filterExistingFiles": "false"}
+        )
+        try:
+            payload = http(
+                "GET",
+                f"{base}/manualimport?{query}",
+                headers=arr_headers(api_key),
+            )
+        except RuntimeError as exc:
+            log(f"{kind} manual import list {folder}: {exc}", "WARNING")
+            continue
+        for item in as_list(payload):
+            path = item.get("path")
+            if not isinstance(path, str) or path in seen:
+                continue
+            seen.add(path)
+            rejected = import_rejection_text(item)
+            if rejected:
+                log(
+                    f"{kind} will not import {os.path.basename(path)}: {rejected}",
+                    "WARNING",
+                )
+                continue
+            row = manual_import_file(item, kind)
+            if not row:
+                log(
+                    f"{kind} no library match for {os.path.basename(path)}",
+                    "WARNING",
+                )
+                continue
+            files.append(row)
+    if not files:
+        return
+    try:
+        http(
+            "POST",
+            f"{base}/command",
+            {"name": "ManualImport", "files": files, "importMode": "Move"},
+            headers=arr_headers(api_key),
+        )
+        log(f"{kind} renaming {len(files)} file(s) into the library")
+    except RuntimeError as exc:
+        log(f"{kind} manual import: {exc}", "WARNING")
 
 
 def log_complete_drop_contents() -> None:
@@ -2042,16 +2265,21 @@ def main() -> int:
     rp = household_quality_profile(radarr, rk, "radarr")
     ensure_media_management(sonarr, sk, "sonarr")
     ensure_media_management(radarr, rk, "radarr")
+    ensure_download_client_handling(sonarr, sk, "sonarr")
+    ensure_download_client_handling(radarr, rk, "radarr")
     ensure_prowlarr_app(prowlarr, pk, "Sonarr", "Sonarr", sonarr_url(), sk)
     ensure_prowlarr_app(prowlarr, pk, "Radarr", "Radarr", radarr_url(), rk)
     ensure_indexer(prowlarr, pk)
     sync_prowlarr_indexers(prowlarr, pk)
     log_arr_vs_prowlarr_indexers(radarr, rk, sonarr, sk, prowlarr, pk)
     retry_unfilled_titles(radarr, rk, sonarr, sk)
+    unlock_completed_torrents()
     refresh_monitored_downloads(radarr, rk, "radarr")
     refresh_monitored_downloads(sonarr, sk, "sonarr")
     scan_download_drop(radarr, rk, "radarr")
     scan_download_drop(sonarr, sk, "sonarr")
+    import_matched_drop(radarr, rk, "radarr")
+    import_matched_drop(sonarr, sk, "sonarr")
     forget_moved_torrents()
     log_complete_drop_contents()
     log_stuck_imports(radarr, rk, "radarr")
@@ -2074,7 +2302,7 @@ def main() -> int:
 
 
 def housekeep() -> int:
-    """Keep hidden qBittorrent empty of torrents whose files already left."""
+    """Stop finished torrents, rename into the library, forget rows whose files left."""
     secrets = load_secrets()
     wait_http(f"{qbit_url()}/api/v2/app/version")
     wait_http(f"{sonarr_url()}/ping")
@@ -2082,10 +2310,13 @@ def housekeep() -> int:
     sonarr = f"{sonarr_url()}/api/v3"
     radarr = f"{radarr_url()}/api/v3"
     sk, rk = secrets["sonarr_api_key"], secrets["radarr_api_key"]
+    unlock_completed_torrents()
     refresh_monitored_downloads(radarr, rk, "radarr")
     refresh_monitored_downloads(sonarr, sk, "sonarr")
     scan_download_drop(radarr, rk, "radarr")
     scan_download_drop(sonarr, sk, "sonarr")
+    import_matched_drop(radarr, rk, "radarr")
+    import_matched_drop(sonarr, sk, "sonarr")
     forget_moved_torrents()
     log_complete_drop_contents()
     log_stuck_imports(radarr, rk, "radarr")

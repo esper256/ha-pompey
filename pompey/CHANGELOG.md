@@ -2,7 +2,7 @@
 
 ## 0.2.32
 
-- Older downloads can sit in `downloads/complete/radarr` (qBittorrent used a category subfolder). Newer ones go to `incomplete/` then `complete/` with no `radarr/` folder. Arr’s scan of `complete/` can treat that leftover `radarr` directory as a title and never look inside. Housekeeping now scans `complete/radarr` and `complete/sonarr` too, and the app log lists what is still under `complete/` (names and sizes, not a full Home Assistant dump). Rebuild so the banner says **0.2.32**.
+- Finished files on a NAS share were staying in `downloads/complete` instead of the Plex library folder. qBittorrent was still seeding (and locking the file), and Arr’s default is to hardlink then copy — CIFS cannot hardlink, so that “move” was a slow second write or a failure. Housekeeping now **stops** a finished torrent (files kept), tells Arr to **rename** on the same share, and logs why a file is rejected (wrong quality stays in `complete/`; do not drag it by hand). Older leftover `complete/radarr` folders are scanned too. Rebuild so the banner says **0.2.32**.
 
 ## 0.2.31
 

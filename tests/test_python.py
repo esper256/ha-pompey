@@ -240,17 +240,33 @@ class FakeState:
             "enableCompletedDownloadHandling": True,
             "skipFreeSpaceCheckWhenImporting": False,
             "minimumFreeSpaceWhenImporting": 100,
+            "copyUsingHardlinks": True,
         }
         self.sonarr_media: dict = {
             "id": 1,
             "enableCompletedDownloadHandling": True,
             "skipFreeSpaceCheckWhenImporting": False,
             "minimumFreeSpaceWhenImporting": 100,
+            "copyUsingHardlinks": True,
         }
+        self.radarr_dl_config: dict = {
+            "id": 1,
+            "enableCompletedDownloadHandling": True,
+            "autoRedownloadFailed": True,
+            "autoRedownloadFailedFromInteractiveSearch": True,
+        }
+        self.sonarr_dl_config: dict = {
+            "id": 1,
+            "enableCompletedDownloadHandling": True,
+            "autoRedownloadFailed": True,
+            "autoRedownloadFailedFromInteractiveSearch": True,
+        }
+        self.manual_import: list[dict] = []
         self.queue: list[dict] = []
         self.qbit_categories: dict = {}
         self.qbit_torrents: list[dict] = []
         self.qbit_removed: list[dict] = []
+        self.qbit_stopped: list[dict] = []
         self.history: list[dict] = []
         self.plex_auth: object = None
         self.local_auth: object = None
@@ -316,9 +332,27 @@ def handler_for(state: FakeState):
             if payload:
                 self.wfile.write(payload)
 
+        def _qbit_hashes(self, body) -> str:
+            form = body if isinstance(body, dict) else {}
+            hashes = form.get("hashes") or form.get("hash") or ""
+            if isinstance(hashes, list):
+                hashes = hashes[0] if hashes else ""
+            return str(hashes)
+
+        def _stop_qbit(self, body, action: str):
+            hashes = self._qbit_hashes(body)
+            state.qbit_stopped.append({"hashes": hashes, "action": action})
+            drop = {part for part in hashes.split("|") if part}
+            for item in state.qbit_torrents:
+                if item.get("hash") in drop:
+                    item["state"] = "stoppedUP"
+            return self._send(text="Ok.")
+
         def _handle(self, method: str):
             role = getattr(self.server, "role")
-            path = self.path.split("?", 1)[0]
+            raw_path = self.path
+            path = raw_path.split("?", 1)[0]
+            query = parse_qs(raw_path.split("?", 1)[1]) if "?" in raw_path else {}
             body = self._read() if method in {"POST", "PUT"} else None
             state.calls.append((role, method, path, body))
             if role == "qbit":
@@ -326,6 +360,10 @@ def handler_for(state: FakeState):
                     return self._send(text="5.0.4")
                 if path == "/api/v2/torrents/" + "info" and method == "GET":
                     return self._send(body=state.qbit_torrents)
+                if path == "/api/v2/torrents/" + "stop" and method == "POST":
+                    return self._stop_qbit(body, "stop")
+                if path == "/api/v2/torrents/" + "pause" and method == "POST":
+                    return self._stop_qbit(body, "pause")
                 if path == "/api/v2/torrents/delete" and method == "POST":
                     form = body if isinstance(body, dict) else {}
                     hashes = form.get("hashes") or form.get("hash") or ""
@@ -403,6 +441,25 @@ def handler_for(state: FakeState):
                     return self._send(body=saved)
                 if path.endswith("/queue") and method == "GET":
                     return self._send(body={"records": state.queue, "page": 1, "pageSize": 50})
+                if path.endswith("/config/downloadclient") and method == "GET":
+                    cfg = state.radarr_dl_config if role == "radarr" else state.sonarr_dl_config
+                    return self._send(body=cfg)
+                if "/config/downloadclient/" in path and method == "PUT":
+                    saved = dict(body or {})
+                    if role == "radarr":
+                        state.radarr_dl_config = saved
+                    else:
+                        state.sonarr_dl_config = saved
+                    return self._send(body=saved)
+                if path.endswith("/manualimport") and method == "GET":
+                    folder = (query.get("folder") or [""])[0]
+                    items = []
+                    for item in state.manual_import:
+                        item_path = str(item.get("path") or "")
+                        if folder and folder not in item_path and not item_path.startswith(folder):
+                            continue
+                        items.append(item)
+                    return self._send(body=items)
                 if path.endswith("/downloadclient") and method == "GET":
                     clients = state.radarr_clients if role == "radarr" else state.sonarr_clients
                     return self._send(body=clients)
@@ -1118,6 +1175,96 @@ PersistentKeepalive = 25
             )
         )
 
+    def test_qbit_unlocks_finished_files_still_in_complete(self):
+        root = Path(os.environ.get("TEST_TMP") or "/tmp") / f"pompey-unlock-{os.getpid()}"
+        complete = root / "downloads" / "complete"
+        complete.mkdir(parents=True)
+        payload = complete / "Title.mkv"
+        payload.write_text("x")
+        incomplete = root / "downloads" / "incomplete" / "Title.mkv"
+        incomplete.parent.mkdir(parents=True)
+        incomplete.write_text("y")
+        os.environ["MEDIA_ROOT"] = str(root)
+        try:
+            self.assertTrue(
+                ws.qbit_should_unlock(
+                    {
+                        "hash": "ff",
+                        "state": "uploading",
+                        "progress": 1,
+                        "amount_left": 0,
+                        "content_path": str(payload),
+                    }
+                )
+            )
+            self.assertFalse(
+                ws.qbit_should_unlock(
+                    {
+                        "hash": "gg",
+                        "state": "stoppedUP",
+                        "progress": 1,
+                        "amount_left": 0,
+                        "content_path": str(payload),
+                    }
+                )
+            )
+            self.assertFalse(
+                ws.qbit_should_unlock(
+                    {
+                        "hash": "hh",
+                        "state": "downloading",
+                        "progress": 0.4,
+                        "content_path": str(payload),
+                    }
+                )
+            )
+            self.assertFalse(
+                ws.qbit_should_unlock(
+                    {
+                        "hash": "ii",
+                        "state": "uploading",
+                        "progress": 1,
+                        "amount_left": 0,
+                        "content_path": str(incomplete),
+                    }
+                )
+            )
+        finally:
+            os.environ.pop("MEDIA_ROOT", None)
+            payload.unlink(missing_ok=True)
+            incomplete.unlink(missing_ok=True)
+            for path in (complete, incomplete.parent, root / "downloads", root):
+                try:
+                    path.rmdir()
+                except OSError:
+                    pass
+
+    def test_manual_import_file_requires_match(self):
+        quality = {"quality": {"id": 7, "name": "Bluray-1080p"}, "revision": {"version": 1}}
+        movie = {
+            "path": "/media/dlna/downloads/complete/ok.mkv",
+            "movieId": 9,
+            "quality": quality,
+            "languages": [{"id": 1, "name": "English"}],
+        }
+        self.assertEqual(ws.manual_import_file(movie, "radarr")["movieId"], 9)
+        self.assertIsNone(
+            ws.manual_import_file({**movie, "movieId": None, "movie": {}}, "radarr")
+        )
+        episode = {
+            "path": "/media/dlna/downloads/complete/ep.mkv",
+            "seriesId": 3,
+            "episodeIds": [11, 12],
+            "quality": quality,
+        }
+        self.assertEqual(ws.manual_import_file(episode, "sonarr")["episodeIds"], [11, 12])
+        self.assertEqual(
+            ws.import_rejection_text(
+                {"rejections": [{"reason": "Not a wanted quality"}]}
+            ),
+            "Not a wanted quality",
+        )
+
     def test_qbit_payload_gone_treats_empty_dir_as_moved(self):
         empty = Path(os.environ.get("TEST_TMP") or "/tmp") / f"pompey-gone-{os.getpid()}"
         empty.mkdir(parents=True, exist_ok=True)
@@ -1302,6 +1449,10 @@ class WireStack(unittest.TestCase):
         self.assertTrue(self.state.radarr_media.get("skipFreeSpaceCheckWhenImporting"))
         self.assertTrue(self.state.sonarr_media.get("enableCompletedDownloadHandling"))
         self.assertEqual(self.state.radarr_media.get("minimumFreeSpaceWhenImporting"), 100)
+        self.assertFalse(self.state.radarr_media.get("copyUsingHardlinks"))
+        self.assertFalse(self.state.sonarr_media.get("copyUsingHardlinks"))
+        self.assertFalse(self.state.radarr_dl_config.get("autoRedownloadFailed"))
+        self.assertTrue(self.state.radarr_dl_config.get("enableCompletedDownloadHandling"))
         self.assertIn(
             "RefreshMonitoredDownloads",
             [c.get("name") for c in self.state.arr_commands],
@@ -1655,6 +1806,77 @@ class WireStack(unittest.TestCase):
         self.assertEqual(remaining, {"11" * 20, "33" * 20})
         self.assertTrue((self.tmp / "complete-file.mkv").is_file())
         self.assertTrue((self.tmp / "incomplete-file.mkv").is_file())
+        self.assertEqual(self.state.qbit_stopped, [])
+
+    def test_housekeep_stops_seeding_torrent_in_complete(self):
+        os.environ["INDEXER_URL"] = ""
+        os.environ["INDEXER_API_KEY"] = ""
+        os.environ["MEDIA_ROOT"] = str(self.tmp)
+        complete = self.tmp / "downloads" / "complete"
+        complete.mkdir(parents=True)
+        payload = complete / "new-grab.mkv"
+        payload.write_bytes(b"x" * 40)
+        digest = "55" * 20
+        self.state.qbit_torrents = [
+            {
+                "hash": digest,
+                "name": "new-grab",
+                "state": "uploading",
+                "progress": 1,
+                "amount_left": 0,
+                "content_path": str(payload),
+            }
+        ]
+        rc = ws.housekeep()
+        self.assertEqual(rc, 0)
+        self.assertEqual(self.state.qbit_removed, [])
+        self.assertEqual(self.state.qbit_stopped[0]["hashes"], digest)
+        self.assertEqual(self.state.qbit_stopped[0]["action"], "stop")
+        self.assertTrue(payload.is_file())
+        remaining = [item for item in self.state.qbit_torrents if item.get("hash") == digest]
+        self.assertEqual(remaining[0]["state"], "stoppedUP")
+
+    def test_housekeep_renames_matched_drop_and_logs_quality_reject(self):
+        os.environ["INDEXER_URL"] = ""
+        os.environ["INDEXER_API_KEY"] = ""
+        os.environ["MEDIA_ROOT"] = str(self.tmp)
+        complete = self.tmp / "downloads" / "complete"
+        complete.mkdir(parents=True)
+        wanted = complete / "matched.mkv"
+        blocked = complete / "remux.mkv"
+        wanted.write_bytes(b"ok")
+        blocked.write_bytes(b"no")
+        quality = {"quality": {"id": 7, "name": "Bluray-1080p"}, "revision": {"version": 1}}
+        self.state.manual_import = [
+            {
+                "path": str(wanted),
+                "movieId": 1,
+                "quality": quality,
+                "languages": [{"id": 1, "name": "English"}],
+                "rejections": [],
+            },
+            {
+                "path": str(blocked),
+                "movieId": 1,
+                "quality": quality,
+                "rejections": [{"reason": "Not a wanted quality for Default"}],
+            },
+        ]
+        from io import StringIO
+        from contextlib import redirect_stdout
+
+        buf = StringIO()
+        with redirect_stdout(buf):
+            rc = ws.housekeep()
+        self.assertEqual(rc, 0)
+        manuals = [
+            item for item in self.state.arr_commands if item.get("name") == "ManualImport"
+        ]
+        self.assertEqual(len(manuals), 1)
+        self.assertEqual(manuals[0].get("importMode"), "Move")
+        paths = [row.get("path") for row in manuals[0].get("files") or []]
+        self.assertEqual(paths, [str(wanted)])
+        self.assertIn("will not import remux.mkv: Not a wanted quality for Default", buf.getvalue())
 
     def test_housekeep_does_not_delete_torrent_data(self):
         os.environ["INDEXER_URL"] = ""
@@ -1728,6 +1950,11 @@ class WireStack(unittest.TestCase):
             self.assertTrue(cfg.get("enableCompletedDownloadHandling"))
             self.assertTrue(cfg.get("skipFreeSpaceCheckWhenImporting"))
             self.assertEqual(cfg.get("minimumFreeSpaceWhenImporting"), 100)
+            self.assertFalse(cfg.get("copyUsingHardlinks"))
+        for cfg in (self.state.radarr_dl_config, self.state.sonarr_dl_config):
+            self.assertTrue(cfg.get("enableCompletedDownloadHandling"))
+            self.assertFalse(cfg.get("autoRedownloadFailed"))
+            self.assertFalse(cfg.get("autoRedownloadFailedFromInteractiveSearch"))
 
     def test_media_management_400_does_not_block_wire(self):
         os.environ["INDEXER_URL"] = ""
