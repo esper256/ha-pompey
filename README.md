@@ -17,7 +17,7 @@ The plan is [VISION.md](VISION.md). Operator steps (including Plex in another Do
 - One source as a URL plus API key (we do not ship a catalog)
 - A few GB of RAM on top of Home Assistant, and disk on `/media`
 
-Copy `pompey/` into `/addons`, let Supervisor build, fill Proton + Plex IP + token + source, start **Pompey**, open the sidebar. First start can take several minutes. If the wait screen stays on the tunnel step, Proton is not up.
+Copy `pompey/` into `/addons` from the **0.2.1** tree, let Supervisor build, fill Proton + Plex IP + token + source, start **Pompey**, open the sidebar. First start can take several minutes. If the wait screen stays on the tunnel step, Proton is not up. Operator checklist (Plex token, Plex libraries): [pompey/DOCS.md](pompey/DOCS.md).
 
 **Not yet a household app.** A request becoming a file on disk that Plex notices has not been proven. Quality profiles are engine defaults (no Recyclarr). If search is a blank page after the wait screen, that is the bug to send back.
 

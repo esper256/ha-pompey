@@ -154,6 +154,21 @@ grep -q "FILEPRIVATEKEY" "${POMPEY_WG_CONF}"
 grep -q "PersistentKeepalive = 25" "${POMPEY_WG_CONF}"
 grep -q "Using WireGuard config file" <<<"$(BASHIO_OPTIONS="${BASHIO_OPTIONS}" run "${INIT}/10-vpn-config.sh" 2>&1)"
 
+echo "== vpn config resolves Endpoint hostname before kill switch =="
+python3 - "${ROOT}/tests/fixtures/wg0.conf" "${POMPEY_CONFIG}/wireguard/wg0.conf" <<'PY'
+from pathlib import Path
+import sys
+text = Path(sys.argv[1]).read_text()
+text = text.replace("185.159.157.1:51820", "localhost:51820")
+Path(sys.argv[2]).write_text(text)
+PY
+: > "${IPTABLES_LOG}"
+run "${INIT}/10-vpn-config.sh"
+grep -q "127.0.0.1:51820" "${POMPEY_WG_CONF}"
+grep -qv "Endpoint = localhost" "${POMPEY_WG_CONF}"
+grep -q "127.0.0.1" "${IPTABLES_LOG}"
+grep -q "51820" "${IPTABLES_LOG}"
+
 echo "== nginx ingress port from stub =="
 run "${INIT}/20-nginx.sh"
 grep -q "listen 8099" "${NGINX_INGRESS_CONF}"

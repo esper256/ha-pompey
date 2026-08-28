@@ -20,7 +20,9 @@ profile pompey flags=(attach_disconnected,mediate_deleted) {
   # s6-overlay
   /init ix,
   /bin/** ix,
+  /sbin/** ix,
   /usr/bin/** ix,
+  /usr/sbin/** ix,
   /usr/local/bin/** ix,
   /run/{s6,s6-rc*,service}/** ix,
   /package/** ix,

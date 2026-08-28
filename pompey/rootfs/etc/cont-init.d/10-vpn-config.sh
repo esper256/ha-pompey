@@ -38,6 +38,43 @@ if ! grep -qi '^[[:space:]]*PersistentKeepalive' "${DST}"; then
   bashio::log.info "Added PersistentKeepalive=25 so the Proton peer stays up behind NAT"
 fi
 
+# Resolve Endpoint while Home Assistant DNS still works. After we point
+# resolv.conf at Proton 10.2.0.1, a hostname cannot be looked up until wg0
+# exists — and wg-quick needs that Endpoint to create wg0.
+resolved="$(python3 - "${DST}" <<'PY'
+import re
+import socket
+import sys
+
+path = sys.argv[1]
+text = open(path, encoding="utf-8").read()
+match = re.search(r"(?im)^(\s*Endpoint\s*=\s*)(\S+)\s*$", text)
+if not match:
+    raise SystemExit(0)
+prefix, value = match.group(1), match.group(2)
+if value.startswith("["):
+    raise SystemExit(0)
+host, sep, port = value.rpartition(":")
+if not sep or not port.isdigit():
+    raise SystemExit(0)
+parts = host.split(".")
+if len(parts) == 4 and all(p.isdigit() and 0 <= int(p) <= 255 for p in parts if p):
+    raise SystemExit(0)
+try:
+    ip = socket.getaddrinfo(host, None, socket.AF_INET)[0][4][0]
+except OSError as exc:
+    print(f"Could not resolve WireGuard Endpoint host {host}: {exc}", file=sys.stderr)
+    raise SystemExit(1)
+open(path, "w", encoding="utf-8").write(
+    text[: match.start()] + prefix + f"{ip}:{port}" + text[match.end() :]
+)
+print(f"{host} -> {ip}")
+PY
+)" || bashio::exit.nok "WireGuard Endpoint hostname could not be resolved before the kill switch. Use an IPv4 Endpoint in the Proton file."
+if [[ -n "${resolved}" ]]; then
+  bashio::log.info "Resolved WireGuard Endpoint ${resolved} (needed before Proton DNS / kill switch)"
+fi
+
 printf '%s\n' "$(bashio::config 'lan_networks')" >"${POMPEY_LAN_FILE}"
 
 if [[ "${POMPEY_FAKE_VPN:-}" == "1" ]]; then
