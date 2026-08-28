@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
-# Realistic agent run: fake wg0, official TV/movie engines, TMDB lookup.
-# Not HAOS. Not Proton. Never starts a torrent client or waits on a grab.
+# Realistic agent run: fake wg0, official TV/movie engines, TMDB lookup,
+# then Prowlarr search against a fake Torznab source until the fake
+# qBittorrent WebUI records a magnet add. Not HAOS. Not Proton.
+# Never starts a torrent client or waits on peers.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -159,157 +161,21 @@ ns "${POMPEY_ENGINES}/Radarr/Radarr" -nobrowser -data="${POMPEY_CONFIG}/radarr" 
 PIDS+=("$!")
 
 # wire-stack waits on the download-engine WebUI. Answer HTTP only — do not run it.
-log "HTTP stubs (download-engine WebUI + Seerr); no torrent client"
-ns python3 - "${WORK}" >"${WORK}/http-stub.log" 2>&1 <<'PY' &
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-import json, os, sys, threading
-from urllib.parse import parse_qs, urlparse
-
-work = sys.argv[1]
-CATEGORIES = {}
-SEERR = {"initialized": False, "radarr": [], "sonarr": []}
-
-
-class Qbit(BaseHTTPRequestHandler):
-    def log_message(self, *a, **k):
-        return
-
-    def _send(self, code, body, ctype, cookie=None):
-        if isinstance(body, str):
-            body = body.encode()
-        elif not isinstance(body, (bytes, bytearray)):
-            body = json.dumps(body).encode()
-            ctype = "application/json"
-        self.send_response(code)
-        self.send_header("Content-Type", ctype)
-        self.send_header("Content-Length", str(len(body)))
-        if cookie:
-            self.send_header("Set-Cookie", cookie)
-        self.end_headers()
-        self.wfile.write(body)
-
-    def _form(self):
-        n = int(self.headers.get("Content-Length") or 0)
-        raw = self.rfile.read(n).decode() if n else ""
-        return {k: (v[0] if v else "") for k, v in parse_qs(raw).items()}
-
-    def do_GET(self):
-        path = urlparse(self.path).path
-        if path.endswith("/version") or path.endswith("/webapiVersion"):
-            return self._send(200, "5.0.4", "text/plain")
-        if path.endswith("/preferences"):
-            return self._send(
-                200,
-                {
-                    "current_network_interface": "wg0",
-                    "listen_port": 0,
-                    "save_path": "/tmp/downloads",
-                },
-                "application/json",
-            )
-        if path.endswith("/categories"):
-            return self._send(200, CATEGORIES, "application/json")
-        return self._send(200, [], "application/json")
-
-    def do_POST(self):
-        path = urlparse(self.path).path
-        form = self._form()
-        if path.endswith("/login"):
-            return self._send(200, "Ok.", "text/plain", cookie="SID=pompey-dev; path=/")
-        if path.endswith("/createCategory") or path.endswith("/editCategory"):
-            name = form.get("category") or form.get("name") or ""
-            if name:
-                CATEGORIES[name] = {"name": name, "savePath": form.get("savePath", "")}
-            return self._send(200, "Ok.", "text/plain")
-        return self._send(200, "Ok.", "text/plain")
-
-
-class Seerr(BaseHTTPRequestHandler):
-    def log_message(self, *a, **k):
-        return
-
-    def _body(self):
-        n = int(self.headers.get("Content-Length") or 0)
-        raw = self.rfile.read(n) if n else b""
-        if not raw:
-            return {}
-        try:
-            return json.loads(raw.decode())
-        except json.JSONDecodeError:
-            return {}
-
-    def _send(self, code, body, ctype="application/json", cookie=None):
-        if isinstance(body, str):
-            payload = body.encode()
-        elif isinstance(body, (bytes, bytearray)):
-            payload = bytes(body)
-        else:
-            payload = json.dumps(body).encode()
-            ctype = "application/json"
-        self.send_response(code)
-        self.send_header("Content-Type", ctype)
-        self.send_header("Content-Length", str(len(payload)))
-        if cookie:
-            self.send_header("Set-Cookie", cookie)
-        self.end_headers()
-        self.wfile.write(payload)
-
-    def do_GET(self):
-        path = urlparse(self.path).path
-        if path in ("/", "/login", "/setup"):
-            html = b'<!doctype html><script src="/_next/static/x.js"></script>'
-            return self._send(200, html, "text/html")
-        if path.endswith("/settings/radarr"):
-            return self._send(200, SEERR["radarr"])
-        if path.endswith("/settings/sonarr"):
-            return self._send(200, SEERR["sonarr"])
-        if path.endswith("/settings/public"):
-            return self._send(200, {"initialized": SEERR["initialized"]})
-        if path.endswith("/settings/main"):
-            return self._send(200, {"apiKey": "stub-seerr-key"})
-        if path.endswith("/settings/plex/devices/servers"):
-            return self._send(200, [])
-        if path.endswith("/settings/plex/library"):
-            return self._send(200, [])
-        return self._send(200, {"ok": True})
-
-    def do_POST(self):
-        path = urlparse(self.path).path
-        body = self._body()
-        if path.endswith("/settings/radarr"):
-            SEERR["radarr"].append(body)
-            return self._send(201, body)
-        if path.endswith("/settings/sonarr"):
-            SEERR["sonarr"].append(body)
-            return self._send(201, body)
-        if path.endswith("/auth/local") or path.endswith("/auth/plex"):
-            return self._send(200, {"id": 1}, cookie="connect.sid=int; Path=/; HttpOnly")
-        if path.endswith("/initialize"):
-            SEERR["initialized"] = True
-            return self._send(200, {"initialized": True})
-        return self._send(200, body or {"ok": True})
-
-    do_PUT = do_POST
-
-
-qbit = ThreadingHTTPServer(("127.0.0.1", 8080), Qbit)
-seerr = ThreadingHTTPServer(("127.0.0.1", 5055), Seerr)
-threading.Thread(target=qbit.serve_forever, daemon=True).start()
-threading.Thread(target=seerr.serve_forever, daemon=True).start()
-open(os.path.join(work, "http-stub.pid"), "w").write(str(os.getpid()))
-threading.Event().wait()
-PY
+log "HTTP stubs (Torznab source + download-engine WebUI + Seerr); no torrent client"
+ns python3 "${ROOT}/tests/lib/fake_source.py" serve --work "${WORK}" \
+  >"${WORK}/http-stub.log" 2>&1 &
 PIDS+=("$!")
 
 wait_url http://127.0.0.1:8080/api/v2/app/version 20
 wait_url http://127.0.0.1:5055/api/v1/settings/public 20
+wait_url "http://127.0.0.1:9117/api?t=caps" 20
 wait_url http://127.0.0.1:9696/ping 60
 wait_url http://127.0.0.1:8989/ping 60
 wait_url http://127.0.0.1:7878/ping 60
 
 export PLEX_URL="" PLEX_TOKEN=""
-export INDEXER_URL=""
-export INDEXER_API_KEY=""
+export INDEXER_URL=http://127.0.0.1:9117
+export INDEXER_API_KEY=pompey-dev-source
 export QBIT_URL=http://127.0.0.1:8080
 export SONARR_URL=http://127.0.0.1:8989
 export RADARR_URL=http://127.0.0.1:7878
@@ -342,6 +208,17 @@ test -f "${POMPEY_READY}/wired"
 test "$(jq -r .search "${POMPEY_READY}/status.json")" = true
 grep -q 'proxy_pass http://127.0.0.1:8098' "${NGINX_INGRESS_CONF}"
 grep -q 'X-Ingress-Path' "${NGINX_INGRESS_CONF}"
+
+PROWLARR_KEY="$(jq -r .prowlarr_api_key "${POMPEY_SECRETS}")"
+PROWLARR=http://127.0.0.1:9696
+indexers="$(arr "${PROWLARR}" "${PROWLARR_KEY}" GET "/api/v1/indexer")"
+if ! echo "${indexers}" | jq -e 'length >= 1' >/dev/null; then
+  echo "Prowlarr has no source indexer after wire-stack: ${indexers}" >&2
+  tail -n 80 "${WORK}/prowlarr.log" >&2 || true
+  cat "${WORK}/http-stub.log" >&2 || true
+  exit 1
+fi
+log "Prowlarr source indexer: $(echo "${indexers}" | jq -r '.[0].name')"
 
 log "ingress rewriter against Seerr stub (no Seerr binary)"
 ns env \
@@ -444,10 +321,33 @@ if [[ -z "${found}" ]]; then
   exit 1
 fi
 
+log "Prowlarr search ${MOVIE} → fake qBittorrent add (no torrent client)"
+QBIT_USER="$(jq -r .qbit_user "${POMPEY_SECRETS}")"
+QBIT_PASS="$(jq -r .qbit_password "${POMPEY_SECRETS}")"
+if ! ns python3 "${ROOT}/tests/lib/fake_source.py" grab \
+  --prowlarr "${PROWLARR}" \
+  --key "${PROWLARR_KEY}" \
+  --query "${MOVIE}" \
+  --adds "${WORK}/qbit-adds.jsonl" \
+  --user "${QBIT_USER}" \
+  --password "${QBIT_PASS}" \
+  >"${WORK}/grab.log" 2>&1; then
+  echo "Prowlarr search/grab failed" >&2
+  cat "${WORK}/grab.log" >&2 || true
+  echo "---- prowlarr.log (tail) ----" >&2
+  tail -n 80 "${WORK}/prowlarr.log" >&2 || true
+  echo "---- http-stub.log ----" >&2
+  cat "${WORK}/http-stub.log" >&2 || true
+  exit 1
+fi
+cat "${WORK}/grab.log"
+grep -q 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' "${WORK}/qbit-adds.jsonl"
+log "fake qBittorrent recorded magnet add"
+
 if ns sh -c "ss -tuanp 2>/dev/null | grep -q '10.2.0.2'" || ns sh -c "ss -tuan 2>/dev/null | grep -q '10.2.0.2'"; then
   log "saw sockets bound to 10.2.0.2 (wg0)"
 else
   log "lookup already went through the fake wg0 netns"
 fi
 
-log "integration ok: ${title} is in Radarr on fake wg0 (no torrent client)"
+log "integration ok: ${title} is in Radarr; Prowlarr searched the fake source; qBittorrent WebUI got the magnet add (no torrent client)"
