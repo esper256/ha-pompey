@@ -5,7 +5,6 @@ set -euo pipefail
 source "$(command -v pompey-env)"
 
 until [[ -f "${POMPEY_READY}/engines-ready" ]]; do
-  pompey-status start "Waiting for hidden engines" 65 || true
   sleep 2
 done
 

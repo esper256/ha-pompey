@@ -120,13 +120,16 @@ class Handler(BaseHTTPRequestHandler):
         save_wg(text)
         applied = apply_vpn()
         if applied.returncode != 0:
-            self._send(
-                400,
-                {
-                    "ok": False,
-                    "error": "Saved the file, but could not apply it. Open the app log (do not send the Proton key).",
-                },
-            )
+            # Never send apply stdout/stderr to the browser (keys live there).
+            sys.stderr.write("pompey-setup: apply-vpn-config exited %s\n" % applied.returncode)
+            if applied.returncode == 3:
+                msg = "That Proton file is missing Endpoint or keys. Paste the whole .conf you downloaded."
+            else:
+                msg = (
+                    "The Proton file was saved, but this Home Assistant host could not "
+                    "apply it. Open the app log (do not send the Proton key)."
+                )
+            self._send(400, {"ok": False, "error": msg})
             return
         self._send(200, {"ok": True})
 

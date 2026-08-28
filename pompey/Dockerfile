@@ -10,7 +10,7 @@ ARG BUILD_DESCRIPTION="Search for a movie or show; Proton WireGuard for all inte
 ARG BUILD_NAME="Pompey"
 ARG BUILD_REF
 ARG BUILD_REPOSITORY="esper256/ha-pompey"
-ARG BUILD_VERSION="0.2.3"
+ARG BUILD_VERSION="0.2.5"
 
 RUN apk add --no-cache \
     bind-tools \
@@ -20,6 +20,7 @@ RUN apk add --no-cache \
     icu-libs \
     iptables \
     iptables-legacy \
+    nftables \
     iproute2 \
     jq \
     krb5-libs \

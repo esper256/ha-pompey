@@ -4,7 +4,10 @@ set -euo pipefail
 # shellcheck source=/dev/null
 source "$(command -v pompey-env)"
 
-pompey-status vpn "Waiting for Proton handshake" 15 || true
+# Do not burn the handshake countdown before a Proton file exists.
+until [[ -f "${POMPEY_READY}/vpn-applied" ]]; do
+  sleep 2
+done
 wait-for-vpn 45
 pompey-status fetch "Downloading hidden engines" 30 || true
 n=0

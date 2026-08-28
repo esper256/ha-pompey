@@ -47,6 +47,16 @@ def save(data: dict) -> None:
     os.replace(tmp, STATUS_PATH)
 
 
+def _need_proton_flag(current: bool) -> tuple[bool, str]:
+    """Return (need_proton, explicit) where explicit is 'on', 'off', or ''."""
+    raw = os.environ.get("POMPEY_STATUS_NEED_PROTON", "").strip().lower()
+    if raw in {"1", "true", "yes", "on"}:
+        return True, "on"
+    if raw in {"0", "false", "no", "off"}:
+        return False, "off"
+    return current, ""
+
+
 def main(argv: list[str]) -> int:
     if len(argv) < 3:
         print("usage: pompey-status STEP LABEL [PERCENT] [error message]", file=sys.stderr)
@@ -63,12 +73,17 @@ def main(argv: list[str]) -> int:
 
     order = [s[0] for s in STEPS]
     data = load()
+    need, explicit = _need_proton_flag(bool(data.get("need_proton")))
+    # Other boot services (engines/wire) write status on a timer. While we still
+    # need a Proton paste, those writes must not steal the wait screen or mark
+    # later steps done — that flickers the textarea and the step list.
+    if need and explicit == "":
+        return 0
+    data["need_proton"] = need
     data["updated"] = int(time.time())
     data["step"] = step
     data["label"] = label
     data["error"] = error
-    need = os.environ.get("POMPEY_STATUS_NEED_PROTON", "").lower() in {"1", "true", "yes"}
-    data["need_proton"] = need
     ready = bool(step == "ready" and not error)
     data["handoff"] = ready
     data["search"] = ready

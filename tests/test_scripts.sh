@@ -27,9 +27,12 @@ export IPTABLES_LOG="${WORK}/iptables.log"
 mkdir -p "${WORK}/bin"
 cp "${ROOT}/tests/stubs/iptables" "${WORK}/bin/iptables"
 cp "${ROOT}/tests/stubs/iptables" "${WORK}/bin/ip6tables"
+cp "${ROOT}/tests/stubs/iptables" "${WORK}/bin/iptables-nft"
+cp "${ROOT}/tests/stubs/iptables" "${WORK}/bin/ip6tables-nft"
 cp "${ROOT}/tests/stubs/iptables" "${WORK}/bin/iptables-legacy"
 cp "${ROOT}/tests/stubs/iptables" "${WORK}/bin/ip6tables-legacy"
 chmod +x "${WORK}/bin/iptables" "${WORK}/bin/ip6tables" \
+  "${WORK}/bin/iptables-nft" "${WORK}/bin/ip6tables-nft" \
   "${WORK}/bin/iptables-legacy" "${WORK}/bin/ip6tables-legacy" \
   "${ROOT}/tests/with-bashio"
 # Addon scripts use #!/command/with-contenv bashio. Invoke them with bash
@@ -157,6 +160,66 @@ if grep -q "FILEPRIVATEKEY" /tmp/pompey-banner-empty.log; then
   exit 1
 fi
 grep -q "Using WireGuard config file" <<<"$(BASHIO_OPTIONS="${BASHIO_OPTIONS}" run "${INIT}/10-vpn-config.sh" 2>&1)"
+
+echo "== vpn config strips Proton PostUp iptables snippets =="
+python3 - "${ROOT}/tests/fixtures/wg0.conf" "${POMPEY_CONFIG}/wireguard/wg0.conf" <<'PY'
+from pathlib import Path
+import sys
+text = Path(sys.argv[1]).read_text()
+text += "\nPostUp = iptables -I OUTPUT ! -o %i -j REJECT\nPostDown = iptables -D OUTPUT ! -o %i -j REJECT\n"
+Path(sys.argv[2]).write_text(text)
+PY
+run "${INIT}/10-vpn-config.sh"
+grep -qi "FILEPRIVATEKEY" "${POMPEY_WG_CONF}"
+if grep -qiE '^[[:space:]]*(PostUp|PostDown)[[:space:]]*=' "${POMPEY_WG_CONF}"; then
+  echo "PostUp/PostDown must not reach wg-quick" >&2
+  cat "${POMPEY_WG_CONF}" >&2
+  exit 1
+fi
+
+echo "== vpn kill switch uses nft/iptables when legacy filter table is missing =="
+cp "${ROOT}/tests/stubs/iptables-fail" "${WORK}/bin/iptables-legacy"
+cp "${ROOT}/tests/stubs/iptables-fail" "${WORK}/bin/ip6tables-legacy"
+chmod +x "${WORK}/bin/iptables-legacy" "${WORK}/bin/ip6tables-legacy"
+cp "${ROOT}/tests/fixtures/wg0.conf" "${POMPEY_CONFIG}/wireguard/wg0.conf"
+: > "${IPTABLES_LOG}"
+log="$(run "${INIT}/10-vpn-config.sh" 2>&1)"
+printf '%s\n' "${log}"
+grep -q -- "-j DROP" "${IPTABLES_LOG}"
+grep -q "iptables-nft" "${IPTABLES_LOG}"
+test -f "${POMPEY_READY}/vpn-applied"
+
+echo "== vpn apply succeeds when no iptables/nft filter table exists =="
+for name in iptables ip6tables iptables-nft ip6tables-nft iptables-legacy ip6tables-legacy; do
+  cp "${ROOT}/tests/stubs/iptables-fail" "${WORK}/bin/${name}"
+  chmod +x "${WORK}/bin/${name}"
+done
+cp "${ROOT}/tests/stubs/nft-fail" "${WORK}/bin/nft"
+chmod +x "${WORK}/bin/nft"
+cp "${ROOT}/tests/fixtures/wg0.conf" "${POMPEY_CONFIG}/wireguard/wg0.conf"
+: > "${IPTABLES_LOG}"
+rm -f "${POMPEY_READY}/vpn-applied"
+log="$(run "${INIT}/10-vpn-config.sh" 2>&1)"
+printf '%s\n' "${log}"
+grep -q "Kill switch" <<<"${log}"
+grep -q "FILEPRIVATEKEY" "${POMPEY_WG_CONF}"
+test -f "${POMPEY_READY}/vpn-applied"
+if grep -q -- "-j DROP" "${IPTABLES_LOG}"; then
+  echo "no working filter table must not apply OUTPUT DROP" >&2
+  cat "${IPTABLES_LOG}" >&2
+  exit 1
+fi
+# Restore working stubs for later tests
+for name in iptables ip6tables iptables-nft ip6tables-nft iptables-legacy ip6tables-legacy; do
+  cp "${ROOT}/tests/stubs/iptables" "${WORK}/bin/${name}"
+  chmod +x "${WORK}/bin/${name}"
+done
+rm -f "${WORK}/bin/nft"
+
+echo "== engines and NAT-PMP wait for a Proton file before handshake countdown =="
+grep -q 'vpn-applied' "${ROOT}/pompey/rootfs/etc/services.d/engines/run"
+grep -q 'vpn-applied' "${ROOT}/pompey/rootfs/etc/services.d/natpmp/run"
+grep -q 'iptables-nft' "${ROOT}/pompey/rootfs/usr/local/bin/vpn-killswitch"
 
 echo "== vpn config resolves Endpoint hostname before kill switch =="
 python3 - "${ROOT}/tests/fixtures/wg0.conf" "${POMPEY_CONFIG}/wireguard/wg0.conf" <<'PY'
