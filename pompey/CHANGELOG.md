@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.2.6
+## 0.2.7
 
 - App log is quieter and every Pompey line has a time. The wait screen polled `/status.json` once a second and nginx wrote the full User-Agent on each hit; those polls (and logo/static assets) are no longer logged. Python services (`pompey-setup`, ingress rewriter, wire-stack) use the same `[HH:MM:SS] LEVEL:` prefix as bashio. NAT-PMP and wiring retries no longer repeat the same warning on every loop.
 

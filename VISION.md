@@ -69,4 +69,4 @@ Hardware: this stack wants a few GB of RAM on top of Home Assistant. A 2 GB Pi i
 
 ## This repo
 
-`pompey/` is the Home Assistant app for the whole stack. `0.2.6` is the first cut meant for a real Home Assistant OS try (Proton file pasted on the wait screen, Plex at a numeric IP, one source). Recyclarr/TRaSH quality profiles are not in this cut — engines use their defaults. See the [root README](README.md).
+`pompey/` is the Home Assistant app for the whole stack. `0.2.7` is the first cut meant for a real Home Assistant OS try (Proton file pasted on the wait screen, Plex at a numeric IP, one source). Recyclarr/TRaSH quality profiles are not in this cut — engines use their defaults. See the [root README](README.md).
