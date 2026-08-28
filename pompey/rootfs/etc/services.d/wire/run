@@ -38,7 +38,9 @@ until python3 /usr/local/bin/wire-stack; do
     pompey-status wire "Could not finish connecting search" 80 "Engines started but wiring failed. Check Plex address/token and the source URL." || true
     exec sleep infinity
   fi
-  bashio::log.warning "Wiring not ready yet (attempt ${i})"
+  if [[ "${i}" -eq 1 || $((i % 5)) -eq 0 ]]; then
+    bashio::log.warning "Wiring not ready yet (attempt ${i})"
+  fi
   sleep 8
 done
 

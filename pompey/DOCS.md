@@ -2,7 +2,7 @@
 
 Search for a movie or TV show from the Home Assistant sidebar. Confirm if we need you. It lands in the right library and Plex notices.
 
-**0.2.5 is the first cut meant for a real Home Assistant OS install.** A title landing in Plex is still unproven. Recyclarr quality profiles, Cloudflare solvers, and picking a specific file are not in this version.
+**0.2.6 is the first cut meant for a real Home Assistant OS install.** A title landing in Plex is still unproven. Recyclarr quality profiles, Cloudflare solvers, and picking a specific file are not in this version.
 
 All internet from this app uses Proton WireGuard. If the tunnel is down, internet is dropped.
 
@@ -19,7 +19,7 @@ This app is **not** published as a container image. Copy `pompey/` into `/addons
 
 Do this **before** you start the app:
 
-1. Current `main` (0.2.5). After adding the GitHub Apps repository, look under **Install app**, not the installed-apps list. If you added the URL while the repo was private, remove it and add it again.
+1. Current `main` (0.2.6). After adding the GitHub Apps repository, look under **Install app**, not the installed-apps list. If you added the URL while the repo was private, remove it and add it again.
 2. A Proton **WireGuard** `.conf` on your computer (create a certificate in Proton, NAT-PMP on if you want incoming download ports). You will paste that file after start — not into the HA options list.
 3. Plex token: open any item on the Plex server in a browser, View Source, search for `X-Plex-Token`, or follow [Plex’s token article](https://support.plex.tv/articles/204059436-finding-an-authentication-token-x-plex-token/).
 4. Plex address is a **numeric IP** (see table below).

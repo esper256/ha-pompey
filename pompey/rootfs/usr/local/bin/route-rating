@@ -26,8 +26,9 @@ KID_MOVIE = {"G", "PG", "PG-13"}
 KID_TV = {"TV-Y", "TV-Y7", "TV-G", "TV-PG"}
 
 
-def log(msg: str) -> None:
-    print(f"[route-rating] {msg}", flush=True)
+def log(msg: str, level: str = "INFO") -> None:
+    stamp = time.strftime("%H:%M:%S")
+    print(f"[{stamp}] {level}: [route-rating] {msg}", flush=True)
 
 
 def http_json(method: str, url: str, body=None, headers=None):

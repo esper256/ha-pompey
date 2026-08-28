@@ -29,7 +29,10 @@ class Handler(SimpleHTTPRequestHandler):
         super().__init__(*args, directory=str(STATIC), **kwargs)
 
     def log_message(self, fmt: str, *args) -> None:
-        sys.stderr.write("%s - %s\n" % (self.address_string(), fmt % args))
+        if self.path.split("?", 1)[0] == "/status.json":
+            return
+        stamp = time.strftime("%H:%M:%S")
+        sys.stderr.write("[%s] INFO: %s - %s\n" % (stamp, self.address_string(), fmt % args))
 
     def do_GET(self):
         if self.path.split("?", 1)[0] == "/status.json":
