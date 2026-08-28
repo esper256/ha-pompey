@@ -576,11 +576,29 @@ def handler_for(state: FakeState):
                     return self._send(body=[])
                 if path.endswith("/movie") and method == "GET":
                     return self._send(body=state.movies)
+                if "/movie/" in path and method == "GET":
+                    try:
+                        idx = int(path.rsplit("/", 1)[-1])
+                    except ValueError:
+                        return self._send(404, {"error": path})
+                    for movie in state.movies:
+                        if movie.get("id") == idx:
+                            return self._send(body=movie)
+                    return self._send(404, {"error": path})
                 if "/movie/" in path and method == "PUT":
                     state.moved.append(body)
                     return self._send(body=body)
                 if path.endswith("/series") and method == "GET":
                     return self._send(body=state.series)
+                if "/series/" in path and method == "GET":
+                    try:
+                        idx = int(path.rsplit("/", 1)[-1])
+                    except ValueError:
+                        return self._send(404, {"error": path})
+                    for show in state.series:
+                        if show.get("id") == idx:
+                            return self._send(body=show)
+                    return self._send(404, {"error": path})
                 if "/series/" in path and method == "PUT":
                     state.moved.append(body)
                     return self._send(body=body)
@@ -1248,6 +1266,19 @@ PersistentKeepalive = 25
             "languages": [{"id": 1, "name": "English"}],
         }
         self.assertEqual(ws.manual_import_file(movie, "radarr")["movieId"], 9)
+        self.assertEqual(
+            ws.arr_import_destination(
+                {
+                    **movie,
+                    "movie": {
+                        "id": 9,
+                        "path": "/media/dlna/Movies/Not Kid Friendly/Ok (2024)",
+                    },
+                },
+                "radarr",
+            ),
+            "/media/dlna/Movies/Not Kid Friendly/Ok (2024)",
+        )
         self.assertIsNone(
             ws.manual_import_file({**movie, "movieId": None, "movie": {}}, "radarr")
         )
@@ -1883,10 +1914,18 @@ class WireStack(unittest.TestCase):
         wanted.write_bytes(b"ok")
         blocked.write_bytes(b"no")
         quality = {"quality": {"id": 7, "name": "Bluray-1080p"}, "revision": {"version": 1}}
+        dest = str(self.tmp / "Movies" / "Not Kid Friendly" / "Matched (2024)")
+        unknown = complete / "random-file.mkv"
+        unknown.write_bytes(b"z")
         self.state.manual_import = [
             {
                 "path": str(wanted),
                 "movieId": 1,
+                "movie": {
+                    "id": 1,
+                    "title": "Matched",
+                    "path": dest,
+                },
                 "quality": quality,
                 "languages": [{"id": 1, "name": "English"}],
                 "rejections": [],
@@ -1896,6 +1935,11 @@ class WireStack(unittest.TestCase):
                 "movieId": 1,
                 "quality": quality,
                 "rejections": [{"reason": "Not a wanted quality for Default"}],
+            },
+            {
+                "path": str(unknown),
+                "quality": quality,
+                "rejections": [],
             },
         ]
         from io import StringIO
@@ -1912,7 +1956,13 @@ class WireStack(unittest.TestCase):
         self.assertEqual(manuals[0].get("importMode"), "Move")
         paths = [row.get("path") for row in manuals[0].get("files") or []]
         self.assertEqual(paths, [str(wanted)])
-        self.assertIn("will not import remux.mkv: Not a wanted quality for Default", buf.getvalue())
+        out = buf.getvalue()
+        self.assertIn("will not import remux.mkv: Not a wanted quality for Default", out)
+        self.assertIn(f"importing matched.mkv into {dest} (Arr record from Seerr, not the filename)", out)
+        self.assertIn(
+            "no library match for random-file.mkv (not guessing Kid vs Not Kid from the name)",
+            out,
+        )
 
     def test_housekeep_does_not_delete_torrent_data(self):
         os.environ["INDEXER_URL"] = ""

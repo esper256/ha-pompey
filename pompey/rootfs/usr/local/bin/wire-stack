@@ -1836,7 +1836,11 @@ def forget_moved_torrents() -> None:
 
 
 def scan_download_drop(base: str, api_key: str, kind: str) -> None:
-    """Import anything sitting in complete/ even if qBittorrent already forgot it."""
+    """Import files Arr can match to a title it already has (Seerr's library folder).
+
+    Destination is the movie/series path on Arr, not a guess from the filename.
+    Kid vs Not Kid was stored when Seerr added the title.
+    """
     name = "DownloadedMoviesScan" if kind == "radarr" else "DownloadedEpisodesScan"
     for path in download_scan_paths():
         try:
@@ -1846,7 +1850,9 @@ def scan_download_drop(base: str, api_key: str, kind: str) -> None:
                 {"name": name, "path": path, "importMode": "Move"},
                 headers=arr_headers(api_key),
             )
-            log(f"{kind} scanning {path} for files to import")
+            log(
+                f"{kind} scanning {path} for files that already have an Arr library folder"
+            )
         except RuntimeError as exc:
             log(f"{kind} complete-folder scan {path}: {exc}", "WARNING")
 
@@ -1859,6 +1865,34 @@ def import_rejection_text(item: dict) -> str:
         elif rej:
             bits.append(str(rej))
     return "; ".join(bit for bit in bits if bit)
+
+
+def arr_import_destination(item: dict, kind: str) -> str:
+    """Library folder Arr already has (Seerr's Kid / Not Kid choice), not the filename."""
+    nested_key = "movie" if kind == "radarr" else "series"
+    nested = item.get(nested_key) if isinstance(item.get(nested_key), dict) else {}
+    return title_library_path(nested)
+
+
+def lookup_arr_library_path(base: str, api_key: str, kind: str, row: dict) -> str:
+    try:
+        if kind == "radarr" and row.get("movieId"):
+            movie = http(
+                "GET",
+                f"{base}/movie/{row['movieId']}",
+                headers=arr_headers(api_key),
+            )
+            return title_library_path(movie if isinstance(movie, dict) else {})
+        if kind == "sonarr" and row.get("seriesId"):
+            show = http(
+                "GET",
+                f"{base}/series/{row['seriesId']}",
+                headers=arr_headers(api_key),
+            )
+            return title_library_path(show if isinstance(show, dict) else {})
+    except RuntimeError:
+        return ""
+    return ""
 
 
 def manual_import_file(item: dict, kind: str) -> dict | None:
@@ -1934,10 +1968,19 @@ def import_matched_drop(base: str, api_key: str, kind: str) -> None:
             row = manual_import_file(item, kind)
             if not row:
                 log(
-                    f"{kind} no library match for {os.path.basename(path)}",
+                    f"{kind} no library match for {os.path.basename(path)} "
+                    "(not guessing Kid vs Not Kid from the name)",
                     "WARNING",
                 )
                 continue
+            dest = arr_import_destination(item, kind) or lookup_arr_library_path(
+                base, api_key, kind, row
+            )
+            dest = dest or "Arr title path"
+            log(
+                f"{kind} importing {os.path.basename(path)} into {dest} "
+                "(Arr record from Seerr, not the filename)"
+            )
             files.append(row)
     if not files:
         return
