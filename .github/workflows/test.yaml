@@ -25,7 +25,10 @@ jobs:
           path: ~/.cache/pompey
           key: pompey-servarr-${{ runner.os }}
 
-      # options.json + stubs + real Seerr API + fake-wg0 smoke + real Prowlarr unpack.
-      # Never start a torrent client. Never needs Proton.
+      - name: Install WireGuard tools
+        run: sudo apt-get update && sudo apt-get install -y wireguard-tools iproute2
+
+      # options.json + stubs + real Seerr API + fake-wg0 smoke + real Prowlarr unpack
+      # + generated WireGuard handshake. Never start a torrent client. Never needs Proton.
       - name: Run tests
         run: bash tests/run.sh

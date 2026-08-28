@@ -37,6 +37,9 @@ python3 tests/test_seerr_real.py -v
 echo "== addon scripts with bashio stub =="
 bash tests/test_scripts.sh
 
+echo "== wg-quick contract + local handshake (no Proton) =="
+bash tests/test_wg_quick.sh
+
 echo "== engine unpack (fixture + real Prowlarr linux-musl tar.gz) =="
 bash tests/test_engine_unpack.sh
 
