@@ -19,6 +19,9 @@ if [[ -e tests/dev/torznab.py ]]; then
   exit 1
 fi
 
+echo "== Home Assistant config.yaml (Supervisor SCHEMA_APP_CONFIG) =="
+python3 tests/test_ha_config.py -v
+
 echo "== python unittest (fake engines + supplied options.json) =="
 python3 tests/test_python.py -v
 

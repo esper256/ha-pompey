@@ -6,7 +6,7 @@ source "$(command -v pompey-env)"
 
 bashio::log.level "$(bashio::config 'log_level')" >/dev/null 2>&1 || true
 
-bashio::log.info "Pompey ${BUILD_VERSION:-0.2.1} starting"
+bashio::log.info "Pompey ${BUILD_VERSION:-0.2.2} starting"
 pompey-status vpn "Starting" 5 || true
 
 mkdir -p "${POMPEY_CONFIG}/wireguard" "${POMPEY_WG_ETC}" "${POMPEY_VPN_TMP}" "${POMPEY_NGINX_RUN}"

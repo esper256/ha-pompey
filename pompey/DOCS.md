@@ -2,11 +2,11 @@
 
 Search for a movie or TV show from the Home Assistant sidebar. Confirm if we need you. It lands in the right library and Plex notices.
 
-**0.2.1 is the first cut meant for a real Home Assistant OS install.** A title landing in Plex is still unproven. Recyclarr quality profiles, Cloudflare solvers, and picking a specific file are not in this version.
+**0.2.2 is the first cut meant for a real Home Assistant OS install.** A title landing in Plex is still unproven. Recyclarr quality profiles, Cloudflare solvers, and picking a specific file are not in this version.
 
 All internet from this app uses Proton WireGuard. If the tunnel is down, internet is dropped.
 
-This app is **not** published as a container image. Copy `pompey/` into `/addons` and let Supervisor build it on the machine. After the tunnel is up, Pompey downloads the household search UI (Seerr) and the hidden engines. First start can take several minutes and a few hundred megabytes. Supervisor is allowed up to 30 minutes for that.
+This app is **not** published as a container image. Copy `pompey/` into `/addons` and let Supervisor build it on the machine. After the tunnel is up, Pompey downloads the household search UI (Seerr) and the hidden engines. First start can take several minutes and a few hundred megabytes. Supervisor waits at most **300 seconds** for Docker to start or stop the container (that is the schema maximum). Engine download happens *after* the container is up, on the wait screen.
 
 ## Before you start
 
@@ -19,7 +19,7 @@ This app is **not** published as a container image. Copy `pompey/` into `/addons
 
 Do this **before** you start the app:
 
-1. Current `main` (0.2.1). After adding the GitHub Apps repository, look under **Install app**, not the installed-apps list. If you added the URL while the repo was private, remove it and add it again.
+1. Current `main` (0.2.2). After adding the GitHub Apps repository, look under **Install app**, not the installed-apps list. If you added the URL while the repo was private, remove it and add it again. If you added 0.2.1 and Pompey never listed, remove and re-add after this version — 0.2.1’s `timeout: 1800` made Supervisor skip the app.
 2. Proton WireGuard `.conf` in the app config share as `wireguard/wg0.conf`.
 3. Plex token: open any item on the Plex server in a browser, View Source, search for `X-Plex-Token`, or follow [Plex’s token article](https://support.plex.tv/articles/204059436-finding-an-authentication-token-x-plex-token/).
 4. Plex address is a **numeric IP** (see table below).
@@ -51,7 +51,7 @@ The GitHub repo can be public. Home Assistant still **does not publish or pull a
 
 **Or copy the folder:** put `pompey/` on the machine as `/addons/pompey` (USB/Samba/SSH), then Check for updates.
 
-If it still does not appear: Settings → System → Logs → **Supervisor**. Look for `Can't read` / `pompey`. Pompey only lists on **aarch64** and **amd64** (not 32-bit Raspberry Pi).
+If it still does not appear: Settings → System → Logs → **Supervisor**. Look for `Can't read` / `pompey`. An invalid `config.yaml` is skipped with no store card (that is what `timeout: 1800` did). Pompey only lists on **aarch64** and **amd64** (not 32-bit Raspberry Pi). `bash tests/run.sh` now includes that schema check.
 
 Then:
 
@@ -128,4 +128,4 @@ Home Assistant OS is not required. Supervisor would write `/data/options.json` f
 bash tests/run.sh
 ```
 
-Tests never start the torrent client or wait on a download. CI is `tests/run.sh` only.
+That includes `tests/test_ha_config.py`, which loads `pompey/config.yaml` and `repository.yaml` through Supervisor’s app schema (the check that would have caught `timeout: 1800`). Tests never start the torrent client or wait on a download. CI is `tests/run.sh` only.
