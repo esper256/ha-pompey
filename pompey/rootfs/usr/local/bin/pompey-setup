@@ -6,6 +6,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 MAX_BODY = 64 * 1024
@@ -81,9 +82,14 @@ def apply_vpn() -> subprocess.CompletedProcess:
     )
 
 
+def _log(msg: str, level: str = "INFO") -> None:
+    stamp = time.strftime("%H:%M:%S")
+    sys.stderr.write(f"[{stamp}] {level}: pompey-setup: {msg}\n")
+
+
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt: str, *args) -> None:
-        sys.stderr.write("pompey-setup: %s\n" % (fmt % args))
+        _log(fmt % args)
 
     def _send(self, code: int, body: dict) -> None:
         raw = json.dumps(body).encode()
@@ -121,7 +127,7 @@ class Handler(BaseHTTPRequestHandler):
         applied = apply_vpn()
         if applied.returncode != 0:
             # Never send apply stdout/stderr to the browser (keys live there).
-            sys.stderr.write("pompey-setup: apply-vpn-config exited %s\n" % applied.returncode)
+            _log("apply-vpn-config exited %s" % applied.returncode, "ERROR")
             if applied.returncode == 3:
                 msg = "That Proton file is missing Endpoint or keys. Paste the whole .conf you downloaded."
             else:

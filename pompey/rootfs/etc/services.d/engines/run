@@ -8,7 +8,7 @@ source "$(command -v pompey-env)"
 until [[ -f "${POMPEY_READY}/vpn-applied" ]]; do
   sleep 2
 done
-wait-for-vpn 45
+WAIT_FOR_VPN_QUIET=1 wait-for-vpn 45
 pompey-status fetch "Downloading hidden engines" 30 || true
 n=0
 until fetch-engines; do

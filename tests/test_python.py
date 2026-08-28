@@ -359,6 +359,16 @@ class Helpers(unittest.TestCase):
         self.assertIn("do not send the Proton key", setup)
         self.assertIn("The Proton file was saved", setup)
 
+    def test_logs_use_clock_prefix_and_skip_status_polls(self):
+        nginx = (ROOT / "pompey/rootfs/etc/nginx/nginx.conf").read_text()
+        self.assertIn("if=$pompey_accesslog", nginx)
+        self.assertIn("/status.json", nginx)
+        setup = (ROOT / "pompey/rootfs/usr/local/bin/pompey-setup").read_text()
+        ingress = (ROOT / "pompey/rootfs/usr/local/bin/pompey-ingress").read_text()
+        self.assertIn("%H:%M:%S", setup)
+        self.assertIn("%H:%M:%S", ingress)
+        self.assertIn('code in {"200", "304"}', ingress)
+
     def test_ha_store_icon_is_square_logo_is_wide(self):
         icon = ROOT / "pompey/icon.png"
         logo = ROOT / "pompey/logo.png"
@@ -466,6 +476,7 @@ class WireStack(unittest.TestCase):
         self.assertIn("X-Ingress-Path", text)
         self.assertIn("X-Forwarded-Prefix", text)
         self.assertIn("status.json", text)
+        self.assertIn("access_log off", text)
         self.assertNotIn("test-plex-token", text)
         live = json.loads((self.ready / "status.json").read_text())
         self.assertTrue(live["search"])
