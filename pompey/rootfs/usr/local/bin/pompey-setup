@@ -1,0 +1,154 @@
+#!/usr/bin/env python3
+"""Accept a Proton WireGuard .conf from the wait screen. Do not log secrets."""
+from __future__ import annotations
+
+import json
+import os
+import subprocess
+import sys
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+MAX_BODY = 64 * 1024
+LISTEN = os.environ.get("POMPEY_SETUP_LISTEN", "127.0.0.1:8097")
+
+
+def _field(text: str, key: str) -> str:
+    want = key.lower()
+    for raw in text.replace("\r\n", "\n").replace("\r", "\n").splitlines():
+        line = raw.split("#", 1)[0].strip()
+        if "=" not in line:
+            continue
+        name, value = line.split("=", 1)
+        if name.strip().lower() == want:
+            return value.strip()
+    return ""
+
+
+def validate_wg(text: str) -> str:
+    """Return an error string, or empty if this looks like a Proton WireGuard file."""
+    if not text or not text.strip():
+        return "Paste the whole Proton WireGuard file (the .conf you downloaded)."
+    if len(text.encode("utf-8")) > MAX_BODY:
+        return "That file is larger than a WireGuard config. Paste only the .conf."
+    private = _field(text, "PrivateKey")
+    address = _field(text, "Address")
+    peer = _field(text, "PublicKey")
+    endpoint = _field(text, "Endpoint")
+    missing = [
+        label
+        for label, value in (
+            ("PrivateKey", private),
+            ("Address", address),
+            ("Peer PublicKey", peer),
+            ("Endpoint", endpoint),
+        )
+        if not value
+    ]
+    if missing:
+        return "That is not a complete Proton WireGuard file. It needs " + ", ".join(missing) + "."
+    host, sep, port = endpoint.rpartition(":")
+    if endpoint.startswith("["):
+        return ""
+    if not sep or not port.isdigit():
+        return "Endpoint should look like host:port (Proton puts this in the .conf)."
+    return ""
+
+
+def wg_file() -> str:
+    config = os.environ.get("POMPEY_CONFIG", "/config")
+    return os.path.join(config, "wireguard", "wg0.conf")
+
+
+def save_wg(text: str) -> None:
+    path = wg_file()
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    cleaned = text.replace("\r\n", "\n").replace("\r", "\n").strip() + "\n"
+    tmp = path + ".tmp"
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        fh.write(cleaned)
+    os.replace(tmp, path)
+
+
+def apply_vpn() -> subprocess.CompletedProcess:
+    env = os.environ.copy()
+    return subprocess.run(
+        ["apply-vpn-config"],
+        check=False,
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+
+
+class Handler(BaseHTTPRequestHandler):
+    def log_message(self, fmt: str, *args) -> None:
+        sys.stderr.write("pompey-setup: %s\n" % (fmt % args))
+
+    def _send(self, code: int, body: dict) -> None:
+        raw = json.dumps(body).encode()
+        self.send_response(code)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Content-Length", str(len(raw)))
+        self.end_headers()
+        self.wfile.write(raw)
+
+    def do_POST(self) -> None:
+        path = self.path.split("?", 1)[0]
+        if path not in {"/setup/proton", "/proton"}:
+            self._send(404, {"ok": False, "error": "not found"})
+            return
+        length = int(self.headers.get("Content-Length") or "0")
+        if length > MAX_BODY:
+            self._send(400, {"ok": False, "error": "That file is too large. Paste only the Proton .conf."})
+            return
+        raw = self.rfile.read(length) if length else b""
+        ctype = (self.headers.get("Content-Type") or "").split(";")[0].strip().lower()
+        text = raw.decode("utf-8", errors="replace")
+        if ctype == "application/json":
+            try:
+                payload = json.loads(text or "{}")
+            except json.JSONDecodeError:
+                self._send(400, {"ok": False, "error": "Could not read that paste."})
+                return
+            text = str(payload.get("config") or payload.get("text") or "")
+        err = validate_wg(text)
+        if err:
+            self._send(400, {"ok": False, "error": err})
+            return
+        save_wg(text)
+        applied = apply_vpn()
+        if applied.returncode != 0:
+            self._send(
+                400,
+                {
+                    "ok": False,
+                    "error": "Saved the file, but could not apply it. Open the app log (do not send the Proton key).",
+                },
+            )
+            return
+        self._send(200, {"ok": True})
+
+
+def serve() -> int:
+    host, _, port_s = LISTEN.rpartition(":")
+    server = ThreadingHTTPServer((host or "127.0.0.1", int(port_s or "8097")), Handler)
+    server.serve_forever()
+    return 0
+
+
+def main(argv: list[str]) -> int:
+    if argv[1:] and argv[1] == "--validate":
+        path = argv[2] if len(argv) > 2 else "-"
+        text = sys.stdin.read() if path == "-" else open(path, encoding="utf-8").read()
+        err = validate_wg(text)
+        if err:
+            print(err, file=sys.stderr)
+            return 3
+        return 0
+    return serve()
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv))

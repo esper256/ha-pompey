@@ -11,21 +11,21 @@ POMPEY_READY="${POMPEY_READY:-/tmp/pompey}"
 POMPEY_CONFIG="${POMPEY_CONFIG:-/config}"
 POMPEY_WG_ETC="${POMPEY_WG_ETC:-/etc/wireguard}"
 POMPEY_WG_CONF="${POMPEY_WG_CONF:-${POMPEY_WG_ETC}/wg0.conf}"
+POMPEY_WG_FILE="${POMPEY_WG_FILE:-${POMPEY_CONFIG}/wireguard/wg0.conf}"
+POMPEY_WG_DNS="${POMPEY_WG_DNS:-10.2.0.1}"
+POMPEY_LAN_NETWORKS="${POMPEY_LAN_NETWORKS:-10.0.0.0/8,172.16.0.0/12,192.168.0.0/16}"
 POMPEY_VPN_TMP="${POMPEY_VPN_TMP:-/tmp/vpn}"
 POMPEY_LAN_FILE="${POMPEY_LAN_FILE:-/etc/pompey-lan-networks}"
 POMPEY_RESOLV="${POMPEY_RESOLV:-/etc/resolv.conf}"
 POMPEY_NGINX_RUN="${POMPEY_NGINX_RUN:-/run/nginx}"
 NGINX_INGRESS_CONF="${NGINX_INGRESS_CONF:-/etc/nginx/http.d/ingress.conf}"
-
-if [[ -z "${MEDIA_ROOT:-}" ]]; then
-  MEDIA_ROOT="$(bashio::config 'media_root')"
-fi
 MEDIA_ROOT="${MEDIA_ROOT:-/media}"
 
 mkdir -p \
   "${POMPEY_DATA}" \
   "${POMPEY_ENGINES}" \
   "${POMPEY_READY}" \
+  "${POMPEY_CONFIG}/wireguard" \
   "${POMPEY_CONFIG}/sonarr" \
   "${POMPEY_CONFIG}/radarr" \
   "${POMPEY_CONFIG}/prowlarr" \
@@ -37,3 +37,4 @@ mkdir -p \
   "${MEDIA_ROOT}/Kid Friendly TV" \
   "${MEDIA_ROOT}/downloads/incomplete" \
   "${MEDIA_ROOT}/downloads/complete"
+chmod 700 "${POMPEY_CONFIG}/wireguard" 2>/dev/null || true

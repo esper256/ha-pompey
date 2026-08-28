@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.3
+
+- Home Assistant options are only questions a household can answer: **Plex address**, **Plex token**, **source URL**, **source key**. WireGuard filename, private key, address, peer key, endpoint, DNS, LAN list, media folder, port-forward toggle, and log level are gone.
+- Missing Proton no longer kills the container. Start Pompey, open it in the sidebar, **paste the Proton WireGuard .conf** on the wait screen. That is the file Proton gives you when you create a WireGuard certificate.
+
 ## 0.2.2
 
 - Supervisor `config.yaml` validator in `tests/test_ha_config.py` (same schema that skips a bad app so it never lists). `timeout` must be 10–300 seconds; **1800 was rejected**, which is why Pompey did not appear under Install app after the repo cloned.

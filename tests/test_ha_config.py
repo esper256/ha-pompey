@@ -310,7 +310,25 @@ class SupervisorConfigSchema(unittest.TestCase):
         self.config_path = ROOT / "pompey/config.yaml"
         self.raw = load_yaml(self.config_path)
 
-    def test_pompey_config_passes_supervisor_schema(self):
+    def test_household_options_only(self):
+        self.assertEqual(
+            set(self.raw["options"]),
+            {"plex_url", "plex_token", "source_url", "source_key"},
+        )
+        self.assertEqual(set(self.raw["schema"]), set(self.raw["options"]))
+        for leaked in (
+            "wireguard_config",
+            "wireguard_private_key",
+            "wireguard_address",
+            "wireguard_peer_public_key",
+            "wireguard_endpoint",
+            "wireguard_dns",
+            "lan_networks",
+            "port_forwarding",
+            "media_root",
+            "log_level",
+        ):
+            self.assertNotIn(leaked, self.raw["schema"], leaked)
         validated = validate_app_config(self.raw)
         self.assertEqual(validated["slug"], "pompey")
         self.assertIn("aarch64", validated["arch"])

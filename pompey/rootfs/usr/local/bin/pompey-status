@@ -67,6 +67,8 @@ def main(argv: list[str]) -> int:
     data["step"] = step
     data["label"] = label
     data["error"] = error
+    need = os.environ.get("POMPEY_STATUS_NEED_PROTON", "").lower() in {"1", "true", "yes"}
+    data["need_proton"] = need
     ready = bool(step == "ready" and not error)
     data["handoff"] = ready
     data["search"] = ready

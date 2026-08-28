@@ -7,6 +7,7 @@ import importlib.util
 import json
 import os
 import struct
+import sys
 import threading
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -347,6 +348,9 @@ class Helpers(unittest.TestCase):
         self.assertIn("location.replace", html)
         self.assertIn("Opening search", html)
         self.assertIn('src="logo.png"', html)
+        self.assertIn("setup/proton", html)
+        self.assertIn("need_proton", html)
+        self.assertIn("Paste the Proton WireGuard file", html)
 
     def test_ha_store_icon_is_square_logo_is_wide(self):
         icon = ROOT / "pompey/icon.png"
@@ -410,8 +414,8 @@ class WireStack(unittest.TestCase):
                 "MEDIA_ROOT": "/media",
                 "PLEX_URL": OPTIONS["plex_url"],
                 "PLEX_TOKEN": OPTIONS["plex_token"],
-                "INDEXER_URL": OPTIONS["indexer_url"],
-                "INDEXER_API_KEY": OPTIONS["indexer_api_key"],
+                "INDEXER_URL": OPTIONS["source_url"],
+                "INDEXER_API_KEY": OPTIONS["source_key"],
                 "QBIT_URL": urls["qbit"],
                 "SONARR_URL": urls["sonarr"],
                 "RADARR_URL": urls["radarr"],
@@ -618,6 +622,46 @@ class IngressRewrite(unittest.TestCase):
             proxy.server_close()
             up.shutdown()
             up.server_close()
+
+
+class ProtonSetup(unittest.TestCase):
+    def setUp(self):
+        self.setup = load("pompey_setup", BIN / "pompey-setup")
+        self.sample = (ROOT / "tests/fixtures/wg0.conf").read_text()
+
+    def test_valid_proton_file(self):
+        self.assertEqual(self.setup.validate_wg(self.sample), "")
+
+    def test_empty_paste(self):
+        self.assertIn("whole Proton", self.setup.validate_wg(""))
+
+    def test_missing_endpoint(self):
+        text = "\n".join(
+            line for line in self.sample.splitlines() if not line.lower().startswith("endpoint")
+        )
+        err = self.setup.validate_wg(text)
+        self.assertIn("Endpoint", err)
+
+    def test_does_not_echo_private_key(self):
+        err = self.setup.validate_wg("[Interface]\nPrivateKey = SUPERSECRET\n")
+        self.assertNotIn("SUPERSECRET", err)
+
+    def test_status_need_proton_flag(self):
+        import tempfile
+
+        ready = Path(tempfile.mkdtemp())
+        env = os.environ.copy()
+        env["POMPEY_READY"] = str(ready)
+        env["POMPEY_STATUS_NEED_PROTON"] = "1"
+        import subprocess
+
+        subprocess.run(
+            [sys.executable, str(BIN / "pompey-status"), "vpn", "Paste the Proton WireGuard file you downloaded", "8"],
+            check=True,
+            env=env,
+        )
+        data = json.loads((ready / "status.json").read_text())
+        self.assertTrue(data["need_proton"])
 
 
 class TestsNeverUseBitTorrent(unittest.TestCase):

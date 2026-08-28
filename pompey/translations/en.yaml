@@ -1,43 +1,18 @@
 configuration:
-  wireguard_config:
-    name: WireGuard config file
-    description: Filename under /config/wireguard/ (the Proton-generated .conf). Used when that file exists.
-  wireguard_private_key:
-    name: WireGuard private key
-    description: PrivateKey from the Proton config. Only needed if the file is not present.
-  wireguard_address:
-    name: WireGuard address
-    description: Interface Address from the Proton config (for example 10.2.0.2/32).
-  wireguard_peer_public_key:
-    name: Peer public key
-    description: Peer's PublicKey from the Proton config.
-  wireguard_endpoint:
-    name: Endpoint
-    description: Peer's Endpoint (host:port) from the Proton config.
-  wireguard_dns:
-    name: WireGuard DNS
-    description: Tunnel DNS/gateway. Proton WireGuard uses 10.2.0.1. Also the NAT-PMP gateway.
-  port_forwarding:
-    name: Port forwarding
-    description: Ask Proton for a forwarded port so downloads can accept incoming connections.
-  lan_networks:
-    name: LAN networks
-    description: Home CIDRs that may talk to this app without the VPN (Plex, NAS). Supervisor's 172.30.32.0/23 is always included.
   plex_url:
     name: Plex address
-    description: Numeric IP where Plex listens, for example http://192.168.1.10:32400 or http://172.30.32.1:32400. Hostnames will not resolve through Proton DNS.
+    description: >-
+      Numeric IP where Plex listens, for example http://192.168.1.10:32400
+      or http://172.30.32.1:32400 if Plex is on this same Home Assistant machine.
+      Hostnames will not resolve through Proton DNS.
   plex_token:
     name: Plex token
-    description: Token from the Plex account that owns the server. Used to sign the household UI into Plex.
-  indexer_url:
+    description: >-
+      Token from the Plex account that owns the server. Open any item on that
+      server in a browser, View Source, search for X-Plex-Token.
+  source_url:
     name: Source URL
     description: Base URL of one source. Pompey does not ship a catalog; you provide this.
-  indexer_api_key:
+  source_key:
     name: Source key
     description: API key for that source.
-  media_root:
-    name: Media folder
-    description: Root for libraries and downloads. Default /media. Libraries and in-progress downloads should share a filesystem.
-  log_level:
-    name: Log level
-    description: Verbosity for the app and VPN scripts.

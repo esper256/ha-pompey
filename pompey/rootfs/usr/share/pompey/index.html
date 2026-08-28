@@ -102,6 +102,49 @@
       color: var(--err);
       margin-top: 0.75rem;
     }
+
+    #proton {
+      margin-top: 1.25rem;
+    }
+
+    #proton label {
+      display: block;
+      font-family: ui-sans-serif, system-ui, sans-serif;
+      font-size: 0.95rem;
+      color: var(--fg);
+      margin-bottom: 0.5rem;
+    }
+
+    #proton textarea {
+      width: 100%;
+      min-height: 11rem;
+      margin: 0 0 0.75rem;
+      padding: 0.75rem;
+      border: 1px solid var(--line);
+      border-radius: 0.4rem;
+      background: #10141c;
+      color: var(--fg);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.8rem;
+      line-height: 1.4;
+      resize: vertical;
+    }
+
+    #proton button {
+      font-family: ui-sans-serif, system-ui, sans-serif;
+      font-size: 0.95rem;
+      background: var(--focus);
+      color: #07090d;
+      border: 0;
+      border-radius: 0.35rem;
+      padding: 0.55rem 1rem;
+      cursor: pointer;
+    }
+
+    #proton button:disabled {
+      opacity: 0.6;
+      cursor: wait;
+    }
   </style>
 </head>
 <body>
@@ -110,6 +153,11 @@
     <div class="bar" aria-hidden="true"><span id="fill"></span></div>
     <ol id="steps"></ol>
     <p class="now" id="now">Bringing the fleet to heel…</p>
+    <form id="proton" hidden>
+      <label for="wg">Paste the Proton WireGuard file you downloaded (.conf). Pompey reads Endpoint and keys from that file.</label>
+      <textarea id="wg" name="config" spellcheck="false" autocomplete="off" autocapitalize="off"></textarea>
+      <button type="submit" id="wg-go">Start the tunnel</button>
+    </form>
     <p id="file-hint" hidden>This file is only the wait screen. On Home Assistant it lives in the sidebar after Proton is up. In this repo run <code>python3 tests/preview.py</code> to watch progress here.</p>
     <p class="error" id="err" hidden></p>
   </main>
@@ -119,6 +167,9 @@
     const now = document.getElementById("now");
     const err = document.getElementById("err");
     const stepsEl = document.getElementById("steps");
+    const proton = document.getElementById("proton");
+    const wg = document.getElementById("wg");
+    const wgGo = document.getElementById("wg-go");
     const marks = { pending: "·", active: "›", done: "✓", error: "!" };
 
     if (location.protocol === "file:") {
@@ -128,10 +179,11 @@
     function render(data) {
       fill.style.width = Math.max(0, Math.min(100, data.percent || 0)) + "%";
       now.textContent = data.label || "Bringing the fleet to heel…";
+      proton.hidden = !data.need_proton;
       if (data.error) {
         err.hidden = false;
         err.textContent = data.error;
-      } else {
+      } else if (!data.need_proton) {
         err.hidden = true;
         err.textContent = "";
       }
@@ -147,7 +199,7 @@
         li.append(mark, lab);
         stepsEl.append(li);
       });
-      if (data.search) {
+      if (data.search && !data.need_proton) {
         now.textContent = "Opening search…";
         const n = Number(sessionStorage.getItem("pompey-handoff") || "0");
         if (n < 8) {
@@ -158,6 +210,32 @@
         }
       }
     }
+
+    proton.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      wgGo.disabled = true;
+      err.hidden = true;
+      try {
+        const res = await fetch("setup/proton", {
+          method: "POST",
+          headers: { "Content-Type": "text/plain" },
+          body: wg.value,
+        });
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok || body.ok === false) {
+          err.hidden = false;
+          err.textContent = body.error || "Could not use that Proton file.";
+          return;
+        }
+        proton.hidden = true;
+        now.textContent = "Starting the Proton tunnel…";
+      } catch (_exc) {
+        err.hidden = false;
+        err.textContent = "Could not send the Proton file. Try again from the sidebar.";
+      } finally {
+        wgGo.disabled = false;
+      }
+    });
 
     async function tick() {
       if (location.protocol === "file:") return;
@@ -175,3 +253,4 @@
   </script>
 </body>
 </html>
+

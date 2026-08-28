@@ -1,6 +1,12 @@
 #!/command/with-contenv bashio
 # shellcheck shell=bash
 set -euo pipefail
+# shellcheck source=/dev/null
+source "$(command -v pompey-env)"
+
+need_proton() {
+  POMPEY_STATUS_NEED_PROTON=1 pompey-status vpn "Paste the Proton WireGuard file you downloaded" 8 || true
+}
 
 if [[ "${POMPEY_FAKE_VPN:-}" == "1" ]]; then
   bashio::log.info "Fake wg0 (agent/dev): not Proton"
@@ -15,9 +21,11 @@ if [[ "${POMPEY_FAKE_VPN:-}" == "1" ]]; then
   exit 1
 fi
 
-if [[ ! -f /etc/wireguard/wg0.conf ]]; then
-  bashio::exit.nok "WireGuard config missing"
-fi
+# Stay running while we wait. Exiting would halt the container (wireguard/finish).
+until apply-vpn-config; do
+  need_proton
+  sleep 2
+done
 
 bashio::log.info "Bringing up wg0"
 pompey-status vpn "Bringing up the Proton tunnel" 10 || true
@@ -27,14 +35,12 @@ if ! wg-quick up wg0; then
   wg-quick up wg0
 fi
 
-# wg-quick may rewrite resolv.conf; keep Proton tunnel DNS.
-printf 'nameserver %s\n' "$(bashio::config 'wireguard_dns')" >/etc/resolv.conf
+printf 'nameserver %s\n' "${POMPEY_WG_DNS}" >/etc/resolv.conf
 
 bashio::log.info "Waiting for Proton handshake on wg0"
 pompey-status vpn "Waiting for Proton handshake" 15 || true
 wait-for-vpn 45
 
-# Stay in the foreground. A stale handshake is a crash (kill switch).
 while wait-for-vpn 1; do
   sleep 30
 done

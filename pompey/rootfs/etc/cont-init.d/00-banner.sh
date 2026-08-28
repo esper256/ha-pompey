@@ -4,36 +4,19 @@ set -euo pipefail
 # shellcheck source=/dev/null
 source "$(command -v pompey-env)"
 
-bashio::log.level "$(bashio::config 'log_level')" >/dev/null 2>&1 || true
-
-bashio::log.info "Pompey ${BUILD_VERSION:-0.2.2} starting"
+bashio::log.info "Pompey ${BUILD_VERSION:-0.2.3} starting"
 pompey-status vpn "Starting" 5 || true
 
 mkdir -p "${POMPEY_CONFIG}/wireguard" "${POMPEY_WG_ETC}" "${POMPEY_VPN_TMP}" "${POMPEY_NGINX_RUN}"
 chmod 700 "${POMPEY_CONFIG}/wireguard" "${POMPEY_WG_ETC}"
 pompey-secrets >/dev/null
 
-WG_FILE="${POMPEY_CONFIG}/wireguard/$(bashio::config 'wireguard_config')"
-HAS_FILE=false
-HAS_FIELDS=false
-
-if [[ -s "${WG_FILE}" ]]; then
-  HAS_FILE=true
-fi
-if bashio::config.has_value 'wireguard_private_key' \
-  && bashio::config.has_value 'wireguard_address' \
-  && bashio::config.has_value 'wireguard_peer_public_key' \
-  && bashio::config.has_value 'wireguard_endpoint'; then
-  HAS_FIELDS=true
-fi
-
 if [[ "${POMPEY_FAKE_VPN:-}" == "1" ]]; then
   bashio::log.info "Fake VPN (agent/dev): no Proton required"
   pompey-status vpn "Fake wg0" 10 || true
-  if [[ "${HAS_FILE}" != "true" && "${HAS_FIELDS}" != "true" ]]; then
-    mkdir -p "${POMPEY_CONFIG}/wireguard"
+  if [[ ! -s "${POMPEY_WG_FILE}" ]]; then
     umask 077
-    cat > "${WG_FILE}" <<'EOF'
+    cat > "${POMPEY_WG_FILE}" <<'EOF'
 [Interface]
 PrivateKey = AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
 Address = 10.2.0.2/32
@@ -44,14 +27,15 @@ PublicKey = BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB=
 AllowedIPs = 0.0.0.0/0
 Endpoint = 127.0.0.1:1
 EOF
-    HAS_FILE=true
     bashio::log.info "Fake VPN: wrote a stub WireGuard file (not Proton)"
   fi
 fi
 
-if [[ "${HAS_FILE}" != "true" && "${HAS_FIELDS}" != "true" ]]; then
-  pompey-status vpn "Need a Proton WireGuard config" 5 "Put a Proton WireGuard file in the app config share, or fill private key, address, peer public key, and endpoint." || true
-  bashio::exit.nok "Need a Proton WireGuard config: put it at ${WG_FILE} or fill private key, address, peer public key, and endpoint."
+if [[ ! -s "${POMPEY_WG_FILE}" ]]; then
+  POMPEY_STATUS_NEED_PROTON=1 pompey-status vpn "Paste the Proton WireGuard file you downloaded" 8 || true
+  bashio::log.info "No Proton config yet. Start the app and paste the .conf you downloaded from Proton onto the wait screen."
+else
+  bashio::log.info "Proton WireGuard file is present"
 fi
 
 plex_token="$(bashio::config 'plex_token')"
@@ -59,8 +43,11 @@ if [[ -z "${plex_token}" ]]; then
   bashio::log.warning "Plex token is empty. Search can still start; you will finish Plex from that screen."
 fi
 
-indexer_url="$(bashio::config 'indexer_url')"
-if [[ -z "${indexer_url}" ]]; then
+source_url="$(bashio::config 'source_url')"
+if [[ -z "${source_url}" ]]; then
+  source_url="$(bashio::config 'indexer_url')"
+fi
+if [[ -z "${source_url}" ]]; then
   bashio::log.warning "No source URL yet. Add a source (URL plus key) so titles can be found."
 fi
 
