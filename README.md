@@ -30,10 +30,10 @@ Copy `pompey/` into `/addons`, or add `https://github.com/esper256/ha-pompey` as
 | Proton + kill switch | WireGuard from that pasted Proton file; `PersistentKeepalive`; internet **OUTPUT** only on `wg0` (nft/iptables-nft, then legacy). Ingress from Supervisor is INPUT and stays up if the tunnel fails. RFC1918 LAN (Plex, NAS) allowed |
 | Runtime fetch | After the tunnel is up: Seerr, TV/movie/indexer engines, download engine. Retries on failure. Supervisor docker start/stop timeout is 300s (schema max); the wait screen covers the longer fetch |
 | Ingress + Seerr | Wait page, then nginx → a rewriter that prefixes `/_next` and `/api/v1` with `X-Ingress-Path` so Next.js works under Ingress. `/login` and `/setup` are rewritten only as quoted strings so Seerr’s `/login/i` regex stays valid (the Plex button on setup). Cookies are scoped to that prefix. |
-| Local wiring | Engines on localhost; Prowlarr syncs the source to TV/movie engines; Seerr pointed at them via its own `settings.json` API key (local password login is not how Seerr creates the first admin). If Plex is missing, Seerr stays uninitialized so its wizard can run. A required miss (indexer, Seerr→Radarr/Sonarr) keeps the wait screen up |
+| Local wiring | Engines on localhost; Prowlarr syncs the source to TV/movie engines. Seerr’s `settings.json` API key impersonates user id 1, which the Plex wizard creates — before that, Arr wiring 403s and we still hand off so the wizard can run, then retry. If Plex is missing, Seerr stays uninitialized. A required miss (indexer, or Seerr→Radarr/Sonarr after initialize) keeps the wait screen up |
 | Kid vs general folders | Kid Friendly vs general roots. Poller moves titles by certification (including nested Radarr fields). Unknown → general |
 | NAT-PMP | Proton mapped port is pushed into the download engine (always tried; enable NAT-PMP on the Proton certificate) |
-| Agent tests | `bash tests/run.sh` (CI). No torrent client. Fake `wg0` smoke. Ingress rewriter unit tests. TMDB lookup via `tests/integration.sh` |
+| Agent tests | `bash tests/run.sh` (CI). No torrent client. Fake `wg0` smoke. Real Seerr API (cached image unpack). Ingress rewriter vs real client JS. TMDB lookup via `tests/integration.sh` |
 
 ## What is not done yet
 

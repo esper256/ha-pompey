@@ -31,6 +31,9 @@ echo "== python unittest (fake engines + supplied options.json) =="
 python3 tests/test_python.py -v
 python3 tests/test_fake_source.py -v
 
+echo "== real Seerr (crane unpack + musl chroot; Arr/qbit stay fake) =="
+python3 tests/test_seerr_real.py -v
+
 echo "== addon scripts with bashio stub =="
 bash tests/test_scripts.sh
 
