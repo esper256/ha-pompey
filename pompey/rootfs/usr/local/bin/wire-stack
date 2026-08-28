@@ -459,6 +459,8 @@ def ensure_media_management(base: str, api_key: str, kind: str) -> None:
         "skipFreeSpaceCheckWhenImporting": True,
         "minimumFreeSpaceWhenImporting": MIN_IMPORT_FREE_SPACE,
         "copyUsingHardlinks": False,
+        "importExtraFiles": True,
+        "extraFileExtensions": "srt",
     }
     if all(cfg.get(key) == value for key, value in want.items()):
         return
@@ -1690,21 +1692,56 @@ QBIT_STOPPED = {
 }
 
 
+VIDEO_EXTENSIONS = {
+    ".mkv",
+    ".mp4",
+    ".avi",
+    ".m4v",
+    ".ts",
+    ".m2ts",
+    ".wmv",
+    ".mov",
+    ".webm",
+    ".iso",
+}
+
+
+def is_video_file(name: str) -> bool:
+    return os.path.splitext(name)[1].lower() in VIDEO_EXTENSIONS
+
+
+def path_has_video(path: str) -> bool:
+    """True when a movie/episode file is still on disk (sidecars do not count)."""
+    if not os.path.exists(path):
+        return False
+    if os.path.isfile(path):
+        return is_video_file(os.path.basename(path))
+    try:
+        for dirpath, dirnames, filenames in os.walk(path):
+            dirnames[:] = [name for name in dirnames if not name.startswith(".")]
+            for name in filenames:
+                if name.startswith("."):
+                    continue
+                if is_video_file(name):
+                    return True
+    except OSError:
+        return True
+    return False
+
+
 def qbit_payload_gone(item: dict) -> bool:
-    """True when the torrent's files are not on disk (moved into the library)."""
+    """True when the torrent's video is not on disk (moved into the library).
+
+    Leftover .srt/.nfo/.txt next to an already-imported movie do not keep the
+    torrent alive — those extras are not the library file.
+    """
     path = item.get("content_path")
     if not isinstance(path, str) or not path.strip():
         return str(item.get("state") or "") == "missingFiles"
     path = path.strip()
     if not os.path.exists(path):
         return True
-    if os.path.isdir(path):
-        try:
-            with os.scandir(path) as entries:
-                return next(entries, None) is None
-        except OSError:
-            return False
-    return False
+    return not path_has_video(path)
 
 
 def qbit_is_finished(item: dict) -> bool:
@@ -1874,6 +1911,21 @@ def arr_import_destination(item: dict, kind: str) -> str:
     return title_library_path(nested)
 
 
+def arr_already_has_library_file(item: dict, kind: str) -> bool:
+    """True when Arr already assigned a library file. Do not ManualImport again.
+
+    Re-importing a title that hasFile deletes the library copy (no recycle bin)
+    and treats leftover complete/ extras as a new movie.
+    """
+    if kind == "radarr":
+        movie = item.get("movie") if isinstance(item.get("movie"), dict) else {}
+        return movie.get("hasFile") is True
+    episodes = item.get("episodes") if isinstance(item.get("episodes"), list) else []
+    if not episodes:
+        return False
+    return all(isinstance(ep, dict) and ep.get("hasFile") is True for ep in episodes)
+
+
 def lookup_arr_library_path(base: str, api_key: str, kind: str, row: dict) -> str:
     try:
         if kind == "radarr" and row.get("movieId"):
@@ -1965,6 +2017,14 @@ def import_matched_drop(base: str, api_key: str, kind: str) -> None:
                     "WARNING",
                 )
                 continue
+            if arr_already_has_library_file(item, kind):
+                dest = arr_import_destination(item, kind) or "Arr title path"
+                log(
+                    f"{kind} already has a library file for "
+                    f"{os.path.basename(path)} -> {dest} "
+                    "(not re-importing leftover complete/ files)"
+                )
+                continue
             row = manual_import_file(item, kind)
             if not row:
                 log(
@@ -1997,16 +2057,20 @@ def import_matched_drop(base: str, api_key: str, kind: str) -> None:
 
 
 def log_complete_drop_contents() -> None:
-    """Household log: what is still under complete/, not a full HA dump."""
+    """Warn only when a video is still under complete/. Sidecars are not the movie."""
     root = downloads_complete()
     if not os.path.isdir(root):
         log(f"complete folder is missing: {root}", "WARNING")
         return
-    found: list[str] = []
+    videos: list[str] = []
+    extras = 0
     for dirpath, dirnames, filenames in os.walk(root):
         dirnames[:] = [name for name in dirnames if not name.startswith(".")]
         for name in filenames:
             if name.startswith("."):
+                continue
+            if not is_video_file(name):
+                extras += 1
                 continue
             full = os.path.join(dirpath, name)
             rel = os.path.relpath(full, root)
@@ -2014,14 +2078,20 @@ def log_complete_drop_contents() -> None:
                 size = os.path.getsize(full)
             except OSError:
                 size = -1
-            found.append(f"{rel} ({size} bytes)")
-            if len(found) >= 20:
+            videos.append(f"{rel} ({size} bytes)")
+            if len(videos) >= 20:
                 break
-        if len(found) >= 20:
+        if len(videos) >= 20:
             break
-    if found:
-        extra = " …" if len(found) >= 20 else ""
-        log(f"still in complete/: {'; '.join(found)}{extra}", "WARNING")
+    if videos:
+        extra = " …" if len(videos) >= 20 else ""
+        log(f"still in complete/: {'; '.join(videos)}{extra}", "WARNING")
+        return
+    if extras:
+        log(
+            f"complete/ leftovers are extras only ({extras} srt/nfo/txt file(s)); "
+            "movies already in the library"
+        )
         return
     try:
         names = [name for name in os.listdir(root) if not name.startswith(".")]

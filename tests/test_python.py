@@ -1289,6 +1289,27 @@ PersistentKeepalive = 25
             "quality": quality,
         }
         self.assertEqual(ws.manual_import_file(episode, "sonarr")["episodeIds"], [11, 12])
+        self.assertTrue(
+            ws.arr_already_has_library_file(
+                {"movie": {"hasFile": True, "path": "/media/dlna/Movies/Not Kid Friendly/Ok (2024)"}},
+                "radarr",
+            )
+        )
+        self.assertFalse(
+            ws.arr_already_has_library_file({"movie": {"hasFile": False}}, "radarr")
+        )
+        self.assertTrue(
+            ws.arr_already_has_library_file(
+                {"episodes": [{"id": 11, "hasFile": True}, {"id": 12, "hasFile": True}]},
+                "sonarr",
+            )
+        )
+        self.assertFalse(
+            ws.arr_already_has_library_file(
+                {"episodes": [{"id": 11, "hasFile": True}, {"id": 12, "hasFile": False}]},
+                "sonarr",
+            )
+        )
         self.assertEqual(
             ws.import_rejection_text(
                 {"rejections": [{"reason": "Not a wanted quality"}]}
@@ -1337,11 +1358,15 @@ PersistentKeepalive = 25
         empty.mkdir(parents=True, exist_ok=True)
         try:
             self.assertTrue(ws.qbit_payload_gone({"content_path": str(empty)}))
+            (empty / "notes.nfo").write_text("nfo")
+            (empty / "English.srt").write_text("1")
+            self.assertTrue(ws.qbit_payload_gone({"content_path": str(empty)}))
             (empty / "file.mkv").write_text("x")
             self.assertFalse(ws.qbit_payload_gone({"content_path": str(empty)}))
             self.assertTrue(
                 ws.qbit_payload_gone({"content_path": str(empty / "missing.mkv")})
             )
+            self.assertTrue(ws.qbit_payload_gone({"content_path": str(empty / "notes.nfo")}))
         finally:
             for child in empty.iterdir():
                 child.unlink()
@@ -1518,6 +1543,8 @@ class WireStack(unittest.TestCase):
         self.assertEqual(self.state.radarr_media.get("minimumFreeSpaceWhenImporting"), 100)
         self.assertFalse(self.state.radarr_media.get("copyUsingHardlinks"))
         self.assertFalse(self.state.sonarr_media.get("copyUsingHardlinks"))
+        self.assertTrue(self.state.radarr_media.get("importExtraFiles"))
+        self.assertEqual(self.state.radarr_media.get("extraFileExtensions"), "srt")
         self.assertFalse(self.state.radarr_dl_config.get("autoRedownloadFailed"))
         self.assertTrue(self.state.radarr_dl_config.get("enableCompletedDownloadHandling"))
         self.assertIn(
@@ -1925,6 +1952,7 @@ class WireStack(unittest.TestCase):
                     "id": 1,
                     "title": "Matched",
                     "path": dest,
+                    "hasFile": False,
                 },
                 "quality": quality,
                 "languages": [{"id": 1, "name": "English"}],
@@ -1982,6 +2010,32 @@ class WireStack(unittest.TestCase):
         self.assertNotIn("true", self.state.qbit_removed[0]["deleteFiles"].lower())
         self.assertFalse(any(item.get("hash") == "44" * 20 for item in self.state.qbit_torrents))
 
+    def test_housekeep_forgets_torrent_when_only_extras_remain(self):
+        os.environ["INDEXER_URL"] = ""
+        os.environ["INDEXER_API_KEY"] = ""
+        root = self.tmp / "forget-extras"
+        leftover = root / "downloads" / "complete" / "Marty leftover"
+        leftover.mkdir(parents=True)
+        (leftover / "English.srt").write_bytes(b"sub")
+        os.environ["MEDIA_ROOT"] = str(root)
+        digest = "66" * 20
+        self.state.qbit_torrents = [
+            {
+                "hash": digest,
+                "name": "Marty leftover",
+                "state": "stoppedUP",
+                "progress": 1,
+                "amount_left": 0,
+                "content_path": str(leftover),
+            }
+        ]
+        rc = ws.housekeep()
+        self.assertEqual(rc, 0)
+        self.assertEqual(self.state.qbit_removed[0]["hashes"], digest)
+        self.assertEqual(self.state.qbit_removed[0]["deleteFiles"], "false")
+        self.assertTrue((leftover / "English.srt").is_file())
+        self.assertFalse(any(item.get("hash") == digest for item in self.state.qbit_torrents))
+
     def test_housekeep_scans_legacy_complete_radarr_folder(self):
         os.environ["INDEXER_URL"] = ""
         os.environ["INDEXER_API_KEY"] = ""
@@ -2005,6 +2059,70 @@ class WireStack(unittest.TestCase):
         self.assertIn(str(self.tmp / "downloads" / "complete"), scan_paths)
         self.assertIn(str(stuck), scan_paths)
         self.assertIn("radarr/stuck-title.mkv (50 bytes)", buf.getvalue())
+
+    def test_housekeep_skips_manual_import_when_library_already_has_file(self):
+        os.environ["INDEXER_URL"] = ""
+        os.environ["INDEXER_API_KEY"] = ""
+        root = self.tmp / "skip-hasfile"
+        complete = root / "downloads" / "complete"
+        complete.mkdir(parents=True)
+        leftover = complete / "already-imported.mkv"
+        leftover.write_bytes(b"x")
+        os.environ["MEDIA_ROOT"] = str(root)
+        dest = str(root / "Movies" / "Not Kid Friendly" / "Already (2024)")
+        quality = {"quality": {"id": 7, "name": "Bluray-1080p"}, "revision": {"version": 1}}
+        self.state.manual_import = [
+            {
+                "path": str(leftover),
+                "movieId": 2,
+                "movie": {
+                    "id": 2,
+                    "title": "Already",
+                    "path": dest,
+                    "hasFile": True,
+                },
+                "quality": quality,
+                "languages": [{"id": 1, "name": "English"}],
+                "rejections": [],
+            }
+        ]
+        from io import StringIO
+        from contextlib import redirect_stdout
+
+        buf = StringIO()
+        with redirect_stdout(buf):
+            rc = ws.housekeep()
+        self.assertEqual(rc, 0)
+        manuals = [
+            item for item in self.state.arr_commands if item.get("name") == "ManualImport"
+        ]
+        self.assertEqual(manuals, [])
+        self.assertIn(
+            f"already has a library file for already-imported.mkv -> {dest} "
+            "(not re-importing leftover complete/ files)",
+            buf.getvalue(),
+        )
+
+    def test_housekeep_logs_extras_not_videos_in_complete(self):
+        os.environ["INDEXER_URL"] = ""
+        os.environ["INDEXER_API_KEY"] = ""
+        root = self.tmp / "extras-only"
+        folder = root / "downloads" / "complete" / "Marty leftover"
+        folder.mkdir(parents=True)
+        (folder / "English.srt").write_bytes(b"sub")
+        (folder / "release.nfo").write_bytes(b"nfo")
+        os.environ["MEDIA_ROOT"] = str(root)
+        from io import StringIO
+        from contextlib import redirect_stdout
+
+        buf = StringIO()
+        with redirect_stdout(buf):
+            rc = ws.housekeep()
+        self.assertEqual(rc, 0)
+        out = buf.getvalue()
+        self.assertIn("complete/ leftovers are extras only (2 srt/nfo/txt file(s))", out)
+        self.assertNotIn("still in complete/:", out)
+        self.assertNotIn("English.srt", out)
 
     def test_updates_existing_download_client_remove_flag(self):
         os.environ["INDEXER_URL"] = ""
@@ -2037,6 +2155,8 @@ class WireStack(unittest.TestCase):
             self.assertTrue(cfg.get("skipFreeSpaceCheckWhenImporting"))
             self.assertEqual(cfg.get("minimumFreeSpaceWhenImporting"), 100)
             self.assertFalse(cfg.get("copyUsingHardlinks"))
+            self.assertTrue(cfg.get("importExtraFiles"))
+            self.assertEqual(cfg.get("extraFileExtensions"), "srt")
         for cfg in (self.state.radarr_dl_config, self.state.sonarr_dl_config):
             self.assertTrue(cfg.get("enableCompletedDownloadHandling"))
             self.assertFalse(cfg.get("autoRedownloadFailed"))
