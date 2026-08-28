@@ -25,7 +25,7 @@ jobs:
           path: ~/.cache/pompey
           key: pompey-servarr-${{ runner.os }}
 
-      # options.json + stubs + fake-wg0 smoke + real Prowlarr unpack.
+      # options.json + stubs + real Seerr API + fake-wg0 smoke + real Prowlarr unpack.
       # Never start a torrent client. Never needs Proton.
       - name: Run tests
         run: bash tests/run.sh

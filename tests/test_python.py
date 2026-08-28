@@ -73,6 +73,7 @@ class FakeState:
         self.local_auth: object = None
         self.allow_seerr_local = False
         self.seerr_object_lists = False
+        self.seerr_has_admin = False
         self.seerr_radarr: list[dict] = []
         self.seerr_sonarr: list[dict] = []
         self.initialized = False
@@ -225,14 +226,22 @@ def handler_for(state: FakeState):
                     state.plex_auth = body
                     return self._send(body={"id": 1}, cookie="connect.sid=testcookie; Path=/")
                 if path == "/api/v1/auth/local":
+                    # Real Seerr is login-only (see tests/test_seerr_real.py). Default 403.
                     if not state.allow_seerr_local:
                         return self._send(403, {"message": "Access denied."})
                     state.local_auth = body
                     return self._send(body={"id": 1, "email": (body or {}).get("email")}, cookie="connect.sid=local; Path=/")
-                key = self.headers.get("X-Api-Key") or ""
+                # Real Seerr: X-API-Key impersonates user id 1. That row does not
+                # exist until Plex login or the setup wizard creates the first admin.
+                key = self.headers.get("X-API-Key") or self.headers.get("X-Api-Key") or ""
                 cookie = (self.headers.get("Cookie") or "").strip()
-                if not cookie and key not in {"seerr-disk-key", "seerr-api-key"}:
-                    return self._send(403, {"message": "Access denied."})
+                has_admin = bool(state.plex_auth or state.local_auth or state.seerr_has_admin)
+                valid_key = key in {"seerr-disk-key", "seerr-api-key"}
+                if not cookie and not (valid_key and has_admin):
+                    return self._send(
+                        403,
+                        {"status": 403, "error": "You do not have permission to access this endpoint"},
+                    )
                 if path == "/api/v1/settings/main" and method == "GET":
                     return self._send(body={"apiKey": "seerr-api-key"})
                 if path == "/api/v1/settings/main" and method == "POST":
@@ -506,6 +515,7 @@ class WireStack(unittest.TestCase):
         self.assertEqual(self.state.plex_auth, {"authToken": "test-plex-token"})
         self.assertEqual(self.state.seerr_radarr[0]["hostname"], "127.0.0.1")
         self.assertEqual(self.state.seerr_sonarr[0]["activeDirectory"], "/media/TV")
+        self.assertTrue((self.ready / "seerr-arr").exists())
         self.assertTrue(self.state.initialized)
         text = self.nginx.read_text()
         self.assertIn("proxy_pass " + os.environ.get("POMPEY_INGRESS_PROXY", "http://127.0.0.1:8098"), text)
@@ -519,18 +529,15 @@ class WireStack(unittest.TestCase):
         self.assertTrue(live["handoff"])
         self.assertIsNone(self.state.local_auth)
 
-    def test_wires_without_plex_when_seerr_returns_objects(self):
-        os.environ["PLEX_URL"] = ""
-        os.environ["PLEX_TOKEN"] = ""
+    def test_wires_when_seerr_returns_objects(self):
+        # Plex login creates user id 1; GET /settings/radarr can still be an object.
         self.state.seerr_object_lists = True
         rc = ws.main()
         self.assertEqual(rc, 0)
         self.assertTrue((self.ready / "wired").exists())
-        self.assertIsNone(self.state.plex_auth)
-        self.assertIsNone(self.state.local_auth)
         self.assertEqual(self.state.seerr_radarr[0]["hostname"], "127.0.0.1")
         self.assertEqual(self.state.seerr_sonarr[0]["hostname"], "127.0.0.1")
-        self.assertFalse(self.state.initialized)
+        self.assertTrue((self.ready / "seerr-arr").exists())
         live = json.loads((self.ready / "status.json").read_text())
         self.assertTrue(live["search"])
 
@@ -559,25 +566,54 @@ class WireStack(unittest.TestCase):
         self.assertEqual(self.state.commands, [])
 
     def test_wires_when_seerr_local_login_is_403(self):
-        """Real Seerr /auth/local is login-only; 403 until the wizard creates a user."""
+        """Real Seerr /auth/local is login-only; API key 403s until user id 1 exists."""
         os.environ["PLEX_URL"] = ""
         os.environ["PLEX_TOKEN"] = ""
         rc = ws.main()
         self.assertEqual(rc, 0)
         self.assertTrue((self.ready / "wired").exists())
+        self.assertFalse((self.ready / "seerr-arr").exists())
+        self.assertIsNone(self.state.local_auth)
+        self.assertEqual(self.state.seerr_radarr, [])
+        self.assertEqual(self.state.seerr_sonarr, [])
+        self.assertFalse(self.state.initialized)
+        live = json.loads((self.ready / "status.json").read_text())
+        self.assertTrue(live["search"])
+
+    def test_wires_arr_with_api_key_after_admin_exists(self):
+        """After the wizard, the API key impersonates user id 1 with no cookie."""
+        os.environ["PLEX_URL"] = ""
+        os.environ["PLEX_TOKEN"] = ""
+        self.state.seerr_has_admin = True
+        rc = ws.main()
+        self.assertEqual(rc, 0)
+        self.assertTrue((self.ready / "wired").exists())
+        self.assertTrue((self.ready / "seerr-arr").exists())
+        self.assertIsNone(self.state.plex_auth)
         self.assertIsNone(self.state.local_auth)
         self.assertEqual(self.state.seerr_radarr[0]["hostname"], "127.0.0.1")
         self.assertFalse(self.state.initialized)
 
-    def test_does_not_mark_ready_without_seerr_api_key(self):
+    def test_marks_ready_before_wizard_without_seerr_api_key(self):
         os.environ["PLEX_URL"] = ""
         os.environ["PLEX_TOKEN"] = ""
         cfg = Path(os.environ["SEERR_CONFIG"])
         (cfg / "settings.json").unlink()
+        rc = ws.main()
+        self.assertEqual(rc, 0)
+        self.assertTrue((self.ready / "wired").exists())
+        self.assertFalse((self.ready / "seerr-arr").exists())
+        self.assertEqual(self.state.seerr_radarr, [])
+
+    def test_does_not_mark_ready_when_initialized_seerr_cannot_wire_arr(self):
+        os.environ["PLEX_URL"] = ""
+        os.environ["PLEX_TOKEN"] = ""
+        self.state.initialized = True
         with self.assertRaises(RuntimeError) as ctx:
             ws.main()
-        self.assertIn("API key", str(ctx.exception))
+        self.assertIn("Radarr/Sonarr", str(ctx.exception))
         self.assertFalse((self.ready / "wired").exists())
+        self.assertTrue((self.ready / "arr-wired").exists())
 
     def _stub_nginx(self, script: str) -> None:
         bindir = self.tmp / "bin"
