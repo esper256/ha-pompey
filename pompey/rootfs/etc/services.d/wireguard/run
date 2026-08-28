@@ -2,6 +2,19 @@
 # shellcheck shell=bash
 set -euo pipefail
 
+if [[ "${POMPEY_FAKE_VPN:-}" == "1" ]]; then
+  bashio::log.info "Fake wg0 (agent/dev): not Proton"
+  pompey-status vpn "Bringing up fake wg0" 10 || true
+  pompey-dev-vpn up
+  pompey-status vpn "Fake wg0 is up" 15 || true
+  wait-for-vpn 10
+  while wait-for-vpn 1; do
+    sleep 30
+  done
+  bashio::log.error "Fake wg0 went away"
+  exit 1
+fi
+
 if [[ ! -f /etc/wireguard/wg0.conf ]]; then
   bashio::exit.nok "WireGuard config missing"
 fi

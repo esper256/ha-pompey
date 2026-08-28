@@ -155,27 +155,41 @@ python3 "${BIN}/pompey-status" ready "Ready" 100
 test "$(jq -r .handoff "${POMPEY_READY}/status.json")" = true
 
 echo "== fetch URL construction (range GET, not a full download) =="
-python3 - <<'PY'
-import os, subprocess, sys
-arch = os.uname().machine
-servarr = "x64" if arch in {"x86_64", "amd64"} else "arm64"
-qbit = "x86_64" if arch in {"x86_64", "amd64"} else "aarch64"
-urls = [
-    f"https://prowlarr.servarr.com/v1/update/master/updatefile?os=linuxmusl&runtime=netcore&arch={servarr}",
-    f"https://services.sonarr.tv/v1/download/main/latest?version=4&os=linuxmusl&arch={servarr}",
-    f"https://radarr.servarr.com/v1/update/master/updatefile?os=linuxmusl&runtime=netcore&arch={servarr}",
-    f"https://github.com/userdocs/qbittorrent-nox-static/releases/latest/download/{qbit}-qbittorrent-nox",
-]
-for url in urls:
-    out = subprocess.check_output(
-        ["curl", "-sS", "-o", "/dev/null", "-w", "%{http_code}", "-r", "0-256", "-L", "--max-time", "40", url],
-        text=True,
-    )
-    if out not in {"200", "206"}:
-        print("bad", out, url, file=sys.stderr)
-        sys.exit(1)
-    print(out, url.split("?")[0])
-print("fetch URLs reachable")
-PY
+urls="$(run "${BIN}/fetch-engines" --print-urls)"
+printf '%s\n' "${urls}"
+while IFS= read -r url; do
+  [[ -n "${url}" ]] || continue
+  out="$(curl -sS -o /dev/null -w '%{http_code}' -r 0-256 -L --max-time 40 "${url}")"
+  if [[ "${out}" != "200" && "${out}" != "206" ]]; then
+    echo "bad ${out} ${url}" >&2
+    exit 1
+  fi
+  echo "${out} ${url%%\?*}"
+done <<<"${urls}"
+musl_urls="$(POMPEY_SERVARR_OS=linuxmusl run "${BIN}/fetch-engines" --print-urls)"
+grep -q 'os=linuxmusl' <<<"${musl_urls}"
+grep -q 'os=linux&' <<<"${urls}" || grep -q 'os=linux$' <<<"${urls}" || grep -q 'os=linux&runtime' <<<"${urls}"
+echo "fetch URLs reachable (glibc here, musl URLs listed for HAOS)"
+
+echo "== fake VPN skips kill switch and wait-for-vpn checks iface =="
+: > "${IPTABLES_LOG}"
+POMPEY_FAKE_VPN=1 run "${INIT}/10-vpn-config.sh"
+if grep -q -- "-j DROP" "${IPTABLES_LOG}"; then
+  echo "fake VPN must not apply OUTPUT DROP" >&2
+  cat "${IPTABLES_LOG}" >&2
+  exit 1
+fi
+mkdir -p "${WORK}/bin"
+cat > "${WORK}/bin/ip" <<'EOF'
+#!/usr/bin/env bash
+echo '2: wg0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue state UP'
+exit 0
+EOF
+chmod +x "${WORK}/bin/ip"
+POMPEY_FAKE_VPN=1 run "${BIN}/wait-for-vpn" 1
+
+echo "== banner allows empty Proton when POMPEY_FAKE_VPN=1 =="
+BASHIO_OPTIONS="${empty}" POMPEY_FAKE_VPN=1 run "${INIT}/00-banner.sh" >/tmp/pompey-banner-fake.log 2>&1
+grep -q "Fake VPN" /tmp/pompey-banner-fake.log
 
 echo "script tests ok (${WORK})"

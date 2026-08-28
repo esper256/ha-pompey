@@ -19,6 +19,25 @@ case "${arch_cpu}" in
     ;;
 esac
 
+# HAOS (Alpine) uses musl tarballs. Ubuntu agent VMs need glibc.
+if [[ -n "${POMPEY_SERVARR_OS:-}" ]]; then
+  servarr_os="${POMPEY_SERVARR_OS}"
+elif [[ -f /etc/alpine-release ]]; then
+  servarr_os="linuxmusl"
+else
+  servarr_os="linux"
+fi
+
+prowlarr_url="https://prowlarr.servarr.com/v1/update/master/updatefile?os=${servarr_os}&runtime=netcore&arch=${servarr_arch}"
+sonarr_url="https://services.sonarr.tv/v1/download/main/latest?version=4&os=${servarr_os}&arch=${servarr_arch}"
+radarr_url="https://radarr.servarr.com/v1/update/master/updatefile?os=${servarr_os}&runtime=netcore&arch=${servarr_arch}"
+qbit_url="https://github.com/userdocs/qbittorrent-nox-static/releases/latest/download/${qbit_arch}-qbittorrent-nox"
+
+if [[ "${1:-}" == "--print-urls" ]]; then
+  printf '%s\n' "${prowlarr_url}" "${sonarr_url}" "${radarr_url}" "${qbit_url}"
+  exit 0
+fi
+
 fetch_tarball() {
   local name="$1"
   local url="$2"
@@ -54,15 +73,22 @@ fetch_qbit() {
   fi
   bashio::log.info "Downloading the download engine"
   pompey-status fetch "Downloading the download engine" 45 || true
-  curl -fsSL --retry 3 --retry-delay 2 -o "${dest}" \
-    "https://github.com/userdocs/qbittorrent-nox-static/releases/latest/download/${qbit_arch}-qbittorrent-nox"
+  curl -fsSL --retry 3 --retry-delay 2 -o "${dest}" "${qbit_url}"
   chmod 755 "${dest}"
 }
 
 fetch_seerr() {
+  if [[ "${POMPEY_SKIP_SEERR:-}" == "1" ]]; then
+    bashio::log.info "Skipping Seerr unpack (POMPEY_SKIP_SEERR=1)"
+    return 0
+  fi
   local dest="${POMPEY_ENGINES}/seerr"
   if [[ -f "${dest}/app/dist/index.js" ]]; then
     bashio::log.info "Seerr already present"
+    return 0
+  fi
+  if ! command -v crane >/dev/null 2>&1; then
+    bashio::log.warning "crane not on PATH; skip Seerr unpack (HAOS image has crane; agents can install it)"
     return 0
   fi
   bashio::log.info "Unpacking the household UI"
@@ -82,12 +108,9 @@ fetch_seerr() {
   ln -sfn "${POMPEY_CONFIG}/seerr" "${dest}/app/config"
 }
 
-fetch_tarball "Prowlarr" \
-  "https://prowlarr.servarr.com/v1/update/master/updatefile?os=linuxmusl&runtime=netcore&arch=${servarr_arch}"
-fetch_tarball "Sonarr" \
-  "https://services.sonarr.tv/v1/download/main/latest?version=4&os=linuxmusl&arch=${servarr_arch}"
-fetch_tarball "Radarr" \
-  "https://radarr.servarr.com/v1/update/master/updatefile?os=linuxmusl&runtime=netcore&arch=${servarr_arch}"
+fetch_tarball "Prowlarr" "${prowlarr_url}"
+fetch_tarball "Sonarr" "${sonarr_url}"
+fetch_tarball "Radarr" "${radarr_url}"
 fetch_qbit
 fetch_seerr
 

@@ -2,11 +2,39 @@
 # shellcheck shell=bash
 set -euo pipefail
 
+if ! command -v ip >/dev/null 2>&1; then
+  export PATH="/usr/sbin:/sbin:${PATH}"
+fi
+
 IFACE="${WG_IFACE:-wg0}"
 TRIES="${1:-60}"
 MAX_AGE="${WG_HANDSHAKE_MAX_AGE:-180}"
 
+iface_up() {
+  local ns="${POMPEY_FAKE_VPN_NETNS:-pompey-dev}"
+  if [[ "${POMPEY_FAKE_VPN:-}" == "1" ]] \
+    && ip netns list 2>/dev/null | awk '{ print $1 }' | grep -qx "${ns}"; then
+    local show
+    if [[ "$(id -u)" -eq 0 ]]; then
+      show="$(ip netns exec "${ns}" ip -o link show "${IFACE}" 2>/dev/null)" || return 1
+    elif sudo -n true 2>/dev/null; then
+      show="$(sudo -n ip netns exec "${ns}" ip -o link show "${IFACE}" 2>/dev/null)" || return 1
+    else
+      return 1
+    fi
+    grep -q '[,<]UP[,>]' <<<"${show}"
+    return
+  fi
+  ip link show "${IFACE}" >/dev/null 2>&1 || return 1
+  ip -o link show "${IFACE}" | grep -q '[,<]UP[,>]'
+}
+
 handshake_ok() {
+  if [[ "${POMPEY_FAKE_VPN:-}" == "1" ]]; then
+    # Agent/dev veth: no WireGuard handshake. wg0 must exist and be UP.
+    iface_up
+    return
+  fi
   command -v wg >/dev/null 2>&1 || return 1
   wg show "${IFACE}" >/dev/null 2>&1 || return 1
   local ts now
@@ -21,7 +49,11 @@ until handshake_ok; do
   i=$((i + 1))
   if [[ "${i}" -ge "${TRIES}" ]]; then
     bashio::log.error "WireGuard ${IFACE} has no fresh handshake"
-    pompey-status vpn "Waiting for Proton handshake" 15 "The tunnel is not up yet. Check the Proton WireGuard file and that this app has NET_ADMIN /dev/net/tun." || true
+    if [[ "${POMPEY_FAKE_VPN:-}" == "1" ]]; then
+      pompey-status vpn "Waiting for fake wg0" 15 "POMPEY_FAKE_VPN is set but ${IFACE} is not up. Run pompey-dev-vpn up." || true
+    else
+      pompey-status vpn "Waiting for Proton handshake" 15 "The tunnel is not up yet. Check the Proton WireGuard file and that this app has NET_ADMIN /dev/net/tun." || true
+    fi
     exit 1
   fi
   sleep 2
