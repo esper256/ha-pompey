@@ -1,9 +1,20 @@
 #!/command/with-contenv bashio
 # shellcheck shell=bash
 # Download official engine artifacts after the tunnel is up.
+#
+# HAOS AppArmor allows /tmp/** rwk (no chmod). GNU tar restoring archive
+# modes there prints "Cannot change mode ... Operation not permitted" and
+# exits 2 — which aborted fetch with set -e. Linux Servarr builds are .NET:
+# lots of .dll files plus an ELF launcher. That is not a Windows zip.
+# Extract under /data/engines, never restore owner/mode from the archive.
 set -euo pipefail
 # shellcheck source=/dev/null
 source "$(command -v pompey-env)"
+
+# mktemp and anything else that honors TMPDIR must land on /data, not /tmp.
+mkdir -p "${POMPEY_ENGINES}"
+export TMPDIR="${POMPEY_ENGINES}/.tmp"
+mkdir -p "${TMPDIR}"
 
 arch_cpu="$(uname -m)"
 case "${arch_cpu}" in
@@ -28,15 +39,99 @@ else
   servarr_os="linux"
 fi
 
-prowlarr_url="https://prowlarr.servarr.com/v1/update/master/updatefile?os=${servarr_os}&runtime=netcore&arch=${servarr_arch}"
-sonarr_url="https://services.sonarr.tv/v1/download/main/latest?version=4&os=${servarr_os}&arch=${servarr_arch}"
-radarr_url="https://radarr.servarr.com/v1/update/master/updatefile?os=${servarr_os}&runtime=netcore&arch=${servarr_arch}"
-qbit_url="https://github.com/userdocs/qbittorrent-nox-static/releases/latest/download/${qbit_arch}-qbittorrent-nox"
+prowlarr_url="${POMPEY_PROWLARR_URL:-https://prowlarr.servarr.com/v1/update/master/updatefile?os=${servarr_os}&runtime=netcore&arch=${servarr_arch}}"
+sonarr_url="${POMPEY_SONARR_URL:-https://services.sonarr.tv/v1/download/main/latest?version=4&os=${servarr_os}&arch=${servarr_arch}}"
+radarr_url="${POMPEY_RADARR_URL:-https://radarr.servarr.com/v1/update/master/updatefile?os=${servarr_os}&runtime=netcore&arch=${servarr_arch}}"
+qbit_url="${POMPEY_QBIT_URL:-https://github.com/userdocs/qbittorrent-nox-static/releases/latest/download/${qbit_arch}-qbittorrent-nox}"
 
 if [[ "${1:-}" == "--print-urls" ]]; then
   printf '%s\n' "${prowlarr_url}" "${sonarr_url}" "${radarr_url}" "${qbit_url}"
   exit 0
 fi
+
+file_magic() {
+  # First 4 bytes as lowercase hex, no spaces: 1f8b08..  504b0304  7f454c46  4d5a....
+  od -An -t x1 -N 4 "$1" 2>/dev/null | tr -d ' \n' | tr 'A-F' 'a-f'
+}
+
+header_filename() {
+  python3 - "$1" <<'PY'
+import re, sys
+name = ""
+try:
+    text = open(sys.argv[1], "rb").read().decode("latin-1", "replace")
+except OSError:
+    print("")
+    raise SystemExit(0)
+for raw in text.splitlines():
+    if raw.lower().startswith("content-disposition:"):
+        m = re.search(r"filename\*=(?:UTF-8'')?([^;]+)", raw, re.I)
+        if not m:
+            m = re.search(r'filename="([^"]+)"', raw, re.I)
+        if not m:
+            m = re.search(r"filename=([^;]+)", raw, re.I)
+        if m:
+            name = m.group(1).strip().strip('"')
+print(name)
+PY
+}
+
+reject_windows_archive() {
+  local name="$1"
+  local archive="$2"
+  local filename="$3"
+  local effective="$4"
+  local magic
+  magic="$(file_magic "${archive}")"
+  local blob="${filename} ${effective}"
+  blob="$(printf '%s' "${blob}" | tr 'A-Z' 'a-z')"
+  if [[ "${blob}" == *windows* || "${filename}" == *.zip || "${filename}" == *.ZIP ]]; then
+    bashio::exit.nok "${name} resolved to a Windows artifact (${filename:-${effective}}). HAOS needs os=${servarr_os} linux tarball."
+  fi
+  if [[ "${magic}" == 504b* ]]; then
+    bashio::exit.nok "${name} is a zip (Windows Servarr build), not a Linux .tar.gz (magic ${magic})"
+  fi
+  if [[ "${magic}" != 1f8b* ]]; then
+    bashio::exit.nok "${name} is not gzip (magic ${magic}; ${filename:-${effective}}). Refusing to untar."
+  fi
+  if [[ "${servarr_os}" == "linuxmusl" && -n "${filename}" && "${filename}" != *musl* ]]; then
+    bashio::exit.nok "${name} filename ${filename} is not a musl build (HAOS is Alpine)"
+  fi
+}
+
+assert_elf_launcher() {
+  local bin="$1"
+  local magic
+  magic="$(file_magic "${bin}")"
+  if [[ "${magic}" == 4d5a* ]]; then
+    bashio::exit.nok "${bin} is a Windows PE launcher (MZ). Linux Servarr uses an ELF host; .dll sidecars can still be MZ."
+  fi
+  if [[ "${magic}" != 7f454c46 ]]; then
+    bashio::exit.nok "${bin} is not an ELF executable (magic ${magic})"
+  fi
+}
+
+make_elfs_executable() {
+  local root="$1"
+  local path magic
+  while IFS= read -r -d '' path; do
+    case "${path}" in
+      *.dll|*.json|*.xml|*.config|*.pdb|*.md|*.txt|*.png|*.svg|*.css|*.map|*.html) continue ;;
+    esac
+    magic="$(file_magic "${path}")"
+    if [[ "${magic}" == 7f454c46 ]]; then
+      chmod a+x "${path}" || true
+    fi
+  done < <(find "${root}" -type f -print0)
+}
+
+tar_extract() {
+  # GNU tar (apk add tar) restores modes by default; that chmod is denied on
+  # HAOS /tmp. Never extract engine archives there. Never restore owner/mode.
+  local archive="$1"
+  local dest="$2"
+  tar --no-same-owner --no-same-permissions -xzf "${archive}" -C "${dest}"
+}
 
 fetch_tarball() {
   local name="$1"
@@ -47,22 +142,54 @@ fetch_tarball() {
     return 0
   fi
 
-  bashio::log.info "Downloading hidden engines"
+  bashio::log.info "Downloading ${name} (${servarr_os}/${servarr_arch})"
   pompey-status fetch "Downloading hidden engines" 35 || true
-  local tmp
-  tmp="$(mktemp -d)"
-  curl -fsSL --retry 3 --retry-delay 2 -o "${tmp}/app.tar.gz" "${url}"
-  tar -xzf "${tmp}/app.tar.gz" -C "${tmp}"
-  local inner
-  inner="$(find "${tmp}" -mindepth 1 -maxdepth 1 -type d | head -n1)"
-  if [[ -z "${inner}" || ! -x "${inner}/${name}" ]]; then
-    rm -rf "${tmp}"
-    bashio::exit.nok "Failed to unpack ${name}"
+
+  local staging unpack archive headers effective filename
+  staging="${POMPEY_ENGINES}/.partial-${name}"
+  rm -rf "${staging}"
+  unpack="${staging}/unpack"
+  mkdir -p "${unpack}"
+  archive="${staging}/app.tar.gz"
+  headers="${staging}/headers.txt"
+
+  effective="$(
+    curl -fsSL --retry 3 --retry-delay 2 \
+      -D "${headers}" -o "${archive}" -w '%{url_effective}' \
+      "${url}"
+  )"
+  filename="$(header_filename "${headers}")"
+  bashio::log.info "${name} artifact ${filename:-unknown} (${effective})"
+
+  reject_windows_archive "${name}" "${archive}" "${filename}" "${effective}"
+  tar_extract "${archive}" "${unpack}"
+
+  local inner=""
+  if [[ -e "${unpack}/${name}/${name}" ]]; then
+    inner="${unpack}/${name}"
+  else
+    local candidate
+    while IFS= read -r candidate; do
+      if [[ -e "${candidate}/${name}" ]]; then
+        inner="${candidate}"
+        break
+      fi
+    done < <(find "${unpack}" -mindepth 1 -maxdepth 1 -type d)
   fi
+  if [[ -z "${inner}" || ! -e "${inner}/${name}" ]]; then
+    rm -rf "${staging}"
+    bashio::exit.nok "Failed to unpack ${name} (no ${name}/${name} under ${filename:-archive})"
+  fi
+
+  assert_elf_launcher "${inner}/${name}"
+  make_elfs_executable "${inner}"
+  chmod -R a+rX "${inner}"
+  chmod a+x "${inner}/${name}"
+
   rm -rf "${dest}"
   mv "${inner}" "${dest}"
-  chmod -R a+rX "${dest}"
-  rm -rf "${tmp}"
+  rm -rf "${staging}"
+  bashio::log.info "${name} ready (ELF) under ${dest}"
 }
 
 fetch_qbit() {
@@ -75,10 +202,17 @@ fetch_qbit() {
     bashio::log.info "qBittorrent-nox already present"
     return 0
   fi
-  bashio::log.info "Downloading the download engine"
+  bashio::log.info "Downloading the download engine (${qbit_arch})"
   pompey-status fetch "Downloading the download engine" 45 || true
-  curl -fsSL --retry 3 --retry-delay 2 -o "${dest}" "${qbit_url}"
-  chmod 755 "${dest}"
+  local staging="${POMPEY_ENGINES}/.partial-qbittorrent-nox"
+  rm -rf "${staging}"
+  mkdir -p "${staging}"
+  local bin="${staging}/qbittorrent-nox"
+  curl -fsSL --retry 3 --retry-delay 2 -o "${bin}" "${qbit_url}"
+  assert_elf_launcher "${bin}"
+  chmod 755 "${bin}"
+  mv "${bin}" "${dest}"
+  rm -rf "${staging}"
 }
 
 fetch_seerr() {
@@ -97,24 +231,34 @@ fetch_seerr() {
   fi
   bashio::log.info "Unpacking the household UI"
   pompey-status fetch "Downloading the household UI" 55 || true
-  local tmp
-  tmp="$(mktemp -d)"
-  crane export --platform "${crane_platform}" ghcr.io/seerr-team/seerr:latest | tar -x -C "${tmp}"
-  if [[ ! -f "${tmp}/app/dist/index.js" ]]; then
-    rm -rf "${tmp}"
+  local staging="${POMPEY_ENGINES}/.partial-seerr"
+  rm -rf "${staging}"
+  mkdir -p "${staging}"
+  # Same class of bug as Servarr: do not tar into /tmp under AppArmor.
+  crane export --platform "${crane_platform}" ghcr.io/seerr-team/seerr:latest \
+    | tar --no-same-owner --no-same-permissions -x -C "${staging}"
+  if [[ ! -f "${staging}/app/dist/index.js" ]]; then
+    rm -rf "${staging}"
     bashio::exit.nok "Seerr image did not contain /app/dist/index.js"
   fi
+  chmod -R a+rX "${staging}"
   rm -rf "${dest}"
-  mv "${tmp}" "${dest}"
+  mv "${staging}" "${dest}"
   mkdir -p "${POMPEY_CONFIG}/seerr"
   touch "${POMPEY_CONFIG}/seerr/DOCKER"
   rm -rf "${dest}/app/config"
   ln -sfn "${POMPEY_CONFIG}/seerr" "${dest}/app/config"
 }
 
-fetch_tarball "Prowlarr" "${prowlarr_url}"
-fetch_tarball "Sonarr" "${sonarr_url}"
-fetch_tarball "Radarr" "${radarr_url}"
+if [[ "${POMPEY_SKIP_PROWLARR:-}" != "1" ]]; then
+  fetch_tarball "Prowlarr" "${prowlarr_url}"
+fi
+if [[ "${POMPEY_SKIP_SONARR:-}" != "1" ]]; then
+  fetch_tarball "Sonarr" "${sonarr_url}"
+fi
+if [[ "${POMPEY_SKIP_RADARR:-}" != "1" ]]; then
+  fetch_tarball "Radarr" "${radarr_url}"
+fi
 fetch_qbit
 fetch_seerr
 
