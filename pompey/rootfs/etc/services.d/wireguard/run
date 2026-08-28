@@ -8,15 +8,10 @@ need_proton() {
   POMPEY_STATUS_NEED_PROTON=1 pompey-status vpn "Paste the Proton WireGuard file you downloaded" 8 || true
 }
 
-# wg-quick runs resolvconf when the conf has DNS=. On HAOS that fails with
-# "signature mismatch" and rolls back wg0. Prefer a no-op resolvconf; we set
-# Proton DNS after the interface is up.
+# wg-quick will delete wg0 if resolvconf or src_valid_mark fails on HAOS.
+# PATH helpers no-op those two; Proton DNS is written after the iface is up.
 wg_quick_up() {
-  local bindir="${POMPEY_READY}/wg-bin"
-  mkdir -p "${bindir}"
-  printf '%s\n' '#!/bin/sh' 'exit 0' >"${bindir}/resolvconf"
-  chmod 755 "${bindir}/resolvconf"
-  PATH="${bindir}:${PATH}" wg-quick up wg0
+  PATH="/usr/local/bin/pompey-wg:${PATH}" wg-quick up wg0
 }
 
 bring_up_wg0() {

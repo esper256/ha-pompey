@@ -188,8 +188,26 @@ if grep -E 'basedir/bin/halt|/run/s6/.*/halt' "${ROOT}/pompey/rootfs/etc/service
   echo "wireguard/finish must not halt the container (that kills nginx/Ingress)" >&2
   exit 1
 fi
-grep -q 'resolvconf' "${ROOT}/pompey/rootfs/etc/services.d/wireguard/run"
+grep -q 'pompey-wg' "${ROOT}/pompey/rootfs/etc/services.d/wireguard/run"
 grep -q 'Ingress stays up' "${ROOT}/pompey/rootfs/etc/services.d/wireguard/run"
+
+echo "== wg-quick helpers ignore HAOS resolvconf and read-only src_valid_mark =="
+WG_HELPERS="${ROOT}/pompey/rootfs/usr/local/bin/pompey-wg"
+chmod +x "${WG_HELPERS}/resolvconf" "${WG_HELPERS}/sysctl"
+"${WG_HELPERS}/resolvconf" -a wg0 -m 0 -x
+"${WG_HELPERS}/sysctl" -q net.ipv4.conf.all.src_valid_mark=1
+failing_sysctl="${WORK}/bin/failing-sysctl"
+printf '%s\n' '#!/bin/sh' 'echo "sysctl: error setting key: Read-only file system" >&2' 'exit 1' >"${failing_sysctl}"
+chmod +x "${failing_sysctl}"
+if ! POMPEY_REAL_SYSCTL="${failing_sysctl}" "${WG_HELPERS}/sysctl" -q net.ipv4.conf.all.src_valid_mark=1; then
+  echo "src_valid_mark must succeed when /proc/sys is read-only" >&2
+  exit 1
+fi
+if POMPEY_REAL_SYSCTL="${failing_sysctl}" "${WG_HELPERS}/sysctl" net.ipv4.ip_forward=1 >/dev/null 2>&1; then
+  echo "sysctl wrapper must still fail other keys when the real sysctl fails" >&2
+  exit 1
+fi
+grep -q 'src_valid_mark' "${WG_HELPERS}/sysctl"
 
 echo "== vpn kill switch uses nft/iptables when legacy filter table is missing =="
 cp "${ROOT}/tests/stubs/iptables-fail" "${WORK}/bin/iptables-legacy"

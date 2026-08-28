@@ -10,7 +10,7 @@ ARG BUILD_DESCRIPTION="Search for a movie or show; Proton WireGuard for all inte
 ARG BUILD_NAME="Pompey"
 ARG BUILD_REF
 ARG BUILD_REPOSITORY="esper256/ha-pompey"
-ARG BUILD_VERSION="0.2.8"
+ARG BUILD_VERSION="0.2.9"
 
 RUN apk add --no-cache \
     bind-tools \
@@ -55,7 +55,8 @@ RUN rm -f /etc/nginx/http.d/default.conf \
       /etc/cont-init.d/*.sh \
       /etc/services.d/*/run \
       /etc/services.d/*/finish \
-      /usr/local/bin/*
+      /usr/local/bin/* \
+      /usr/local/bin/pompey-wg/*
 
 LABEL \
     io.hass.name="${BUILD_NAME}" \

@@ -1,0 +1,35 @@
+#!/bin/sh
+# wg-quick, for AllowedIPs 0.0.0.0/0, runs:
+#   sysctl -q net.ipv4.conf.all.src_valid_mark=1
+# Home Assistant OS mounts /proc/sys read-only. That non-zero exit used to
+# roll back policy routing and `ip link delete dev wg0`. Kernel WireGuard had
+# already created the interface. Ignore this one key; other sysctls still fail.
+mark=0
+for a in "$@"; do
+  case "$a" in
+    *src_valid_mark*) mark=1 ;;
+  esac
+done
+
+run_real() {
+  if [ -n "${POMPEY_REAL_SYSCTL:-}" ]; then
+    "${POMPEY_REAL_SYSCTL}" "$@"
+    return $?
+  fi
+  if [ -x /sbin/sysctl ]; then
+    /sbin/sysctl "$@"
+    return $?
+  fi
+  if [ -x /usr/sbin/sysctl ]; then
+    /usr/sbin/sysctl "$@"
+    return $?
+  fi
+  return 127
+}
+
+if [ "$mark" -eq 1 ]; then
+  run_real "$@" >/dev/null 2>&1 || true
+  exit 0
+fi
+run_real "$@"
+exit $?
