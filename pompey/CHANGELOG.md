@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.4
+
+- Wait screen no longer flickers the Proton paste box. Other boot services were overwriting status every couple of seconds (marking later steps done, then resetting to only the tunnel), which hid the textarea and jumped the progress list. Proton paste stays until the `.conf` is applied.
+
 ## 0.2.3
 
 - Home Assistant options are only questions a household can answer: **Plex address**, **Plex token**, **source URL**, **source key**. WireGuard filename, private key, address, peer key, endpoint, DNS, LAN list, media folder, port-forward toggle, and log level are gone.

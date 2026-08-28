@@ -171,19 +171,36 @@
     const wg = document.getElementById("wg");
     const wgGo = document.getElementById("wg-go");
     const marks = { pending: "·", active: "›", done: "✓", error: "!" };
+    let protonSubmitted = false;
+    let lastSig = "";
 
     if (location.protocol === "file:") {
       fileHint.hidden = false;
     }
 
     function render(data) {
+      const showForm = !protonSubmitted && (
+        Boolean(data.need_proton) || document.activeElement === wg
+      );
+      proton.hidden = !showForm;
+      const sig = JSON.stringify([
+        data.percent,
+        data.label,
+        data.error,
+        data.need_proton,
+        data.search,
+        data.steps,
+      ]);
+      if (sig === lastSig) {
+        return;
+      }
+      lastSig = sig;
       fill.style.width = Math.max(0, Math.min(100, data.percent || 0)) + "%";
       now.textContent = data.label || "Bringing the fleet to heel…";
-      proton.hidden = !data.need_proton;
       if (data.error) {
         err.hidden = false;
         err.textContent = data.error;
-      } else if (!data.need_proton) {
+      } else if (!showForm) {
         err.hidden = true;
         err.textContent = "";
       }
@@ -199,7 +216,7 @@
         li.append(mark, lab);
         stepsEl.append(li);
       });
-      if (data.search && !data.need_proton) {
+      if (data.search && !data.need_proton && !showForm) {
         now.textContent = "Opening search…";
         const n = Number(sessionStorage.getItem("pompey-handoff") || "0");
         if (n < 8) {
@@ -228,6 +245,7 @@
           return;
         }
         proton.hidden = true;
+        protonSubmitted = true;
         now.textContent = "Starting the Proton tunnel…";
       } catch (_exc) {
         err.hidden = false;
