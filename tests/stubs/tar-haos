@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+# Fail if engine unpack uses GNU tar the HAOS-AppArmor-hostile way.
+# Real tar is still invoked; this only rejects missing flags / /tmp -C.
+set -euo pipefail
+REAL_TAR="${POMPEY_REAL_TAR:-/usr/bin/tar}"
+extract=0
+target=""
+has_no_same_owner=0
+has_no_same_perm=0
+prev=""
+for arg in "$@"; do
+  case "${arg}" in
+    -x|-xz|-xzf|--extract) extract=1 ;;
+    --no-same-owner) has_no_same_owner=1 ;;
+    --no-same-permissions) has_no_same_perm=1 ;;
+  esac
+  if [[ "${arg}" == -*x* && "${arg}" != --* ]]; then
+    extract=1
+  fi
+  if [[ "${prev}" == "-C" || "${prev}" == "--directory" ]]; then
+    target="${arg}"
+  fi
+  prev="${arg}"
+done
+if [[ "${extract}" -eq 1 ]]; then
+  if [[ "${has_no_same_owner}" -ne 1 || "${has_no_same_perm}" -ne 1 ]]; then
+    echo "tar extract must pass --no-same-owner --no-same-permissions (HAOS /tmp chmod is denied)" >&2
+    echo "argv: $*" >&2
+    exit 1
+  fi
+  if [[ -z "${target}" ]]; then
+    echo "tar extract must pass -C under POMPEY_ENGINES, not the process cwd" >&2
+    exit 1
+  fi
+  if [[ -z "${POMPEY_ENGINES:-}" ]]; then
+    echo "POMPEY_ENGINES must be set so tests can see unpack is not a /tmp mktemp" >&2
+    exit 1
+  fi
+  case "${target}" in
+    "${POMPEY_ENGINES}"|"${POMPEY_ENGINES}"/*) ;;
+    *)
+      echo "tar -C ${target} is not under POMPEY_ENGINES=${POMPEY_ENGINES}" >&2
+      exit 1
+      ;;
+  esac
+fi
+exec "${REAL_TAR}" "$@"

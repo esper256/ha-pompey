@@ -28,6 +28,9 @@ python3 tests/test_python.py -v
 echo "== addon scripts with bashio stub =="
 bash tests/test_scripts.sh
 
+echo "== engine unpack (fixture + real Prowlarr linux-musl tar.gz) =="
+bash tests/test_engine_unpack.sh
+
 echo "== wait-screen preview (--once) =="
 python3 tests/preview.py --once --port 18099
 

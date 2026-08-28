@@ -10,6 +10,8 @@ profile pompey flags=(attach_disconnected,mediate_deleted) {
   capability net_raw,
   capability net_bind_service,
   capability chown,
+  capability fowner,
+  capability fsetid,
   capability setuid,
   capability setgid,
   capability dac_override,
@@ -35,9 +37,11 @@ profile pompey flags=(attach_disconnected,mediate_deleted) {
   /dev/tty rw,
   /dev/net/tun rw,
 
-  # bashio + tmp
+  # bashio + tmp. rwk (no chmod/exec) made GNU tar fail on /tmp with
+  # "Cannot change mode ... Operation not permitted". Engine archives
+  # unpack under /data/engines; keep /tmp usable for everything else.
   /usr/lib/bashio/** ix,
-  /tmp/** rwk,
+  /tmp/** rwlix,
 
   # HA options, addon config, fetched engines
   /data/** rwlix,

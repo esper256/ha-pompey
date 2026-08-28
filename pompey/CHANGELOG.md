@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.11
+
+- Engine fetch no longer dies on `tar: Prowlarr/*.dll: Cannot change mode ... Operation not permitted`. That was GNU tar restoring archive modes under `/tmp`, which HAOS AppArmor allows only `rwk` (no chmod). Linux Servarr builds are .NET — lots of `.dll` files plus an **ELF** launcher — not a Windows zip. Unpack under `/data/engines` with `--no-same-owner --no-same-permissions`, refuse zip/Windows/PE launchers, and log the artifact name (`linux-musl-core-x64`). Same path for Sonarr, Radarr, and Seerr. Rebuild so the banner says **0.2.11**.
+- `tests/run.sh` now unpacks a Prowlarr-shaped fixture **and** the real linux-musl Prowlarr `.tar.gz` (cached). Range-GET alone could not catch this.
+
 ## 0.2.10
 
 - `Table = off` belongs in `[Interface]`. 0.2.9 appended it after `[Peer]`, so `wg addconf` said `Line unrecognized: Table=off` and deleted `wg0`. Rebuild so the banner says **0.2.10**.

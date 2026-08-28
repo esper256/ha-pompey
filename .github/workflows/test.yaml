@@ -19,6 +19,13 @@ jobs:
       - name: Check out the repository
         uses: actions/checkout@v7.0.1
 
-      # options.json + stubs + fake-wg0 smoke only. Never start a torrent client.
+      - name: Cache Servarr artifacts
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pompey
+          key: pompey-servarr-${{ runner.os }}
+
+      # options.json + stubs + fake-wg0 smoke + real Prowlarr unpack.
+      # Never start a torrent client. Never needs Proton.
       - name: Run tests
         run: bash tests/run.sh

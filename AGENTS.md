@@ -20,7 +20,7 @@ In this Cursor VM there is no Supervisor. Starting Docker here is only so an age
 | Config | Supervisor writes `/data/options.json` from the app options UI | We supply [`tests/options.json`](tests/options.json) ourselves |
 | VPN / internet | All traffic on Proton `wg0`, else dropped | **Fake `wg0`**: a veth in netns `pompey-dev` that NATs out `eth0`. Same interface name the download engine binds. Not Proton. Set `POMPEY_FAKE_VPN=1`. Do **not** apply the OUTPUT DROP kill switch here (it would kill the agent). Keep host DNS. |
 | What the household sees | Wait screen, then Seerr on Ingress | [`tests/preview.py`](tests/preview.py) is the wait screen. Seerr’s image is Alpine/musl; if you unpack it, run it with the host glibc `node`. |
-| Engines | musl tarballs after the tunnel is up | glibc (`os=linux`) tarballs on Ubuntu, cached under `~/.cache/pompey/engines`. Tests skip unpacking the torrent client (`POMPEY_SKIP_QBIT=1`). |
+| Engines | musl tarballs after the tunnel is up | glibc (`os=linux`) tarballs on Ubuntu, cached under `~/.cache/pompey/engines`. Tests skip unpacking the torrent client (`POMPEY_SKIP_QBIT=1`). `tests/run.sh` unpacks a Prowlarr-shaped fixture and the real linux-musl Prowlarr `.tar.gz` (cached under `~/.cache/pompey/artifacts`) so HAOS `/tmp` chmod failures and Windows zips are caught without a Supervisor rebuild. |
 | Sources / Plex | Operator URL+key and a real Plex | Empty source + empty Plex token. Tests never speak BitTorrent. |
 
 Shipping path: copy `pompey/` into `/addons`. Supervisor builds locally. That is the only delivery path.
@@ -35,10 +35,10 @@ s6-overlay: `rootfs/etc/cont-init.d/*` once, then `rootfs/etc/services.d/*`.
 
 ## What agents should run here (no HAOS)
 
-Fast, no Docker, no engines download:
+Fast, no Docker. CI unpacks a cached Prowlarr linux-musl tarball (not a torrent client):
 
 ```bash
-bash tests/run.sh              # options.json + bashio stub + fake engines + fake-wg0 smoke
+bash tests/run.sh              # options.json + bashio stub + fake engines + Prowlarr unpack + fake-wg0 smoke
 python3 tests/preview.py       # wait-screen progress UI at http://127.0.0.1:8099/
 ```
 

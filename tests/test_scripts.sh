@@ -327,6 +327,9 @@ test -f "${POMPEY_READY}/status.json"
 echo "== fetch URL construction (range GET, not a full download) =="
 urls="$(run "${BIN}/fetch-engines" --print-urls)"
 printf '%s\n' "${urls}"
+grep -q -- '--no-same-owner' "${BIN}/fetch-engines"
+grep -q -- '--no-same-permissions' "${BIN}/fetch-engines"
+grep -q '.partial-' "${BIN}/fetch-engines"
 while IFS= read -r url; do
   [[ -n "${url}" ]] || continue
   out="$(curl -sS -o /dev/null -w '%{http_code}' -r 0-256 -L --max-time 40 "${url}")"
