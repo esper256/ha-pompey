@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.29
+
+- Do not move files out of `downloads/complete` by hand. After a title is in the library (or you already moved it), Pompey drops the qBittorrent torrent **without deleting files**, so a hidden client cannot start downloading the same thing again. It also asks Radarr/Sonarr to import anything still sitting in `complete/`. Rebuild so the banner says **0.2.29**.
+
 ## 0.2.28
 
 - Search offers three quality choices when you request a title: **Max** (remux / 4K / lossless audio, large files on purpose), **Default** (1080p WEB-DL or BluRay encode, about 2.5–8 GB per 150 minutes; under about 1 GB for two hours is rejected), and **Anything** (obscure titles — take what exists, including CAM). The request dropdown is the Seerr advanced-request control; household users now have that permission. Leftover Arr profiles (Any, HD-720p, Ultra-HD, the old HD name) are removed so the list is those three. Rebuild so the banner says **0.2.28**. Already-queued grabs are not cancelled.

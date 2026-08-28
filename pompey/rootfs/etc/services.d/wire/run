@@ -43,4 +43,9 @@ until [[ -f "${POMPEY_READY}/seerr-arr" ]]; do
   python3 /usr/local/bin/wire-stack >/dev/null || true
 done
 
-exec sleep infinity
+# qBittorrent stays hidden. Forget torrents whose files already moved so they
+# cannot re-download, and keep asking Arr to import anything left in complete/.
+while true; do
+  sleep 300
+  python3 /usr/local/bin/wire-stack housekeep || true
+done
