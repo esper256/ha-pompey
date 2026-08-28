@@ -1,73 +1,63 @@
 # AGENTS.md
 
-## Cursor Cloud specific instructions
+This file is for Cursor cloud agents. Household operators should read [DOCS.md](pompey/DOCS.md). The product plan is [VISION.md](VISION.md).
 
-### What this repo is
+## Short answer (why this file mentions Docker)
 
-Pompey is a **Home Assistant OS add-on** (see [VISION.md](VISION.md), [`pompey/`](pompey/)).
-The "application" is the add-on image defined by [`pompey/Dockerfile`](pompey/Dockerfile),
-which HA Supervisor builds locally on the target machine. There is no package manager,
-no lockfile, and no automated test suite. The runtime is s6-overlay: `rootfs/etc/cont-init.d/*`
-run once at startup, then `rootfs/etc/services.d/*` (wireguard, natpmp, nginx) are supervised.
-The user-facing "face" is nginx serving `pompey/rootfs/usr/share/pompey/index.html` over HA Ingress.
+Starting `dockerd` in this Cursor VM is **not** how the household runs Pompey, and it is **not** a stand-in for Home Assistant OS.
 
-### Toolchain (already installed in the VM snapshot)
+In the real world, **Home Assistant Supervisor** is the container host. It builds `pompey/Dockerfile` on the user’s machine and starts **one** addon container. The operator never types `docker`, never starts `dockerd`, and we never publish an image to Docker Hub or GHCR.
 
-- `docker` (CE 29.x) — used to build the add-on image, exactly like CI and HA Supervisor.
-- `shellcheck`, `yamllint` — lint the bash scripts and YAML.
-- The `ubuntu` user is in the `docker` group (persisted), so `docker` works without `sudo`
-  once the daemon is running.
+In this Cursor VM there is no Supervisor. Starting Docker here is only so an agent can **compile the same Dockerfile** Supervisor will compile (syntax, packages, `COPY` paths). A full `docker run` of that image still dies without bashio + Proton.
 
-### Start the Docker daemon each session (not persisted across VM restarts)
+## Real product vs agent testability
 
-The docker *packages* persist in the snapshot, but the `dockerd` process does not. Before
-building or running, start it (idempotent — skip if `docker info` already works):
+| | Household (HAOS) | Agents in this VM / CI |
+| --- | --- | --- |
+| Who builds the image | Supervisor, from `/addons/pompey` | Optional `docker build`. GitHub Actions Builder does the same compile with `push: false`. |
+| Who starts the container | Supervisor (one container, `NET_ADMIN`, `/dev/net/tun`) | Nobody, unless an agent is checking the Dockerfile. The operator never starts it. |
+| `dockerd` | Already the HAOS host. Not something Pompey starts. | Optional, this VM only. Packages persist; the daemon process does not. |
+| Config | Supervisor writes `/data/options.json` from the app options UI | Supply a fake `/data/options.json` yourself if you need one. Later work uses `tests/options.json`. |
+| VPN / internet | All traffic on Proton `wg0`, else dropped | No Proton, no `/dev/net/tun` — the real stack will not boot |
+| What the household sees | Wait screen, then Seerr on Ingress | nginx serving `index.html` here is **only the wait screen**, not search |
 
-```bash
-sudo dockerd >/tmp/dockerd.log 2>&1 &   # or run in a tmux session
-```
+Shipping path: copy `pompey/` into `/addons`. Supervisor builds locally. That is the only delivery path.
 
-`/etc/docker/daemon.json` is preconfigured for this VM with `storage-driver: fuse-overlayfs`
-and `features.containerd-snapshotter: false` (required for Docker 29 + fuse-overlayfs here).
-Do not remove that config or builds will fail.
+Day-to-day agent checks that do **not** need Docker (bash tests + wait-screen preview) live on later branches of this repo. Prefer those over `docker run`.
 
-### Lint
+## What the real add-on does
 
-```bash
-cd pompey
-shellcheck rootfs/etc/cont-init.d/*.sh rootfs/etc/services.d/*/run \
-  rootfs/etc/services.d/*/finish rootfs/usr/local/bin/wait-for-vpn \
-  rootfs/usr/local/bin/vpn-killswitch
-```
+1. Supervisor builds `pompey/Dockerfile` (WireGuard, nginx, our scripts).
+2. Supervisor starts one container and writes `/data/options.json`.
+3. Our scripts bring up Proton, apply the kill switch, then serve Ingress.
 
-The scripts use the `#!/command/with-contenv bashio` shebang plus `# shellcheck shell=bash`,
-so shellcheck lints them as bash.
+s6-overlay: `rootfs/etc/cont-init.d/*` once, then `rootfs/etc/services.d/*`.
 
-### Build (the real build path — same as CI `.github/workflows/builder.yaml`)
+## Optional: compile the Dockerfile (not a product boot)
+
+If `docker info` fails, start the daemon. This is a quirk of **this cloud box**, not of Pompey:
 
 ```bash
-cd pompey
-docker build --build-arg BUILD_ARCH=amd64 -t local/pompey:dev .
+sudo dockerd >/tmp/dockerd.log 2>&1 &
 ```
 
-### Run
-
-Fully booting the add-on requires the **HA Supervisor runtime** (bashio, Ingress, and
-`/data/options.json`) **and Proton WireGuard credentials** plus `/dev/net/tun`. Without a
-WireGuard config, `rootfs/etc/cont-init.d/00-banner.sh` calls `bashio::exit.nok` and the
-container halts (this is the intended kill-switch behavior), so you cannot fully boot it
-standalone in this VM.
-
-To exercise the user-facing search UI without Supervisor/Proton, run only nginx from the
-built image against `/usr/share/pompey`. Note `rootfs/etc/nginx/http.d/ingress.conf` uses a
-`%%port%%` placeholder (substituted at runtime by `20-nginx.sh`) and restricts access to the
-Supervisor IP `172.30.32.2`, so relax those for a local port:
+This VM may need `/etc/docker/daemon.json` with `storage-driver: fuse-overlayfs` and `features.containerd-snapshotter: false`. Do not treat that file as part of the add-on.
 
 ```bash
-docker run -d --name pompey-ui -p 8099:8099 --entrypoint sh local/pompey:dev -c '
-  mkdir -p /run/nginx
-  sed -e "s/%%port%%/8099/" -e "s/allow 172.30.32.2;/allow all;/" -e "/deny all;/d" \
-    /etc/nginx/http.d/ingress.conf > /tmp/i.conf && cp /tmp/i.conf /etc/nginx/http.d/ingress.conf
-  exec nginx -g "daemon off;"'
-# then: curl http://localhost:8099/
+docker build --build-arg BUILD_ARCH=amd64 -t local/pompey:dev pompey/
 ```
+
+A full `docker run` of that image still dies without bashio + Proton (see `00-banner.sh`). Do not spend the session trying to fake Supervisor.
+
+To peek at the wait HTML from inside the image, run only nginx and relax Ingress `allow 172.30.32.2`. That is a screenshot helper, not the household search UI.
+
+## Lint
+
+```bash
+shellcheck pompey/rootfs/etc/cont-init.d/*.sh \
+  pompey/rootfs/etc/services.d/*/run \
+  pompey/rootfs/etc/services.d/*/finish \
+  pompey/rootfs/usr/local/bin/*
+```
+
+Scripts use `#!/command/with-contenv bashio` plus `# shellcheck shell=bash`.
