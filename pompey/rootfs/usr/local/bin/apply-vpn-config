@@ -40,7 +40,32 @@ chmod 600 "${DST}"
 if ! grep -qi '^[[:space:]]*PersistentKeepalive' "${DST}"; then
   printf '\nPersistentKeepalive = 25\n' >>"${DST}"
 fi
-printf '\nTable = off\n' >>"${DST}"
+# Table is a wg-quick Interface option. Appending after [Peer] made `wg addconf`
+# reject the file (`Line unrecognized: Table=off`) and delete wg0.
+python3 - "${DST}" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+lines = path.read_text(encoding="utf-8").splitlines(True)
+out: list[str] = []
+in_iface = False
+inserted = False
+for line in lines:
+    stripped = line.strip()
+    if stripped.startswith("[") and stripped.endswith("]"):
+        if in_iface and not inserted:
+            out.append("Table = off\n")
+            inserted = True
+        in_iface = stripped.lower() == "[interface]"
+    out.append(line)
+if in_iface and not inserted:
+    out.append("Table = off\n")
+    inserted = True
+if not inserted:
+    out.insert(0, "[Interface]\nTable = off\n")
+path.write_text("".join(out), encoding="utf-8")
+PY
 
 resolved="$(python3 - "${DST}" <<'PY'
 import re

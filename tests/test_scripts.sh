@@ -160,6 +160,17 @@ if ! grep -qiE '^[[:space:]]*Table[[:space:]]*=[[:space:]]*off' "${POMPEY_WG_CON
   cat "${POMPEY_WG_CONF}" >&2
   exit 1
 fi
+python3 - "${POMPEY_WG_CONF}" <<'PY'
+from pathlib import Path
+import sys
+text = Path(sys.argv[1]).read_text()
+low = text.lower()
+iface, peer, table = low.find("[interface]"), low.find("[peer]"), low.find("table")
+if iface < 0 or table < 0 or table < iface or (peer >= 0 and table > peer):
+    print("Table=off must sit in [Interface], not after [Peer]", file=sys.stderr)
+    print(text, file=sys.stderr)
+    raise SystemExit(1)
+PY
 grep -q "DNS = 10.2.0.1" "${POMPEY_CONFIG}/wireguard/wg0.conf"
 grep -q "10.0.0.0/8" "${POMPEY_LAN_FILE}"
 grep -q "185.159.157.1" "${IPTABLES_LOG}"
