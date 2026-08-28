@@ -2,15 +2,15 @@
 # shellcheck shell=bash
 set -euo pipefail
 # shellcheck source=/dev/null
-source /usr/local/bin/pompey-env
+source "$(command -v pompey-env)"
 
 bashio::log.info "Pompey ${BUILD_VERSION:-0.2.0} starting"
 
-mkdir -p /config/wireguard /etc/wireguard /tmp/vpn /run/nginx
-chmod 700 /config/wireguard /etc/wireguard
+mkdir -p "${POMPEY_CONFIG}/wireguard" "${POMPEY_WG_ETC}" "${POMPEY_VPN_TMP}" "${POMPEY_NGINX_RUN}"
+chmod 700 "${POMPEY_CONFIG}/wireguard" "${POMPEY_WG_ETC}"
 pompey-secrets >/dev/null
 
-WG_FILE="/config/wireguard/$(bashio::config 'wireguard_config')"
+WG_FILE="${POMPEY_CONFIG}/wireguard/$(bashio::config 'wireguard_config')"
 HAS_FILE=false
 HAS_FIELDS=false
 

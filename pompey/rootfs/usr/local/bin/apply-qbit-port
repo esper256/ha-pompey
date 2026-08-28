@@ -3,12 +3,15 @@
 # Push Proton's mapped port into qBittorrent (localhost WebUI).
 set -euo pipefail
 # shellcheck source=/dev/null
-source /usr/local/bin/pompey-env
+source "$(command -v pompey-env)"
 
-PORT_FILE="${1:-/tmp/vpn/forwarded_port}"
+PORT_FILE="${1:-${POMPEY_VPN_TMP}/forwarded_port}"
 [[ -s "${PORT_FILE}" ]] || exit 0
 PORT="$(tr -d '[:space:]' < "${PORT_FILE}")"
 [[ "${PORT}" =~ ^[0-9]+$ ]] || exit 0
+
+QBIT="${QBIT_URL:-http://127.0.0.1:8080}"
+QBIT="${QBIT%/}"
 
 # LocalHostAuth is off; still try a login in case a later conf tightens it.
 cookie_jar="$(mktemp)"
@@ -21,9 +24,9 @@ if [[ -s "${POMPEY_SECRETS}" ]]; then
   curl -fsS -c "${cookie_jar}" -b "${cookie_jar}" \
     --data-urlencode "username=${USER}" \
     --data-urlencode "password=${PASS}" \
-    http://127.0.0.1:8080/api/v2/auth/login >/dev/null 2>&1 || true
+    "${QBIT}/api/v2/auth/login" >/dev/null 2>&1 || true
 fi
 
 curl -fsS -c "${cookie_jar}" -b "${cookie_jar}" \
   --data-urlencode "json={\"listen_port\": ${PORT}, \"upnp\": false}" \
-  http://127.0.0.1:8080/api/v2/app/setPreferences >/dev/null 2>&1 || true
+  "${QBIT}/api/v2/app/setPreferences" >/dev/null 2>&1 || true

@@ -9,13 +9,64 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-SECRETS_PATH = os.environ.get("POMPEY_SECRETS", "/data/pompey/secrets.json")
-MEDIA_ROOT = os.environ.get("MEDIA_ROOT", "/media").rstrip("/")
-PLEX_URL = os.environ.get("PLEX_URL", "").strip()
-PLEX_TOKEN = os.environ.get("PLEX_TOKEN", "").strip()
-INDEXER_URL = os.environ.get("INDEXER_URL", "").strip()
-INDEXER_API_KEY = os.environ.get("INDEXER_API_KEY", "").strip()
-READY = os.environ.get("POMPEY_READY", "/tmp/pompey")
+def secrets_path() -> str:
+    return os.environ.get("POMPEY_SECRETS", "/data/pompey/secrets.json")
+
+
+def ready_dir() -> str:
+    return os.environ.get("POMPEY_READY", "/tmp/pompey")
+
+
+def wait_tries() -> int:
+    return int(os.environ.get("POMPEY_WAIT_TRIES", "90"))
+
+
+def wait_sleep() -> float:
+    return float(os.environ.get("POMPEY_WAIT_SLEEP", "2"))
+
+
+def env(name: str, default: str = "") -> str:
+    return os.environ.get(name, default).strip()
+
+
+def media_root() -> str:
+    return env("MEDIA_ROOT", "/media").rstrip("/")
+
+
+def plex_url() -> str:
+    return env("PLEX_URL")
+
+
+def plex_token() -> str:
+    return env("PLEX_TOKEN")
+
+
+def indexer_url() -> str:
+    return env("INDEXER_URL")
+
+
+def indexer_api_key() -> str:
+    return env("INDEXER_API_KEY")
+
+
+def qbit_url() -> str:
+    return env("QBIT_URL", "http://127.0.0.1:8080").rstrip("/")
+
+
+def sonarr_url() -> str:
+    return env("SONARR_URL", "http://127.0.0.1:8989").rstrip("/")
+
+
+def radarr_url() -> str:
+    return env("RADARR_URL", "http://127.0.0.1:7878").rstrip("/")
+
+
+def prowlarr_url() -> str:
+    return env("PROWLARR_URL", "http://127.0.0.1:9696").rstrip("/")
+
+
+def seerr_url() -> str:
+    return env("SEERR_URL", "http://127.0.0.1:5055").rstrip("/")
 
 # Seerr: REQUEST + AUTO_APPROVE + AUTO_APPROVE_MOVIE + AUTO_APPROVE_TV
 SEERR_HOUSEHOLD_PERMS = 32 + 128 + 256 + 512
@@ -26,7 +77,7 @@ def log(msg: str) -> None:
 
 
 def load_secrets() -> dict:
-    with open(SECRETS_PATH, encoding="utf-8") as fh:
+    with open(secrets_path(), encoding="utf-8") as fh:
         return json.load(fh)
 
 
@@ -58,9 +109,10 @@ def http(method: str, url: str, body=None, headers=None, timeout=30):
         raise RuntimeError(f"{method} {url} -> {exc.code} {err[:300]}") from exc
 
 
-def wait_http(url: str, tries: int = 90):
+def wait_http(url: str, tries: int | None = None):
     last = None
-    for _ in range(tries):
+    n = wait_tries() if tries is None else tries
+    for _ in range(n):
         try:
             req = urllib.request.Request(url, method="GET")
             with urllib.request.urlopen(req, timeout=10) as resp:
@@ -71,7 +123,7 @@ def wait_http(url: str, tries: int = 90):
             last = exc
         except Exception as exc:  # noqa: BLE001
             last = exc
-        time.sleep(2)
+        time.sleep(wait_sleep())
     raise RuntimeError(f"timeout {url}: {last}")
 
 
@@ -153,7 +205,7 @@ def ensure_prowlarr_app(prowlarr: str, pkey: str, name: str, impl: str, base_url
     fill_fields(
         app,
         {
-            "prowlarrUrl": "http://127.0.0.1:9696",
+            "prowlarrUrl": f"{prowlarr_url()}",
             "baseUrl": base_url,
             "apiKey": api_key,
         },
@@ -165,14 +217,14 @@ def ensure_prowlarr_app(prowlarr: str, pkey: str, name: str, impl: str, base_url
 
 
 def ensure_indexer(prowlarr: str, pkey: str) -> None:
-    if not INDEXER_URL:
+    if not indexer_url():
         log("no source URL configured yet")
         return
     indexers = http("GET", f"{prowlarr}/api/v1/indexer", headers=arr_headers(pkey)) or []
     if indexers:
         return
     schema = http("GET", f"{prowlarr}/api/v1/indexer/schema", headers=arr_headers(pkey))
-    impl = "Newznab" if "newznab" in INDEXER_URL.lower() else "Torznab"
+    impl = "Newznab" if "newznab" in indexer_url().lower() else "Torznab"
     try:
         indexer = schema_impl(schema, impl)
     except RuntimeError:
@@ -180,9 +232,9 @@ def ensure_indexer(prowlarr: str, pkey: str) -> None:
     fill_fields(
         indexer,
         {
-            "baseUrl": INDEXER_URL.rstrip("/"),
+            "baseUrl": indexer_url().rstrip("/"),
             "apiPath": "/api",
-            "apiKey": INDEXER_API_KEY,
+            "apiKey": indexer_api_key(),
         },
     )
     indexer["name"] = "Source"
@@ -197,7 +249,7 @@ def ensure_indexer(prowlarr: str, pkey: str) -> None:
 def qbit_category(name: str) -> None:
     data = urllib.parse.urlencode({"category": name, "savePath": ""}).encode()
     try:
-        http("POST", "http://127.0.0.1:8080/api/v2/torrents/createCategory", data)
+        http("POST", f"{qbit_url()}/api/v2/torrents/createCategory", data)
         log(f"qbit category {name}")
     except RuntimeError as exc:
         if "409" not in str(exc) and "already" not in str(exc).lower():
@@ -205,8 +257,8 @@ def qbit_category(name: str) -> None:
 
 
 class Seerr:
-    def __init__(self, base: str = "http://127.0.0.1:5055"):
-        self.base = base.rstrip("/")
+    def __init__(self, base: str | None = None):
+        self.base = (base or seerr_url()).rstrip("/")
         self.cookie = ""
         self.api_key = ""
 
@@ -277,21 +329,21 @@ def pick_plex_server(servers, host: str):
 
 def configure_seerr(secrets: dict, radarr_profile, sonarr_profile, sonarr_lang) -> None:
     s = Seerr()
-    for _ in range(60):
+    for _ in range(wait_tries()):
         try:
             s.call("GET", "/api/v1/settings/public")
             break
         except Exception:  # noqa: BLE001
-            time.sleep(2)
+            time.sleep(wait_sleep())
     else:
         raise RuntimeError("Seerr never became ready")
 
-    if not PLEX_URL or not PLEX_TOKEN:
+    if not plex_url() or not plex_token():
         log("Plex URL/token missing; Seerr setup wizard will be used")
         return
 
     try:
-        s.call("POST", "/api/v1/auth/plex", {"authToken": PLEX_TOKEN})
+        s.call("POST", "/api/v1/auth/plex", {"authToken": plex_token()})
         log("seerr signed in with Plex token")
     except RuntimeError as exc:
         log(f"seerr plex login: {exc}")
@@ -304,7 +356,7 @@ def configure_seerr(secrets: dict, radarr_profile, sonarr_profile, sonarr_lang) 
     except RuntimeError as exc:
         log(f"seerr api key: {exc}")
 
-    host, port, ssl = parse_plex(PLEX_URL)
+    host, port, ssl = parse_plex(plex_url())
     try:
         servers = s.call("GET", "/api/v1/settings/plex/devices/servers") or []
         chosen = pick_plex_server(servers, host)
@@ -312,7 +364,7 @@ def configure_seerr(secrets: dict, radarr_profile, sonarr_profile, sonarr_lang) 
             "ip": host,
             "port": port,
             "useSsl": ssl,
-            "webAppUrl": PLEX_URL.rstrip("/"),
+            "webAppUrl": plex_url().rstrip("/"),
         }
         if chosen:
             payload["name"] = chosen.get("name") or "Plex"
@@ -350,7 +402,7 @@ def configure_seerr(secrets: dict, radarr_profile, sonarr_profile, sonarr_lang) 
         "useSsl": False,
         "activeProfileId": radarr_id,
         "activeProfileName": radarr_name,
-        "activeDirectory": f"{MEDIA_ROOT}/Movies",
+        "activeDirectory": f"{media_root()}/Movies",
         "isDefault": True,
         "is4k": False,
         "minimumAvailability": "released",
@@ -366,7 +418,7 @@ def configure_seerr(secrets: dict, radarr_profile, sonarr_profile, sonarr_lang) 
         "useSsl": False,
         "activeProfileId": sonarr_id,
         "activeProfileName": sonarr_name,
-        "activeDirectory": f"{MEDIA_ROOT}/TV",
+        "activeDirectory": f"{media_root()}/TV",
         "isDefault": True,
         "is4k": False,
         "enableSeasonFolders": True,
@@ -436,7 +488,7 @@ def reload_nginx() -> None:
     client_max_body_size 0;
 
     location / {{
-        proxy_pass http://127.0.0.1:5055;
+        proxy_pass {seerr_url()};
         proxy_http_version 1.1;
         proxy_set_header Host $http_host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -451,7 +503,7 @@ def reload_nginx() -> None:
     }}
 }}
 """
-    path = "/etc/nginx/http.d/ingress.conf"
+    path = os.environ.get("NGINX_INGRESS_CONF", "/etc/nginx/http.d/ingress.conf")
     with open(path, "w", encoding="utf-8") as fh:
         fh.write(conf)
     os.system("nginx -s reload >/dev/null 2>&1 || true")
@@ -460,27 +512,27 @@ def reload_nginx() -> None:
 
 def main() -> int:
     secrets = load_secrets()
-    wait_http("http://127.0.0.1:8080/api/v2/app/version")
-    wait_http("http://127.0.0.1:9696/ping")
-    wait_http("http://127.0.0.1:8989/ping")
-    wait_http("http://127.0.0.1:7878/ping")
+    wait_http(f"{qbit_url()}/api/v2/app/version")
+    wait_http(f"{prowlarr_url()}/ping")
+    wait_http(f"{sonarr_url()}/ping")
+    wait_http(f"{radarr_url()}/ping")
 
-    sonarr = "http://127.0.0.1:8989/api/v3"
-    radarr = "http://127.0.0.1:7878/api/v3"
-    prowlarr = "http://127.0.0.1:9696"
+    sonarr = f"{sonarr_url()}/api/v3"
+    radarr = f"{radarr_url()}/api/v3"
+    prowlarr = prowlarr_url()
     sk, rk, pk = secrets["sonarr_api_key"], secrets["radarr_api_key"], secrets["prowlarr_api_key"]
 
     qbit_category("sonarr")
     qbit_category("radarr")
-    ensure_root_folder(sonarr, sk, f"{MEDIA_ROOT}/TV")
-    ensure_root_folder(sonarr, sk, f"{MEDIA_ROOT}/Kid Friendly TV")
-    ensure_root_folder(radarr, rk, f"{MEDIA_ROOT}/Movies")
-    ensure_root_folder(radarr, rk, f"{MEDIA_ROOT}/Kid Friendly Movies")
+    ensure_root_folder(sonarr, sk, f"{media_root()}/TV")
+    ensure_root_folder(sonarr, sk, f"{media_root()}/Kid Friendly TV")
+    ensure_root_folder(radarr, rk, f"{media_root()}/Movies")
+    ensure_root_folder(radarr, rk, f"{media_root()}/Kid Friendly Movies")
     ensure_download_client(sonarr, sk, secrets, "sonarr")
     ensure_download_client(radarr, rk, secrets, "radarr")
     try:
-        ensure_prowlarr_app(prowlarr, pk, "Sonarr", "Sonarr", "http://127.0.0.1:8989", sk)
-        ensure_prowlarr_app(prowlarr, pk, "Radarr", "Radarr", "http://127.0.0.1:7878", rk)
+        ensure_prowlarr_app(prowlarr, pk, "Sonarr", "Sonarr", sonarr_url(), sk)
+        ensure_prowlarr_app(prowlarr, pk, "Radarr", "Radarr", radarr_url(), rk)
     except RuntimeError as exc:
         log(f"prowlarr apps: {exc}")
     try:
@@ -492,12 +544,12 @@ def main() -> int:
     rp = first_profile(radarr, rk)
     sl = language_profile_id(sonarr, sk)
 
-    os.makedirs(READY, exist_ok=True)
-    open(os.path.join(READY, "arr-wired"), "w").close()
+    os.makedirs(ready_dir(), exist_ok=True)
+    open(os.path.join(ready_dir(), "arr-wired"), "w").close()
 
     configure_seerr(secrets, rp, sp, sl)
     reload_nginx()
-    open(os.path.join(READY, "wired"), "w").close()
+    open(os.path.join(ready_dir(), "wired"), "w").close()
     log("done")
     return 0
 

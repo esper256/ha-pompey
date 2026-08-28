@@ -8,22 +8,32 @@ POMPEY_DATA="${POMPEY_DATA:-/data/pompey}"
 POMPEY_ENGINES="${POMPEY_ENGINES:-/data/engines}"
 POMPEY_SECRETS="${POMPEY_SECRETS:-${POMPEY_DATA}/secrets.json}"
 POMPEY_READY="${POMPEY_READY:-/tmp/pompey}"
+POMPEY_CONFIG="${POMPEY_CONFIG:-/config}"
+POMPEY_WG_ETC="${POMPEY_WG_ETC:-/etc/wireguard}"
+POMPEY_WG_CONF="${POMPEY_WG_CONF:-${POMPEY_WG_ETC}/wg0.conf}"
+POMPEY_VPN_TMP="${POMPEY_VPN_TMP:-/tmp/vpn}"
+POMPEY_LAN_FILE="${POMPEY_LAN_FILE:-/etc/pompey-lan-networks}"
+POMPEY_RESOLV="${POMPEY_RESOLV:-/etc/resolv.conf}"
+POMPEY_NGINX_RUN="${POMPEY_NGINX_RUN:-/run/nginx}"
+NGINX_INGRESS_CONF="${NGINX_INGRESS_CONF:-/etc/nginx/http.d/ingress.conf}"
 
-MEDIA_ROOT="$(bashio::config 'media_root')"
+if [[ -z "${MEDIA_ROOT:-}" ]]; then
+  MEDIA_ROOT="$(bashio::config 'media_root')"
+fi
 MEDIA_ROOT="${MEDIA_ROOT:-/media}"
 
 mkdir -p \
   "${POMPEY_DATA}" \
   "${POMPEY_ENGINES}" \
   "${POMPEY_READY}" \
+  "${POMPEY_CONFIG}/sonarr" \
+  "${POMPEY_CONFIG}/radarr" \
+  "${POMPEY_CONFIG}/prowlarr" \
+  "${POMPEY_CONFIG}/qBittorrent" \
+  "${POMPEY_CONFIG}/seerr" \
   "${MEDIA_ROOT}/Movies" \
   "${MEDIA_ROOT}/TV" \
   "${MEDIA_ROOT}/Kid Friendly Movies" \
   "${MEDIA_ROOT}/Kid Friendly TV" \
   "${MEDIA_ROOT}/downloads/incomplete" \
-  "${MEDIA_ROOT}/downloads/complete" \
-  /config/sonarr \
-  /config/radarr \
-  /config/prowlarr \
-  /config/qBittorrent \
-  /config/seerr
+  "${MEDIA_ROOT}/downloads/complete"

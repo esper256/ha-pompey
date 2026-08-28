@@ -2,7 +2,7 @@
 # shellcheck shell=bash
 set -euo pipefail
 # shellcheck source=/dev/null
-source /usr/local/bin/pompey-env
+source "$(command -v pompey-env)"
 
 until [[ -f "${POMPEY_READY}/engines-ready" ]]; do
   sleep 2
@@ -17,11 +17,11 @@ if [[ -z "${NODE}" || ! -d "${APP}" ]]; then
   bashio::exit.nok "Seerr unpack missing node or /app"
 fi
 
-mkdir -p /config/seerr
-touch /config/seerr/DOCKER
-ln -sfn /config/seerr "${APP}/config"
+mkdir -p "${POMPEY_CONFIG}/seerr"
+touch "${POMPEY_CONFIG}/seerr/DOCKER"
+ln -sfn "${POMPEY_CONFIG}/seerr" "${APP}/config"
 export NODE_ENV=production
 export PORT=5055
-export CONFIG_DIRECTORY=/config/seerr
+export CONFIG_DIRECTORY="${POMPEY_CONFIG}/seerr"
 cd "${APP}"
 exec "${NODE}" dist/index.js

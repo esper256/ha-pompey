@@ -3,7 +3,7 @@
 # Download official engine artifacts after the tunnel is up.
 set -euo pipefail
 # shellcheck source=/dev/null
-source /usr/local/bin/pompey-env
+source "$(command -v pompey-env)"
 
 arch_cpu="$(uname -m)"
 case "${arch_cpu}" in
@@ -73,10 +73,10 @@ fetch_seerr() {
   fi
   rm -rf "${dest}"
   mv "${tmp}" "${dest}"
-  mkdir -p /config/seerr
-  touch /config/seerr/DOCKER
+  mkdir -p "${POMPEY_CONFIG}/seerr"
+  touch "${POMPEY_CONFIG}/seerr/DOCKER"
   rm -rf "${dest}/app/config"
-  ln -sfn /config/seerr "${dest}/app/config"
+  ln -sfn "${POMPEY_CONFIG}/seerr" "${dest}/app/config"
 }
 
 fetch_tarball "Prowlarr" \

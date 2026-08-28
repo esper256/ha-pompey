@@ -55,3 +55,11 @@ If Plex is not filled in yet, you will land on that UI’s setup wizard instead.
 ```
 
 App config (including fetched engines) lives in `/addon_configs/<hash>_pompey/` and `/data`. Restarting does not re-download engines that are already present.
+
+## Tests
+
+Home Assistant OS is not required. Supervisor would write `/data/options.json` from the app options; the suite supplies that file and a small bashio stub.
+
+```bash
+bash tests/run.sh
+```

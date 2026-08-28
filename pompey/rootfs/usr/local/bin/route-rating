@@ -7,8 +7,20 @@ import os
 import time
 import urllib.request
 
-SECRETS_PATH = os.environ.get("POMPEY_SECRETS", "/data/pompey/secrets.json")
-MEDIA_ROOT = os.environ.get("MEDIA_ROOT", "/media").rstrip("/")
+def secrets_path() -> str:
+    return os.environ.get("POMPEY_SECRETS", "/data/pompey/secrets.json")
+
+
+def media_root() -> str:
+    return os.environ.get("MEDIA_ROOT", "/media").rstrip("/")
+
+
+def radarr_url() -> str:
+    return os.environ.get("RADARR_URL", "http://127.0.0.1:7878").rstrip("/")
+
+
+def sonarr_url() -> str:
+    return os.environ.get("SONARR_URL", "http://127.0.0.1:8989").rstrip("/")
 
 KID_MOVIE = {"G", "PG", "PG-13"}
 KID_TV = {"TV-Y", "TV-Y7", "TV-G", "TV-PG"}
@@ -47,9 +59,9 @@ def in_root(path: str, root: str) -> bool:
 
 
 def route_movies(key: str) -> None:
-    movies = http_json("GET", "http://127.0.0.1:7878/api/v3/movie", headers=headers(key)) or []
-    kid_root = f"{MEDIA_ROOT}/Kid Friendly Movies"
-    gen_root = f"{MEDIA_ROOT}/Movies"
+    movies = http_json("GET", f"{radarr_url()}/api/v3/movie", headers=headers(key)) or []
+    kid_root = f"{media_root()}/Kid Friendly Movies"
+    gen_root = f"{media_root()}/Movies"
     for movie in movies:
         cert = movie.get("certification") or ""
         path = movie.get("path") or movie.get("rootFolderPath") or ""
@@ -64,7 +76,7 @@ def route_movies(key: str) -> None:
         try:
             http_json(
                 "PUT",
-                f"http://127.0.0.1:7878/api/v3/movie/{movie['id']}?moveFiles=true",
+                f"{radarr_url()}/api/v3/movie/{movie['id']}?moveFiles=true",
                 payload,
                 headers=headers(key),
             )
@@ -74,9 +86,9 @@ def route_movies(key: str) -> None:
 
 
 def route_series(key: str) -> None:
-    series = http_json("GET", "http://127.0.0.1:8989/api/v3/series", headers=headers(key)) or []
-    kid_root = f"{MEDIA_ROOT}/Kid Friendly TV"
-    gen_root = f"{MEDIA_ROOT}/TV"
+    series = http_json("GET", f"{sonarr_url()}/api/v3/series", headers=headers(key)) or []
+    kid_root = f"{media_root()}/Kid Friendly TV"
+    gen_root = f"{media_root()}/TV"
     for show in series:
         cert = show.get("certification") or ""
         path = show.get("path") or ""
@@ -91,7 +103,7 @@ def route_series(key: str) -> None:
         try:
             http_json(
                 "PUT",
-                f"http://127.0.0.1:8989/api/v3/series/{show['id']}?moveFiles=true",
+                f"{sonarr_url()}/api/v3/series/{show['id']}?moveFiles=true",
                 payload,
                 headers=headers(key),
             )
@@ -103,7 +115,7 @@ def route_series(key: str) -> None:
 def main() -> None:
     while True:
         try:
-            secrets = json.load(open(SECRETS_PATH, encoding="utf-8"))
+            secrets = json.load(open(secrets_path(), encoding="utf-8"))
             route_movies(secrets["radarr_api_key"])
             route_series(secrets["sonarr_api_key"])
         except Exception as exc:  # noqa: BLE001

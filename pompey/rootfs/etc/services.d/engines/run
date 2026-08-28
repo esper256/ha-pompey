@@ -2,7 +2,7 @@
 # shellcheck shell=bash
 set -euo pipefail
 # shellcheck source=/dev/null
-source /usr/local/bin/pompey-env
+source "$(command -v pompey-env)"
 
 wait-for-vpn 45
 fetch-engines

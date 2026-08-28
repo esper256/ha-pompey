@@ -3,8 +3,8 @@
 # Write localhost-only config.xml / qBittorrent.conf before the engines start.
 set -euo pipefail
 # shellcheck source=/dev/null
-source /usr/local/bin/pompey-env
-pompey-secrets
+source "$(command -v pompey-env)"
+pompey-secrets >/dev/null
 
 python3 - "${POMPEY_SECRETS}" "${MEDIA_ROOT}" <<'PY'
 import json, os, sys
@@ -36,12 +36,13 @@ def write_xml(path, port, api_key, instance):
     with open(path, "w", encoding="utf-8") as fh:
         fh.write(body)
 
-write_xml("/config/sonarr/config.xml", 8989, secrets["sonarr_api_key"], "Sonarr")
-write_xml("/config/radarr/config.xml", 7878, secrets["radarr_api_key"], "Radarr")
-write_xml("/config/prowlarr/config.xml", 9696, secrets["prowlarr_api_key"], "Prowlarr")
+config = os.environ.get("POMPEY_CONFIG", "/config")
+write_xml(f"{config}/sonarr/config.xml", 8989, secrets["sonarr_api_key"], "Sonarr")
+write_xml(f"{config}/radarr/config.xml", 7878, secrets["radarr_api_key"], "Radarr")
+write_xml(f"{config}/prowlarr/config.xml", 9696, secrets["prowlarr_api_key"], "Prowlarr")
 
-qconf = "/config/qBittorrent/qBittorrent.conf"
-os.makedirs("/config/qBittorrent", exist_ok=True)
+qconf = f"{config}/qBittorrent/qBittorrent.conf"
+os.makedirs(f"{config}/qBittorrent", exist_ok=True)
 if not os.path.isfile(qconf):
     pbk = secrets["qbit_pbkdf2"]
     user = secrets["qbit_user"]

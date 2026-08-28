@@ -21,3 +21,10 @@ We do not publish a container image. Supervisor builds this app on your machine.
 5. Start **Pompey** and open the UI. First start downloads through the tunnel and can take several minutes.
 
 Supervisor builds the Dockerfile locally. That is the only delivery path.
+
+Tests do not need Home Assistant OS. They supply the same `options.json` Supervisor would write:
+
+```bash
+bash tests/run.sh
+```
+
