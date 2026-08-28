@@ -9,7 +9,7 @@
 - First-boot wiring no longer crashes when Seerr settings endpoints return objects instead of arrays (common before initialize / without Plex). A local Seerr account from persisted secrets lets Radarr/Sonarr be wired even if Plex is filled in later.
 - Ingress `Set-Cookie` `Path=/` is rewritten to the Ingress prefix so the household stay signed in under the sidebar URL. Seerr binds localhost.
 - Store and wait-screen branding: square `icon.png`, rectangular `logo.png` (also the loading screen).
-- README says what 0.2.0/0.2.1 actually does vs what is still unproven. Home Assistant cannot clone this GitHub repo as an Apps repository while it is private (`could not read Username`); copy `pompey/` into `/addons` instead.
+- README says what 0.2.0/0.2.1 actually does vs what is still unproven. After adding the GitHub URL as an Apps repository, Pompey is under **Install app** (often at the bottom). If the repo was added while private, remove it and add it again.
 
 ## 0.2.0
 
