@@ -1,6 +1,6 @@
 # https://developers.home-assistant.io/docs/apps/configuration
 name: Pompey
-version: "0.2.26"
+version: "0.2.28"
 slug: pompey
 description: >-
   Search for a movie or TV show. Confirm if we need you. It lands in the
@@ -57,6 +57,9 @@ options:
   tv_folder: TV/Not Kid Friendly
   tv_kid_folder: TV/Kid Friendly
   after_download: stop_sharing
+  preferred_language: english
+  anime_audio: dual_audio
+  subtitles: english
 schema:
   media_folder: str
   movies_folder: str
@@ -64,3 +67,6 @@ schema:
   tv_folder: str
   tv_kid_folder: str
   after_download: list(stop_sharing|share_to_ratio|share_one_day)
+  preferred_language: list(english|original)
+  anime_audio: list(dual_audio|original|english)
+  subtitles: list(english|none)

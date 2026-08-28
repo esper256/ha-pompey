@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.28
+
+- Search offers three quality choices when you request a title: **Max** (remux / 4K / lossless audio, large files on purpose), **Default** (1080p WEB-DL or BluRay encode, about 2.5–8 GB per 150 minutes; under about 1 GB for two hours is rejected), and **Anything** (obscure titles — take what exists, including CAM). The request dropdown is the Seerr advanced-request control; household users now have that permission. Leftover Arr profiles (Any, HD-720p, Ultra-HD, the old HD name) are removed so the list is those three. Rebuild so the banner says **0.2.28**. Already-queued grabs are not cancelled.
+- Home Assistant options for **preferred language**, **anime audio** (dual audio by default), and **subtitles**. These score the release *name* (Dual Audio, English Dub, advertised English subs). They are not a per-request language picker — Seerr does not have one — and they do not download missing subtitles after the file lands (Bazarr is later).
+
 ## 0.2.26
 
 - Auto-grab prefers **1080p WEB-DL / BluRay encodes**, not remux or 4K. A 26 GB remux was Radarr’s default ranking, not a bad source. The household profile also prefers x265 and WEB-DL, rejects CAM/TS, and caps 1080p size (about 10–15 GB for a two-hour movie). Already-queued grabs are not cancelled. Search still uses this profile after a rebuild.
