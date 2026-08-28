@@ -169,6 +169,7 @@ from urllib.parse import parse_qs, urlparse
 
 work = sys.argv[1]
 CATEGORIES = {}
+SEERR = {"initialized": False, "radarr": [], "sonarr": []}
 
 
 class Qbit(BaseHTTPRequestHandler):
@@ -229,15 +230,68 @@ class Seerr(BaseHTTPRequestHandler):
     def log_message(self, *a, **k):
         return
 
-    def do_GET(self):
-        body = json.dumps({"initialized": False}).encode()
-        self.send_response(200)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
+    def _body(self):
+        n = int(self.headers.get("Content-Length") or 0)
+        raw = self.rfile.read(n) if n else b""
+        if not raw:
+            return {}
+        try:
+            return json.loads(raw.decode())
+        except json.JSONDecodeError:
+            return {}
 
-    do_POST = do_GET
+    def _send(self, code, body, ctype="application/json", cookie=None):
+        if isinstance(body, str):
+            payload = body.encode()
+        elif isinstance(body, (bytes, bytearray)):
+            payload = bytes(body)
+        else:
+            payload = json.dumps(body).encode()
+            ctype = "application/json"
+        self.send_response(code)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(payload)))
+        if cookie:
+            self.send_header("Set-Cookie", cookie)
+        self.end_headers()
+        self.wfile.write(payload)
+
+    def do_GET(self):
+        path = urlparse(self.path).path
+        if path in ("/", "/login", "/setup"):
+            html = b'<!doctype html><script src="/_next/static/x.js"></script>'
+            return self._send(200, html, "text/html")
+        if path.endswith("/settings/radarr"):
+            return self._send(200, SEERR["radarr"])
+        if path.endswith("/settings/sonarr"):
+            return self._send(200, SEERR["sonarr"])
+        if path.endswith("/settings/public"):
+            return self._send(200, {"initialized": SEERR["initialized"]})
+        if path.endswith("/settings/main"):
+            return self._send(200, {"apiKey": "stub-seerr-key"})
+        if path.endswith("/settings/plex/devices/servers"):
+            return self._send(200, [])
+        if path.endswith("/settings/plex/library"):
+            return self._send(200, [])
+        return self._send(200, {"ok": True})
+
+    def do_POST(self):
+        path = urlparse(self.path).path
+        body = self._body()
+        if path.endswith("/settings/radarr"):
+            SEERR["radarr"].append(body)
+            return self._send(201, body)
+        if path.endswith("/settings/sonarr"):
+            SEERR["sonarr"].append(body)
+            return self._send(201, body)
+        if path.endswith("/auth/local") or path.endswith("/auth/plex"):
+            return self._send(200, {"id": 1}, cookie="connect.sid=int; Path=/; HttpOnly")
+        if path.endswith("/initialize"):
+            SEERR["initialized"] = True
+            return self._send(200, {"initialized": True})
+        return self._send(200, body or {"ok": True})
+
+    do_PUT = do_POST
 
 
 qbit = ThreadingHTTPServer(("127.0.0.1", 8080), Qbit)
@@ -286,6 +340,26 @@ ns env \
   POMPEY_WAIT_SLEEP="${POMPEY_WAIT_SLEEP}" \
   python3 "${BIN}/wire-stack"
 test -f "${POMPEY_READY}/arr-wired"
+test -f "${POMPEY_READY}/wired"
+test "$(jq -r .search "${POMPEY_READY}/status.json")" = true
+grep -q 'proxy_pass http://127.0.0.1:8098' "${NGINX_INGRESS_CONF}"
+grep -q 'X-Ingress-Path' "${NGINX_INGRESS_CONF}"
+
+log "ingress rewriter against Seerr stub (no Seerr binary)"
+ns env \
+  SEERR_URL=http://127.0.0.1:5055 \
+  POMPEY_INGRESS_PROXY=http://127.0.0.1:8098 \
+  python3 "${BIN}/pompey-ingress" >"${WORK}/ingress.log" 2>&1 &
+PIDS+=("$!")
+wait_url http://127.0.0.1:8098/ 20
+html="$(ns curl -fsS -H 'X-Ingress-Path: /api/hassio_ingress/tok' http://127.0.0.1:8098/)"
+echo "${html}" | grep -q '/api/hassio_ingress/tok/_next/static/x.js'
+cookie_hdr="$(ns curl -sS -D - -o /dev/null -X POST \
+  -H 'X-Ingress-Path: /api/hassio_ingress/tok' \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"a@b.c","password":"x"}' \
+  http://127.0.0.1:8098/api/v1/auth/local)"
+echo "${cookie_hdr}" | grep -qi 'Path=/api/hassio_ingress/tok'
 
 RADARR_KEY="$(jq -r .radarr_api_key "${POMPEY_SECRETS}")"
 RADARR=http://127.0.0.1:7878

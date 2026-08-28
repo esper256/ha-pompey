@@ -28,6 +28,22 @@ if [[ -z "${ENDPOINT_IP}" || -z "${ENDPOINT_PORT}" || "${ENDPOINT_IP}" == "${END
   bashio::exit.nok "vpn-killswitch: could not parse Endpoint from ${WG_CONF}"
 fi
 
+iptables_bin() {
+  if command -v iptables-legacy >/dev/null 2>&1; then
+    command -v iptables-legacy
+  else
+    command -v iptables
+  fi
+}
+
+ip6tables_bin() {
+  if command -v ip6tables-legacy >/dev/null 2>&1; then
+    command -v ip6tables-legacy
+  else
+    command -v ip6tables
+  fi
+}
+
 ensure_chain() {
   local bin="$1"
   "${bin}" -N POMPEY-KILLSWITCH 2>/dev/null || "${bin}" -F POMPEY-KILLSWITCH
@@ -36,27 +52,29 @@ ensure_chain() {
   fi
 }
 
-ensure_chain iptables
-iptables -A POMPEY-KILLSWITCH -o lo -j ACCEPT
-iptables -A POMPEY-KILLSWITCH -o wg0 -j ACCEPT
-iptables -A POMPEY-KILLSWITCH -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
-iptables -A POMPEY-KILLSWITCH -d "${HASS_NET}" -j ACCEPT
-iptables -A POMPEY-KILLSWITCH -d "${ENDPOINT_IP}" -p udp --dport "${ENDPOINT_PORT}" -j ACCEPT
+IPT="$(iptables_bin)"
+ensure_chain "${IPT}"
+"${IPT}" -A POMPEY-KILLSWITCH -o lo -j ACCEPT
+"${IPT}" -A POMPEY-KILLSWITCH -o wg0 -j ACCEPT
+"${IPT}" -A POMPEY-KILLSWITCH -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+"${IPT}" -A POMPEY-KILLSWITCH -d "${HASS_NET}" -j ACCEPT
+"${IPT}" -A POMPEY-KILLSWITCH -d "${ENDPOINT_IP}" -p udp --dport "${ENDPOINT_PORT}" -j ACCEPT
 
 if [[ -f "${LAN_FILE}" ]]; then
   IFS=',' read -r -a cidrs <"${LAN_FILE}"
   for cidr in "${cidrs[@]}"; do
     cidr="${cidr// /}"
     [[ -n "${cidr}" ]] || continue
-    iptables -A POMPEY-KILLSWITCH -d "${cidr}" -j ACCEPT
+    "${IPT}" -A POMPEY-KILLSWITCH -d "${cidr}" -j ACCEPT
   done
 fi
 
-iptables -A POMPEY-KILLSWITCH -j DROP
+"${IPT}" -A POMPEY-KILLSWITCH -j DROP
 
-if command -v ip6tables >/dev/null 2>&1; then
-  ensure_chain ip6tables
-  ip6tables -A POMPEY-KILLSWITCH -o lo -j ACCEPT
-  ip6tables -A POMPEY-KILLSWITCH -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
-  ip6tables -A POMPEY-KILLSWITCH -j DROP
+IP6="$(ip6tables_bin || true)"
+if [[ -n "${IP6}" ]]; then
+  ensure_chain "${IP6}"
+  "${IP6}" -A POMPEY-KILLSWITCH -o lo -j ACCEPT
+  "${IP6}" -A POMPEY-KILLSWITCH -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+  "${IP6}" -A POMPEY-KILLSWITCH -j DROP
 fi

@@ -4,7 +4,9 @@ set -euo pipefail
 # shellcheck source=/dev/null
 source "$(command -v pompey-env)"
 
-bashio::log.info "Pompey ${BUILD_VERSION:-0.2.0} starting"
+bashio::log.level "$(bashio::config 'log_level')" >/dev/null 2>&1 || true
+
+bashio::log.info "Pompey ${BUILD_VERSION:-0.2.1} starting"
 pompey-status vpn "Starting" 5 || true
 
 mkdir -p "${POMPEY_CONFIG}/wireguard" "${POMPEY_WG_ETC}" "${POMPEY_VPN_TMP}" "${POMPEY_NGINX_RUN}"
@@ -60,6 +62,14 @@ fi
 indexer_url="$(bashio::config 'indexer_url')"
 if [[ -z "${indexer_url}" ]]; then
   bashio::log.warning "No source URL yet. Add a source (URL plus key) so titles can be found."
+fi
+
+plex_url="$(bashio::config 'plex_url')"
+if [[ -n "${plex_url}" ]]; then
+  plex_host="$(python3 -c 'from urllib.parse import urlparse; import sys; print(urlparse(sys.argv[1]).hostname or "")' "${plex_url}" 2>/dev/null || true)"
+  if [[ -n "${plex_host}" && ! "${plex_host}" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; then
+    bashio::log.warning "Plex address uses hostname ${plex_host}. Proton DNS will not resolve LAN names — use a numeric IP (the machine that publishes port 32400)."
+  fi
 fi
 
 bashio::log.info "After the tunnel is up, Pompey fetches the household UI and hidden engines. First start can take several minutes."

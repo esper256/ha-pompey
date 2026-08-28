@@ -26,11 +26,17 @@ DNS = ${DNS}
 PublicKey = $(bashio::config 'wireguard_peer_public_key')
 AllowedIPs = 0.0.0.0/0
 Endpoint = $(bashio::config 'wireguard_endpoint')
+PersistentKeepalive = 25
 EOF
   bashio::log.info "Wrote WireGuard config from Home Assistant options (secrets not logged)"
 fi
 
 chmod 600 "${DST}"
+
+if ! grep -qi '^[[:space:]]*PersistentKeepalive' "${DST}"; then
+  printf '\nPersistentKeepalive = 25\n' >>"${DST}"
+  bashio::log.info "Added PersistentKeepalive=25 so the Proton peer stays up behind NAT"
+fi
 
 printf '%s\n' "$(bashio::config 'lan_networks')" >"${POMPEY_LAN_FILE}"
 

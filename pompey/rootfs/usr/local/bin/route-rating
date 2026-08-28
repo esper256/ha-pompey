@@ -45,11 +45,42 @@ def headers(key: str) -> dict:
     return {"X-Api-Key": key}
 
 
+def as_list(value):
+    if isinstance(value, list):
+        return [item for item in value if isinstance(item, dict)]
+    if isinstance(value, dict):
+        for key in ("results", "records", "data", "items"):
+            inner = value.get(key)
+            if isinstance(inner, list):
+                return as_list(inner)
+        return []
+    return []
+
+
 def kid_cert(cert: str, kid_set: set[str]) -> bool:
     raw = (cert or "").strip()
     if not raw:
         return False
     return raw in kid_set or raw.upper() in kid_set
+
+
+def title_cert(item: dict) -> str:
+    """Radarr/Sonarr certification is often empty until metadata fills in."""
+    for key in ("certification", "contentRating", "originalCertification"):
+        val = item.get(key)
+        if isinstance(val, str) and val.strip():
+            return val.strip()
+    ratings = item.get("ratings")
+    if isinstance(ratings, dict):
+        for nested in ratings.values():
+            if isinstance(nested, dict):
+                for key in ("certification", "value"):
+                    val = nested.get(key)
+                    if isinstance(val, str) and val.strip() and not val.replace(".", "").isdigit():
+                        return val.strip()
+            elif isinstance(nested, str) and nested.strip():
+                return nested.strip()
+    return ""
 
 
 def in_root(path: str, root: str) -> bool:
@@ -59,11 +90,11 @@ def in_root(path: str, root: str) -> bool:
 
 
 def route_movies(key: str) -> None:
-    movies = http_json("GET", f"{radarr_url()}/api/v3/movie", headers=headers(key)) or []
+    movies = as_list(http_json("GET", f"{radarr_url()}/api/v3/movie", headers=headers(key)))
     kid_root = f"{media_root()}/Kid Friendly Movies"
     gen_root = f"{media_root()}/Movies"
     for movie in movies:
-        cert = movie.get("certification") or ""
+        cert = title_cert(movie)
         path = movie.get("path") or movie.get("rootFolderPath") or ""
         if not path:
             continue
@@ -86,11 +117,11 @@ def route_movies(key: str) -> None:
 
 
 def route_series(key: str) -> None:
-    series = http_json("GET", f"{sonarr_url()}/api/v3/series", headers=headers(key)) or []
+    series = as_list(http_json("GET", f"{sonarr_url()}/api/v3/series", headers=headers(key)))
     kid_root = f"{media_root()}/Kid Friendly TV"
     gen_root = f"{media_root()}/TV"
     for show in series:
-        cert = show.get("certification") or ""
+        cert = title_cert(show)
         path = show.get("path") or ""
         if not path:
             continue

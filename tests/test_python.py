@@ -31,6 +31,7 @@ def load(name: str, path: Path):
 
 ws = load("wire_stack", BIN / "wire-stack")
 rr = load("route_rating", BIN / "route-rating")
+ing = load("pompey_ingress", BIN / "pompey-ingress")
 
 
 def png_wh(path: Path) -> tuple[int, int]:
@@ -67,6 +68,8 @@ class FakeState:
         self.apps: list[dict] = []
         self.indexers: list[dict] = []
         self.plex_auth: object = None
+        self.local_auth: object = None
+        self.seerr_object_lists = False
         self.seerr_radarr: list[dict] = []
         self.seerr_sonarr: list[dict] = []
         self.initialized = False
@@ -75,6 +78,12 @@ class FakeState:
             {"id": 1, "title": "Kid Flick", "certification": "PG", "path": "/media/Movies/Kid Flick"},
             {"id": 2, "title": "Unknown", "certification": "", "path": "/media/Movies/Unknown"},
             {"id": 3, "title": "Already Kid", "certification": "G", "path": "/media/Kid Friendly Movies/Already Kid"},
+            {
+                "id": 4,
+                "title": "Nested Kid",
+                "ratings": {"tmdb": {"certification": "PG"}},
+                "path": "/media/Movies/Nested Kid",
+            },
         ]
         self.series = [
             {"id": 10, "title": "Adult Show", "certification": "TV-MA", "path": "/media/TV/Adult Show"},
@@ -198,6 +207,8 @@ def handler_for(state: FakeState):
                 if path == "/api/v1/indexer" and method == "POST":
                     state.indexers.append(body)
                     return self._send(201, body)
+                if path == "/api/v1/command" and method == "POST":
+                    return self._send(201, body or {"name": "ApplicationIndexersSync"})
                 return self._send(404, {"error": path})
             if role == "seerr":
                 if path == "/api/v1/settings/public":
@@ -205,6 +216,9 @@ def handler_for(state: FakeState):
                 if path == "/api/v1/auth/plex":
                     state.plex_auth = body
                     return self._send(body={"id": 1}, cookie="connect.sid=testcookie; Path=/")
+                if path == "/api/v1/auth/local":
+                    state.local_auth = body
+                    return self._send(body={"id": 1, "email": (body or {}).get("email")}, cookie="connect.sid=local; Path=/")
                 if path == "/api/v1/settings/main" and method == "GET":
                     return self._send(body={"apiKey": "seerr-api-key"})
                 if path == "/api/v1/settings/main" and method == "POST":
@@ -230,11 +244,15 @@ def handler_for(state: FakeState):
                 if path.startswith("/api/v1/settings/plex/library/") and method == "PUT":
                     return self._send(body={"id": "1", "enabled": True})
                 if path == "/api/v1/settings/radarr" and method == "GET":
+                    if state.seerr_object_lists:
+                        return self._send(body={"initialized": False})
                     return self._send(body=state.seerr_radarr)
                 if path == "/api/v1/settings/radarr" and method == "POST":
                     state.seerr_radarr.append(body)
                     return self._send(201, body)
                 if path == "/api/v1/settings/sonarr" and method == "GET":
+                    if state.seerr_object_lists:
+                        return self._send(body={"initialized": False})
                     return self._send(body=state.seerr_sonarr)
                 if path == "/api/v1/settings/sonarr" and method == "POST":
                     state.seerr_sonarr.append(body)
@@ -291,6 +309,15 @@ class Helpers(unittest.TestCase):
         self.assertFalse(rr.kid_cert("", rr.KID_MOVIE))
         self.assertFalse(rr.kid_cert("TV-MA", rr.KID_TV))
 
+    def test_title_cert_from_nested_ratings(self):
+        self.assertEqual(rr.title_cert({"certification": "PG"}), "PG")
+        self.assertEqual(
+            rr.title_cert({"ratings": {"tmdb": {"certification": "PG-13"}}}),
+            "PG-13",
+        )
+        self.assertEqual(rr.title_cert({"contentRating": "TV-PG"}), "TV-PG")
+        self.assertEqual(rr.title_cert({}), "")
+
     def test_in_root(self):
         self.assertTrue(rr.in_root("/media/Movies/Foo", "/media/Movies"))
         self.assertFalse(rr.in_root("/media/Movies Extra/Foo", "/media/Movies"))
@@ -339,6 +366,17 @@ class Helpers(unittest.TestCase):
         self.assertEqual(resource["fields"][0]["value"], "127.0.0.1")
         self.assertEqual(resource["fields"][1]["value"], 8080)
 
+    def test_as_list_ignores_non_arrays(self):
+        self.assertEqual(ws.as_list({"initialized": False}), [])
+        self.assertEqual(ws.as_list("Ok."), [])
+        self.assertEqual(ws.as_list(None), [])
+        self.assertEqual(
+            ws.as_list([{"hostname": "127.0.0.1"}, "skip"]),
+            [{"hostname": "127.0.0.1"}],
+        )
+        self.assertEqual(ws.as_list({"hostname": "127.0.0.1", "name": "Radarr"})[0]["name"], "Radarr")
+        self.assertEqual(ws.as_list({"results": [{"id": 1}]}), [{"id": 1}])
+
 
 class WireStack(unittest.TestCase):
     def setUp(self):
@@ -357,6 +395,8 @@ class WireStack(unittest.TestCase):
             "prowlarr_api_key": "prowlarr-key",
             "qbit_user": "pompey",
             "qbit_password": "secret",
+            "seerr_email": "pompey@local",
+            "seerr_password": "seerr-secret",
         }
         secrets_path = self.tmp / "secrets.json"
         secrets_path.write_text(json.dumps(secrets))
@@ -411,13 +451,30 @@ class WireStack(unittest.TestCase):
         self.assertEqual(self.state.seerr_sonarr[0]["activeDirectory"], "/media/TV")
         self.assertTrue(self.state.initialized)
         text = self.nginx.read_text()
-        self.assertIn("proxy_pass " + os.environ["SEERR_URL"], text)
+        self.assertIn("proxy_pass " + os.environ.get("POMPEY_INGRESS_PROXY", "http://127.0.0.1:8098"), text)
+        self.assertIn("X-Ingress-Path", text)
         self.assertIn("X-Forwarded-Prefix", text)
         self.assertIn("status.json", text)
         self.assertNotIn("test-plex-token", text)
         live = json.loads((self.ready / "status.json").read_text())
         self.assertTrue(live["search"])
         self.assertTrue(live["handoff"])
+        self.assertIsNone(self.state.local_auth)
+
+    def test_wires_without_plex_when_seerr_returns_objects(self):
+        os.environ["PLEX_URL"] = ""
+        os.environ["PLEX_TOKEN"] = ""
+        self.state.seerr_object_lists = True
+        rc = ws.main()
+        self.assertEqual(rc, 0)
+        self.assertTrue((self.ready / "wired").exists())
+        self.assertIsNone(self.state.plex_auth)
+        self.assertEqual(self.state.local_auth["email"], "pompey@local")
+        self.assertEqual(self.state.seerr_radarr[0]["hostname"], "127.0.0.1")
+        self.assertEqual(self.state.seerr_sonarr[0]["hostname"], "127.0.0.1")
+        self.assertTrue(self.state.initialized)
+        live = json.loads((self.ready / "status.json").read_text())
+        self.assertTrue(live["search"])
 
 
 class RouteRating(unittest.TestCase):
@@ -440,9 +497,127 @@ class RouteRating(unittest.TestCase):
         rr.route_series("sonarr-key")
         dests = {m.get("title"): m.get("rootFolderPath") for m in self.state.moved}
         self.assertEqual(dests["Kid Flick"], "/media/Kid Friendly Movies")
+        self.assertEqual(dests["Nested Kid"], "/media/Kid Friendly Movies")
         self.assertNotIn("Unknown", dests)
         self.assertNotIn("Already Kid", dests)
         self.assertNotIn("Adult Show", dests)
+
+
+class IngressRewrite(unittest.TestCase):
+    def test_rewrites_next_and_login(self):
+        prefix = "/api/hassio_ingress/tok"
+        html = '<script src="/_next/static/x.js"></script><a href="/login">in</a>'
+        out = ing.rewrite_seerr_body(html, prefix)
+        self.assertIn(f"{prefix}/_next/static/x.js", out)
+        self.assertIn(f"{prefix}/login", out)
+        self.assertNotIn('src="/_next/', out)
+        again = ing.rewrite_seerr_body(out, prefix)
+        self.assertEqual(out.count(prefix + "/_next"), again.count(prefix + "/_next"))
+
+    def test_empty_prefix_leaves_html(self):
+        html = '<script src="/_next/static/x.js"></script>'
+        self.assertEqual(ing.rewrite_seerr_body(html, ""), html)
+
+    def test_location_header(self):
+        self.assertEqual(ing.rewrite_location("/login", "/ing"), "/ing/login")
+        self.assertEqual(ing.rewrite_location("/ing/login", "/ing"), "/ing/login")
+        self.assertEqual(ing.rewrite_location("https://x/y", "/ing"), "https://x/y")
+
+    def test_set_cookie_path(self):
+        self.assertEqual(
+            ing.rewrite_set_cookie("connect.sid=abc; Path=/; HttpOnly", "/api/hassio_ingress/tok"),
+            "connect.sid=abc; Path=/api/hassio_ingress/tok; HttpOnly",
+        )
+        self.assertEqual(
+            ing.rewrite_set_cookie("connect.sid=abc; Path=/login", "/ing"),
+            "connect.sid=abc; Path=/ing/login",
+        )
+        self.assertEqual(
+            ing.rewrite_set_cookie("connect.sid=abc; Path=/ing", "/ing"),
+            "connect.sid=abc; Path=/ing",
+        )
+        self.assertEqual(ing.rewrite_set_cookie("connect.sid=abc; Path=/", ""), "connect.sid=abc; Path=/")
+
+    def test_proxy_rewrites_html_using_ingress_header(self):
+        class Upstream(BaseHTTPRequestHandler):
+            def log_message(self, *_a, **_k):
+                return
+
+            def do_GET(self):
+                body = b'<script src="/_next/static/app.js"></script>'
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+        up = ThreadingHTTPServer(("127.0.0.1", 0), Upstream)
+        threading.Thread(target=up.serve_forever, daemon=True).start()
+        uhost, uport = up.server_address
+        os.environ["SEERR_URL"] = f"http://{uhost}:{uport}"
+        proxy = ThreadingHTTPServer(("127.0.0.1", 0), ing.Handler)
+        threading.Thread(target=proxy.serve_forever, daemon=True).start()
+        phost, pport = proxy.server_address
+        try:
+            import urllib.request
+
+            req = urllib.request.Request(
+                f"http://{phost}:{pport}/",
+                headers={"X-Ingress-Path": "/api/hassio_ingress/abc"},
+            )
+            html = urllib.request.urlopen(req, timeout=5).read().decode()
+            self.assertIn("/api/hassio_ingress/abc/_next/static/app.js", html)
+        finally:
+            proxy.shutdown()
+            proxy.server_close()
+            up.shutdown()
+            up.server_close()
+
+    def test_proxy_rewrites_set_cookie_path(self):
+        class Upstream(BaseHTTPRequestHandler):
+            def log_message(self, *_a, **_k):
+                return
+
+            def do_POST(self):
+                n = int(self.headers.get("Content-Length") or 0)
+                if n:
+                    self.rfile.read(n)
+                body = b'{"id":1}'
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Set-Cookie", "connect.sid=abc; Path=/; HttpOnly")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+        up = ThreadingHTTPServer(("127.0.0.1", 0), Upstream)
+        threading.Thread(target=up.serve_forever, daemon=True).start()
+        uhost, uport = up.server_address
+        os.environ["SEERR_URL"] = f"http://{uhost}:{uport}"
+        proxy = ThreadingHTTPServer(("127.0.0.1", 0), ing.Handler)
+        threading.Thread(target=proxy.serve_forever, daemon=True).start()
+        phost, pport = proxy.server_address
+        try:
+            import urllib.request
+
+            req = urllib.request.Request(
+                f"http://{phost}:{pport}/api/v1/auth/local",
+                data=b'{"email":"a@b.c","password":"x"}',
+                method="POST",
+                headers={
+                    "X-Ingress-Path": "/api/hassio_ingress/abc",
+                    "Content-Type": "application/json",
+                },
+            )
+            resp = urllib.request.urlopen(req, timeout=5)
+            cookie = resp.headers.get("Set-Cookie") or ""
+            self.assertIn("Path=/api/hassio_ingress/abc", cookie)
+            self.assertNotIn("Path=/;", cookie + ";")
+        finally:
+            proxy.shutdown()
+            proxy.server_close()
+            up.shutdown()
+            up.server_close()
 
 
 class TestsNeverUseBitTorrent(unittest.TestCase):
