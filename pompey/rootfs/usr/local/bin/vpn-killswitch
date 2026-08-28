@@ -2,6 +2,11 @@
 # shellcheck shell=bash
 # Apply an OUTPUT kill switch that does not depend on the default route.
 # Allowed: loopback, wg0, established, HA/LAN CIDRs, UDP handshake to Proton.
+#
+# Home Assistant OS is nftables. iptables-legacy needs iptable_filter, which
+# this container does not have (/lib/modules is missing). Prefer a backend
+# that can actually list the filter table; if none can, exit 4 so the tunnel
+# still comes up.
 set -euo pipefail
 
 WG_CONF="${1:-${POMPEY_WG_CONF:-/etc/wireguard/wg0.conf}}"
@@ -9,7 +14,8 @@ LAN_FILE="${POMPEY_LAN_FILE:-/etc/pompey-lan-networks}"
 HASS_NET="172.30.32.0/23"
 
 if [[ ! -f "${WG_CONF}" ]]; then
-  bashio::exit.nok "vpn-killswitch: missing ${WG_CONF}"
+  bashio::log.error "vpn-killswitch: missing ${WG_CONF}"
+  exit 1
 fi
 
 ENDPOINT="$(awk -F'=' '{
@@ -25,56 +31,120 @@ ENDPOINT="$(awk -F'=' '{
 ENDPOINT_IP="${ENDPOINT%%:*}"
 ENDPOINT_PORT="${ENDPOINT##*:}"
 if [[ -z "${ENDPOINT_IP}" || -z "${ENDPOINT_PORT}" || "${ENDPOINT_IP}" == "${ENDPOINT_PORT}" ]]; then
-  bashio::exit.nok "vpn-killswitch: could not parse Endpoint from ${WG_CONF}"
+  bashio::log.error "vpn-killswitch: could not parse Endpoint from ${WG_CONF}"
+  exit 1
 fi
 
-iptables_bin() {
-  if command -v iptables-legacy >/dev/null 2>&1; then
-    command -v iptables-legacy
-  else
-    command -v iptables
-  fi
+filter_ok() {
+  local bin="$1"
+  "${bin}" -w 5 -t filter -L -n >/dev/null 2>&1
 }
 
-ip6tables_bin() {
-  if command -v ip6tables-legacy >/dev/null 2>&1; then
-    command -v ip6tables-legacy
-  else
-    command -v ip6tables
-  fi
+pick_iptables() {
+  local cand
+  for cand in iptables-nft iptables iptables-legacy; do
+    command -v "${cand}" >/dev/null 2>&1 || continue
+    if filter_ok "${cand}"; then
+      command -v "${cand}"
+      return 0
+    fi
+  done
+  return 1
+}
+
+pick_ip6tables() {
+  local cand
+  for cand in ip6tables-nft ip6tables ip6tables-legacy; do
+    command -v "${cand}" >/dev/null 2>&1 || continue
+    if filter_ok "${cand}"; then
+      command -v "${cand}"
+      return 0
+    fi
+  done
+  return 1
 }
 
 ensure_chain() {
   local bin="$1"
-  "${bin}" -N POMPEY-KILLSWITCH 2>/dev/null || "${bin}" -F POMPEY-KILLSWITCH
-  if ! "${bin}" -C OUTPUT -j POMPEY-KILLSWITCH >/dev/null 2>&1; then
-    "${bin}" -I OUTPUT 1 -j POMPEY-KILLSWITCH
+  "${bin}" -w 5 -N POMPEY-KILLSWITCH 2>/dev/null || "${bin}" -w 5 -F POMPEY-KILLSWITCH
+  if ! "${bin}" -w 5 -C OUTPUT -j POMPEY-KILLSWITCH >/dev/null 2>&1; then
+    "${bin}" -w 5 -I OUTPUT 1 -j POMPEY-KILLSWITCH
   fi
 }
 
-IPT="$(iptables_bin)"
-ensure_chain "${IPT}"
-"${IPT}" -A POMPEY-KILLSWITCH -o lo -j ACCEPT
-"${IPT}" -A POMPEY-KILLSWITCH -o wg0 -j ACCEPT
-"${IPT}" -A POMPEY-KILLSWITCH -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
-"${IPT}" -A POMPEY-KILLSWITCH -d "${HASS_NET}" -j ACCEPT
-"${IPT}" -A POMPEY-KILLSWITCH -d "${ENDPOINT_IP}" -p udp --dport "${ENDPOINT_PORT}" -j ACCEPT
-
-if [[ -f "${LAN_FILE}" ]]; then
-  IFS=',' read -r -a cidrs <"${LAN_FILE}"
+lan_cidrs() {
+  local cidr
+  local -a cidrs=()
+  if [[ ! -f "${LAN_FILE}" ]]; then
+    return 0
+  fi
+  IFS=',' read -r -a cidrs <"${LAN_FILE}" || true
   for cidr in "${cidrs[@]}"; do
     cidr="${cidr// /}"
     [[ -n "${cidr}" ]] || continue
-    "${IPT}" -A POMPEY-KILLSWITCH -d "${cidr}" -j ACCEPT
+    printf '%s\n' "${cidr}"
   done
+}
+
+apply_iptables() {
+  local ipt="$1"
+  ensure_chain "${ipt}"
+  "${ipt}" -w 5 -A POMPEY-KILLSWITCH -o lo -j ACCEPT
+  "${ipt}" -w 5 -A POMPEY-KILLSWITCH -o wg0 -j ACCEPT
+  "${ipt}" -w 5 -A POMPEY-KILLSWITCH -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+  "${ipt}" -w 5 -A POMPEY-KILLSWITCH -d "${HASS_NET}" -j ACCEPT
+  "${ipt}" -w 5 -A POMPEY-KILLSWITCH -d "${ENDPOINT_IP}" -p udp --dport "${ENDPOINT_PORT}" -j ACCEPT
+  while IFS= read -r cidr; do
+    "${ipt}" -w 5 -A POMPEY-KILLSWITCH -d "${cidr}" -j ACCEPT
+  done < <(lan_cidrs)
+  "${ipt}" -w 5 -A POMPEY-KILLSWITCH -j DROP
+}
+
+apply_nft() {
+  local cidr nft_script
+  nft_script="table inet pompey {
+  chain output {
+    type filter hook output priority 0; policy accept;
+    oifname \"lo\" accept
+    oifname \"wg0\" accept
+    ct state established,related accept
+    ip daddr ${HASS_NET} accept
+    ip daddr ${ENDPOINT_IP} udp dport ${ENDPOINT_PORT} accept
+"
+  while IFS= read -r cidr; do
+    nft_script+="    ip daddr ${cidr} accept
+"
+  done < <(lan_cidrs)
+  nft_script+="    drop
+  }
+}
+"
+  nft delete table inet pompey >/dev/null 2>&1 || true
+  nft -f - <<<"${nft_script}"
+}
+
+IPT="$(pick_iptables || true)"
+if [[ -n "${IPT}" ]]; then
+  apply_iptables "${IPT}"
+  IP6="$(pick_ip6tables || true)"
+  if [[ -n "${IP6}" ]]; then
+    ensure_chain "${IP6}"
+    "${IP6}" -w 5 -A POMPEY-KILLSWITCH -o lo -j ACCEPT
+    "${IP6}" -w 5 -A POMPEY-KILLSWITCH -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+    "${IP6}" -w 5 -A POMPEY-KILLSWITCH -j DROP || true
+  fi
+  bashio::log.info "iptables kill switch applied via ${IPT##*/}"
+  exit 0
 fi
 
-"${IPT}" -A POMPEY-KILLSWITCH -j DROP
-
-IP6="$(ip6tables_bin || true)"
-if [[ -n "${IP6}" ]]; then
-  ensure_chain "${IP6}"
-  "${IP6}" -A POMPEY-KILLSWITCH -o lo -j ACCEPT
-  "${IP6}" -A POMPEY-KILLSWITCH -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
-  "${IP6}" -A POMPEY-KILLSWITCH -j DROP
+if [[ "${ENDPOINT_IP}" =~ ^[0-9.]+$ && "${ENDPOINT_PORT}" =~ ^[0-9]+$ ]] \
+  && command -v nft >/dev/null 2>&1 && nft list tables >/dev/null 2>&1; then
+  if apply_nft; then
+    bashio::log.info "nft kill switch applied (no working iptables filter table)"
+    exit 0
+  fi
+  bashio::log.warning "nft was present but could not install the kill switch"
 fi
+
+bashio::log.warning "Kill switch could not attach (no iptables/nft filter table on this Home Assistant host). Proton file is saved; starting the tunnel anyway. If the tunnel drops, traffic may leak until a firewall table exists."
+exit 4

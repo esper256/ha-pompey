@@ -36,6 +36,10 @@ if ! wg-quick up wg0; then
 fi
 
 printf 'nameserver %s\n' "${POMPEY_WG_DNS}" >/etc/resolv.conf
+# Filter tables sometimes appear only after the interface exists. Retry once.
+if [[ "${POMPEY_FAKE_VPN:-}" != "1" ]]; then
+  vpn-killswitch "${POMPEY_WG_CONF}" || bashio::log.warning "Kill switch still not attached after wg0 is up"
+fi
 
 bashio::log.info "Waiting for Proton handshake on wg0"
 pompey-status vpn "Waiting for Proton handshake" 15 || true

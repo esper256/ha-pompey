@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# HAOS field failure: iptables-legacy cannot init the filter table.
+set -euo pipefail
+echo "modprobe: can't change directory to '/lib/modules': No such file or directory" >&2
+echo "iptables v1.8.13 (legacy): can't initialize iptables table \`filter': Table does not exist (do you need to insmod?)" >&2
+exit 1

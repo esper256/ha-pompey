@@ -44,11 +44,12 @@ profile pompey flags=(attach_disconnected,mediate_deleted) {
   /share/** rw,
   /media/** rw,
 
-  # WireGuard + NAT-PMP
+  # WireGuard + NAT-PMP + kill switch (nft first; HAOS has no iptable_filter)
   /usr/bin/wg ix,
   /usr/bin/wg-quick ix,
   /usr/bin/wireguard-go ix,
   /usr/bin/natpmpc ix,
+  /usr/sbin/nft ix,
   /etc/wireguard/** rw,
   /etc/pompey-lan-networks r,
 
