@@ -2,7 +2,7 @@
 
 **Pompey** is a Home Assistant OS app: one sidebar entry, one search. The household face is [Seerr](https://seerr.dev/). Pompey is the box around it — Proton WireGuard, kill switch, hidden engines, no extra consoles.
 
-Version **0.2.13**. We do not publish a container image. Supervisor builds this app on the machine. After the tunnel is up, the app fetches the official programs it needs.
+Version **0.2.14**. We do not publish a container image. Supervisor builds this app on the machine. After the tunnel is up, the app fetches the official programs it needs.
 
 The plan is [VISION.md](VISION.md). Operator steps (including Plex in another Docker) are [pompey/DOCS.md](pompey/DOCS.md).
 
@@ -20,7 +20,7 @@ Copy `pompey/` into `/addons`, or add `https://github.com/esper256/ha-pompey` as
 
 **Not yet a household app.** A request becoming a file on disk that Plex notices has not been proven. Quality profiles are engine defaults (no Recyclarr). If search is a blank page after the wait screen, that is the bug to send back.
 
-## What is done (0.2.13)
+## What is done (0.2.14)
 
 | Piece | What “done” means |
 | --- | --- |
@@ -30,7 +30,7 @@ Copy `pompey/` into `/addons`, or add `https://github.com/esper256/ha-pompey` as
 | Proton + kill switch | WireGuard from that pasted Proton file; `PersistentKeepalive`; internet **OUTPUT** only on `wg0` (nft/iptables-nft, then legacy). Ingress from Supervisor is INPUT and stays up if the tunnel fails. RFC1918 LAN (Plex, NAS) allowed |
 | Runtime fetch | After the tunnel is up: Seerr, TV/movie/indexer engines, download engine. Retries on failure. Supervisor docker start/stop timeout is 300s (schema max); the wait screen covers the longer fetch |
 | Ingress + Seerr | Wait page, then nginx → a rewriter that prefixes `/_next` and `/api/v1` with `X-Ingress-Path` so Next.js works under Ingress. `/login` and `/setup` are rewritten only as quoted strings so Seerr’s `/login/i` regex stays valid (the Plex button on setup). Cookies are scoped to that prefix. |
-| Local wiring | Engines on localhost; Prowlarr syncs the source to TV/movie engines; Seerr pointed at them and auto-approves. If Plex is missing, a local Seerr account is created and Seerr is left uninitialized so its Plex wizard can run. A required miss (indexer, Seerr→Radarr/Sonarr) keeps the wait screen up |
+| Local wiring | Engines on localhost; Prowlarr syncs the source to TV/movie engines; Seerr pointed at them via its own `settings.json` API key (local password login is not how Seerr creates the first admin). If Plex is missing, Seerr stays uninitialized so its wizard can run. A required miss (indexer, Seerr→Radarr/Sonarr) keeps the wait screen up |
 | Kid vs general folders | Kid Friendly vs general roots. Poller moves titles by certification (including nested Radarr fields). Unknown → general |
 | NAT-PMP | Proton mapped port is pushed into the download engine (always tried; enable NAT-PMP on the Proton certificate) |
 | Agent tests | `bash tests/run.sh` (CI). No torrent client. Fake `wg0` smoke. Ingress rewriter unit tests. TMDB lookup via `tests/integration.sh` |

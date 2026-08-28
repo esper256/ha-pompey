@@ -71,6 +71,7 @@ class FakeState:
         self.commands: list[dict] = []
         self.plex_auth: object = None
         self.local_auth: object = None
+        self.allow_seerr_local = False
         self.seerr_object_lists = False
         self.seerr_radarr: list[dict] = []
         self.seerr_sonarr: list[dict] = []
@@ -224,8 +225,14 @@ def handler_for(state: FakeState):
                     state.plex_auth = body
                     return self._send(body={"id": 1}, cookie="connect.sid=testcookie; Path=/")
                 if path == "/api/v1/auth/local":
+                    if not state.allow_seerr_local:
+                        return self._send(403, {"message": "Access denied."})
                     state.local_auth = body
                     return self._send(body={"id": 1, "email": (body or {}).get("email")}, cookie="connect.sid=local; Path=/")
+                key = self.headers.get("X-Api-Key") or ""
+                cookie = (self.headers.get("Cookie") or "").strip()
+                if not cookie and key not in {"seerr-disk-key", "seerr-api-key"}:
+                    return self._send(403, {"message": "Access denied."})
                 if path == "/api/v1/settings/main" and method == "GET":
                     return self._send(body={"apiKey": "seerr-api-key"})
                 if path == "/api/v1/settings/main" and method == "POST":
@@ -435,6 +442,11 @@ class WireStack(unittest.TestCase):
         }
         secrets_path = self.tmp / "secrets.json"
         secrets_path.write_text(json.dumps(secrets))
+        seerr_cfg = self.tmp / "seerr"
+        seerr_cfg.mkdir(exist_ok=True)
+        (seerr_cfg / "settings.json").write_text(
+            json.dumps({"main": {"apiKey": "seerr-disk-key", "localLogin": True}})
+        )
         nginx = self.tmp / "ingress.conf"
         ready = self.tmp / "ready"
         if ready.exists():
@@ -455,6 +467,7 @@ class WireStack(unittest.TestCase):
                 "RADARR_URL": urls["radarr"],
                 "PROWLARR_URL": urls["prowlarr"],
                 "SEERR_URL": urls["seerr"],
+                "SEERR_CONFIG": str(seerr_cfg),
                 "NGINX_INGRESS_CONF": str(nginx),
                 "INGRESS_PORT": "8099",
             }
@@ -514,7 +527,7 @@ class WireStack(unittest.TestCase):
         self.assertEqual(rc, 0)
         self.assertTrue((self.ready / "wired").exists())
         self.assertIsNone(self.state.plex_auth)
-        self.assertEqual(self.state.local_auth["email"], "pompey@local")
+        self.assertIsNone(self.state.local_auth)
         self.assertEqual(self.state.seerr_radarr[0]["hostname"], "127.0.0.1")
         self.assertEqual(self.state.seerr_sonarr[0]["hostname"], "127.0.0.1")
         self.assertFalse(self.state.initialized)
@@ -544,6 +557,27 @@ class WireStack(unittest.TestCase):
         self.assertTrue((self.ready / "wired").exists())
         self.assertEqual(self.state.indexers, [])
         self.assertEqual(self.state.commands, [])
+
+    def test_wires_when_seerr_local_login_is_403(self):
+        """Real Seerr /auth/local is login-only; 403 until the wizard creates a user."""
+        os.environ["PLEX_URL"] = ""
+        os.environ["PLEX_TOKEN"] = ""
+        rc = ws.main()
+        self.assertEqual(rc, 0)
+        self.assertTrue((self.ready / "wired").exists())
+        self.assertIsNone(self.state.local_auth)
+        self.assertEqual(self.state.seerr_radarr[0]["hostname"], "127.0.0.1")
+        self.assertFalse(self.state.initialized)
+
+    def test_does_not_mark_ready_without_seerr_api_key(self):
+        os.environ["PLEX_URL"] = ""
+        os.environ["PLEX_TOKEN"] = ""
+        cfg = Path(os.environ["SEERR_CONFIG"])
+        (cfg / "settings.json").unlink()
+        with self.assertRaises(RuntimeError) as ctx:
+            ws.main()
+        self.assertIn("API key", str(ctx.exception))
+        self.assertFalse((self.ready / "wired").exists())
 
     def _stub_nginx(self, script: str) -> None:
         bindir = self.tmp / "bin"
