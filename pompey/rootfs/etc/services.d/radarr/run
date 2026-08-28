@@ -8,4 +8,4 @@ until [[ -f "${POMPEY_READY}/engines-ready" ]]; do
   sleep 2
 done
 
-exec "${POMPEY_ENGINES}/Radarr/Radarr" -nobrowser -data=/config/radarr
+exec "${POMPEY_ENGINES}/Radarr/Radarr" -nobrowser -data="${POMPEY_CONFIG}/radarr"

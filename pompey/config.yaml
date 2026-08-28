@@ -1,6 +1,6 @@
 # https://developers.home-assistant.io/docs/apps/configuration
 name: Pompey
-version: "0.2.0"
+version: "0.2.1"
 slug: pompey
 description: >-
   Search for a movie or TV show. Confirm if we need you. It lands in the
@@ -12,14 +12,15 @@ arch:
   - amd64
 init: false
 stage: experimental
-timeout: 600
+timeout: 1800
 startup: application
-boot: manual
+boot: auto
 panel_icon: mdi:magnify
 panel_title: Pompey
 panel_admin: false
 ingress: true
 ingress_port: 8099
+ingress_stream: true
 apparmor: true
 privileged:
   - NET_ADMIN

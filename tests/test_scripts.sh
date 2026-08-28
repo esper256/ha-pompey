@@ -27,7 +27,10 @@ export IPTABLES_LOG="${WORK}/iptables.log"
 mkdir -p "${WORK}/bin"
 cp "${ROOT}/tests/stubs/iptables" "${WORK}/bin/iptables"
 cp "${ROOT}/tests/stubs/iptables" "${WORK}/bin/ip6tables"
+cp "${ROOT}/tests/stubs/iptables" "${WORK}/bin/iptables-legacy"
+cp "${ROOT}/tests/stubs/iptables" "${WORK}/bin/ip6tables-legacy"
 chmod +x "${WORK}/bin/iptables" "${WORK}/bin/ip6tables" \
+  "${WORK}/bin/iptables-legacy" "${WORK}/bin/ip6tables-legacy" \
   "${ROOT}/tests/with-bashio"
 # Addon scripts use #!/command/with-contenv bashio. Invoke them with bash
 # so a supplied options.json is enough; the HA interpreter is not required.
@@ -94,6 +97,17 @@ BASHIO_OPTIONS="${warn}" run "${INIT}/00-banner.sh" >/tmp/pompey-banner-warn.log
 grep -q "Plex token is empty" /tmp/pompey-banner-warn.log
 grep -q "No source URL yet" /tmp/pompey-banner-warn.log
 
+echo "== banner warns when Plex address is a hostname =="
+hostn="${WORK}/plex-host.json"
+python3 - "${ROOT}/tests/options.json" "${hostn}" <<'PY'
+import json, sys
+data = json.load(open(sys.argv[1], encoding="utf-8"))
+data["plex_url"] = "http://plex.local:32400"
+json.dump(data, open(sys.argv[2], "w"))
+PY
+BASHIO_OPTIONS="${hostn}" run "${INIT}/00-banner.sh" >/tmp/pompey-banner-host.log 2>&1
+grep -q "numeric IP" /tmp/pompey-banner-host.log
+
 echo "== write-engine-configs from options =="
 run "${BIN}/write-engine-configs"
 test -f "${POMPEY_CONFIG}/sonarr/config.xml"
@@ -119,6 +133,7 @@ echo "== vpn config from options fields + kill switch stub =="
 run "${INIT}/10-vpn-config.sh"
 grep -q "TESTPRIVATEKEY" "${POMPEY_WG_CONF}"
 grep -q "185.159.157.1:51820" "${POMPEY_WG_CONF}"
+grep -q "PersistentKeepalive = 25" "${POMPEY_WG_CONF}"
 grep -q "nameserver 10.2.0.1" "${POMPEY_RESOLV}"
 grep -q "10.0.0.0/8" "${POMPEY_LAN_FILE}"
 grep -q "185.159.157.1" "${IPTABLES_LOG}"
@@ -136,6 +151,7 @@ cp "${ROOT}/tests/fixtures/wg0.conf" "${POMPEY_CONFIG}/wireguard/wg0.conf"
 : > "${IPTABLES_LOG}"
 run "${INIT}/10-vpn-config.sh"
 grep -q "FILEPRIVATEKEY" "${POMPEY_WG_CONF}"
+grep -q "PersistentKeepalive = 25" "${POMPEY_WG_CONF}"
 grep -q "Using WireGuard config file" <<<"$(BASHIO_OPTIONS="${BASHIO_OPTIONS}" run "${INIT}/10-vpn-config.sh" 2>&1)"
 
 echo "== nginx ingress port from stub =="
@@ -143,6 +159,10 @@ run "${INIT}/20-nginx.sh"
 grep -q "listen 8099" "${NGINX_INGRESS_CONF}"
 grep -qv "%%port%%" "${NGINX_INGRESS_CONF}"
 grep -q "status.json" "${NGINX_INGRESS_CONF}"
+test -f "${ROOT}/pompey/rootfs/etc/services.d/ingress-proxy/run"
+grep -q 'pompey-ingress' "${ROOT}/pompey/rootfs/etc/services.d/ingress-proxy/run"
+grep -q 'POMPEY_CONFIG' "${ROOT}/pompey/rootfs/etc/services.d/radarr/run"
+grep -q 'HOST=127.0.0.1' "${ROOT}/pompey/rootfs/etc/services.d/seerr/run"
 
 echo "== status.json writer =="
 python3 "${BIN}/pompey-status" vpn "Waiting for Proton handshake" 15
