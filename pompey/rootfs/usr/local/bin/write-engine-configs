@@ -1,0 +1,94 @@
+#!/command/with-contenv bashio
+# shellcheck shell=bash
+# Write localhost-only config.xml / qBittorrent.conf before the engines start.
+set -euo pipefail
+# shellcheck source=/dev/null
+source /usr/local/bin/pompey-env
+pompey-secrets
+
+python3 - "${POMPEY_SECRETS}" "${MEDIA_ROOT}" <<'PY'
+import json, os, sys
+
+secrets = json.load(open(sys.argv[1], encoding="utf-8"))
+media = sys.argv[2].rstrip("/")
+
+def write_xml(path, port, api_key, instance):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    if os.path.isfile(path):
+        return
+    body = f"""<Config>
+  <BindAddress>127.0.0.1</BindAddress>
+  <Port>{port}</Port>
+  <SslPort>{port + 1000}</SslPort>
+  <EnableSsl>False</EnableSsl>
+  <ApiKey>{api_key}</ApiKey>
+  <AuthenticationMethod>None</AuthenticationMethod>
+  <AuthenticationRequired>DisabledForLocalAddresses</AuthenticationRequired>
+  <LogLevel>info</LogLevel>
+  <LaunchBrowser>False</LaunchBrowser>
+  <Branch>master</Branch>
+  <UrlBase></UrlBase>
+  <InstanceName>{instance}</InstanceName>
+  <UpdateAutomatically>False</UpdateAutomatically>
+  <UpdateMechanism>Docker</UpdateMechanism>
+</Config>
+"""
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write(body)
+
+write_xml("/config/sonarr/config.xml", 8989, secrets["sonarr_api_key"], "Sonarr")
+write_xml("/config/radarr/config.xml", 7878, secrets["radarr_api_key"], "Radarr")
+write_xml("/config/prowlarr/config.xml", 9696, secrets["prowlarr_api_key"], "Prowlarr")
+
+qconf = "/config/qBittorrent/qBittorrent.conf"
+os.makedirs("/config/qBittorrent", exist_ok=True)
+if not os.path.isfile(qconf):
+    pbk = secrets["qbit_pbkdf2"]
+    user = secrets["qbit_user"]
+    incomplete = f"{media}/downloads/incomplete"
+    complete = f"{media}/downloads/complete"
+    text = f"""[Application]
+FileLogger\\Enabled=true
+
+[AutoRun]
+enabled=false
+
+[BitTorrent]
+Session\\DefaultSavePath={complete}
+Session\\TempPath={incomplete}
+Session\\TempPathEnabled=true
+Session\\Interface=wg0
+Session\\InterfaceName=wg0
+Session\\InterfaceAddress=
+Session\\Port=6881
+Session\\UPnP=false
+Session\\DisableAutoTMMByDefault=false
+
+[LegalNotice]
+Accepted=true
+
+[Network]
+PortForwardingEnabled=false
+
+[Preferences]
+Connection\\PortRangeMin=6881
+Connection\\UPnP=false
+Connection\\Interface=wg0
+Connection\\InterfaceName=wg0
+Downloads\\SavePath={complete}
+Downloads\\TempPathEnabled=true
+Downloads\\TempPath={incomplete}
+General\\Locale=en
+WebUI\\Address=127.0.0.1
+WebUI\\Port=8080
+WebUI\\LocalHostAuth=false
+WebUI\\Username={user}
+WebUI\\Password_PBKDF2="{pbk}"
+WebUI\\CSRFProtection=false
+WebUI\\HostHeaderValidation=false
+WebUI\\ClickjackingProtection=false
+"""
+    with open(qconf, "w", encoding="utf-8") as fh:
+        fh.write(text)
+    os.chmod(qconf, 0o600)
+PY

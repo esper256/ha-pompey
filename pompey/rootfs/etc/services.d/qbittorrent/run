@@ -1,0 +1,14 @@
+#!/command/with-contenv bashio
+# shellcheck shell=bash
+set -euo pipefail
+# shellcheck source=/dev/null
+source /usr/local/bin/pompey-env
+
+until [[ -f "${POMPEY_READY}/engines-ready" ]]; do
+  sleep 2
+done
+
+exec "${POMPEY_ENGINES}/qbittorrent-nox" \
+  --profile=/config \
+  --webui-port=8080 \
+  --confirm-legal-notice

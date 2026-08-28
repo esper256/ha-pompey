@@ -1,6 +1,6 @@
 # https://developers.home-assistant.io/docs/apps/configuration
 name: Pompey
-version: "0.1.1"
+version: "0.2.0"
 slug: pompey
 description: >-
   Search for a movie or TV show. Confirm if we need you. It lands in the
@@ -12,7 +12,7 @@ arch:
   - amd64
 init: false
 stage: experimental
-timeout: 120
+timeout: 600
 startup: application
 boot: manual
 panel_icon: mdi:magnify
@@ -37,6 +37,11 @@ options:
   wireguard_dns: 10.2.0.1
   port_forwarding: true
   lan_networks: 10.0.0.0/8,172.16.0.0/12,192.168.0.0/16
+  plex_url: http://172.30.32.1:32400
+  plex_token: ""
+  indexer_url: ""
+  indexer_api_key: ""
+  media_root: /media
   log_level: info
 schema:
   wireguard_config: str
@@ -47,4 +52,9 @@ schema:
   wireguard_dns: str
   port_forwarding: bool
   lan_networks: str
+  plex_url: str
+  plex_token: password
+  indexer_url: str
+  indexer_api_key: password
+  media_root: str
   log_level: list(debug|info|warning|error)

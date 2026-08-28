@@ -1,14 +1,21 @@
 # Pompey
 
-Search for a movie or TV show from the Home Assistant sidebar. It lands in the right library and Plex is told to scan.
+Search for a movie or TV show from the Home Assistant sidebar. Confirm if we need you. It lands in the right library and Plex notices.
 
-`0.1.1` is the starting point: Proton WireGuard, an iptables kill switch, a NAT-PMP helper, and a placeholder screen. The real face will be Seerr, fetched at runtime. That is not wired yet.
+All internet from this app uses Proton WireGuard. If the tunnel is down, internet is dropped.
 
-This app is **not** published as a container image. Copy `pompey/` into `/addons` and let Supervisor build it on the machine. Artwork and (later) hidden engines are downloaded while the app runs, after the VPN is up.
+This app is **not** published as a container image. Copy `pompey/` into `/addons` and let Supervisor build it on the machine. After the tunnel is up, Pompey downloads the household search UI (Seerr) and the hidden engines onto the config share. First start can take several minutes and a few hundred megabytes.
+
+## Before you start
+
+1. In Proton, create a **WireGuard** certificate. Enable **NAT-PMP (Port Forwarding)** if you want incoming connections for downloads.
+2. A Plex server on the LAN, with a token from that Plex account.
+3. At least one **source**: a URL plus API key. Pompey does not ship a catalog of sources.
+4. Disk that can hold libraries and in-progress downloads on the same filesystem (`/media` is the usual choice). This stack wants a few GB of RAM on top of Home Assistant. A 2 GB Pi is not a target.
 
 ## VPN (required)
 
-In Proton, create a **WireGuard** certificate. Enable **NAT-PMP (Port Forwarding)** if you want incoming connections for downloads. Then either:
+Either:
 
 1. Copy the downloaded `.conf` to the app config share as `/addon_configs/<hash>_pompey/wireguard/wg0.conf`, or
 2. Paste **Private key**, **Address**, **Peer public key**, and **Endpoint** from that file into the app options.
@@ -19,20 +26,32 @@ There is no country dropdown. The Proton file already chose a server. Generate a
 | --- | --- |
 | WireGuard config | Filename under `/config/wireguard/` (default `wg0.conf`) |
 | WireGuard DNS | Proton tunnel DNS, default `10.2.0.1`. Also the NAT-PMP gateway. |
-| Port forwarding | Renew a Proton NAT-PMP mapping. |
+| Port forwarding | Renew a Proton NAT-PMP mapping and apply it to the download engine. |
 | LAN networks | Home CIDRs that may be reached without the VPN (Plex, NAS). Supervisor’s `172.30.32.0/23` is always included. |
+| Plex address | Where Plex lives, usually on the LAN. |
+| Plex token | Lets Pompey sign the household UI into Plex and skip most of the first-run wizard. |
+| Source URL | One indexer/source base URL. |
+| Source key | API key for that source. |
+| Media folder | Root for libraries and downloads (default `/media`). |
+| Log level | Verbosity for the app and VPN scripts. |
 
-All internet from this container uses `wg0`. If the tunnel is down, internet is dropped. Do not publish download peer ports on the Home Assistant host.
+Do not publish download peer ports on the Home Assistant host.
+
+## What you see
+
+Open **Pompey** in the sidebar. The first boot shows a short wait screen while the tunnel comes up and the official programs are fetched. After that, the sidebar is the search UI: type a title, pick the right one, request it. Household requests auto-approve. Kid-friendly vs general is decided from the title’s certification on the way to disk (unknown goes to general).
+
+If Plex is not filled in yet, you will land on that UI’s setup wizard instead.
 
 ## Storage
-
-Libraries and in-progress downloads should share a filesystem (`/media` is the usual choice) so completed titles can land in place:
 
 ```text
 /media/Kid Friendly Movies
 /media/Movies
 /media/Kid Friendly TV
 /media/TV
+/media/downloads/incomplete
+/media/downloads/complete
 ```
 
-App config lives in `/addon_configs/<hash>_pompey/`.
+App config (including fetched engines) lives in `/addon_configs/<hash>_pompey/` and `/data`. Restarting does not re-download engines that are already present.

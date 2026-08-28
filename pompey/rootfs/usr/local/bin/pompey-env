@@ -1,0 +1,29 @@
+#!/command/with-contenv bashio
+# shellcheck shell=bash
+# Shared paths. Sourced by other scripts.
+# shellcheck disable=SC2034
+set -euo pipefail
+
+POMPEY_DATA="${POMPEY_DATA:-/data/pompey}"
+POMPEY_ENGINES="${POMPEY_ENGINES:-/data/engines}"
+POMPEY_SECRETS="${POMPEY_SECRETS:-${POMPEY_DATA}/secrets.json}"
+POMPEY_READY="${POMPEY_READY:-/tmp/pompey}"
+
+MEDIA_ROOT="$(bashio::config 'media_root')"
+MEDIA_ROOT="${MEDIA_ROOT:-/media}"
+
+mkdir -p \
+  "${POMPEY_DATA}" \
+  "${POMPEY_ENGINES}" \
+  "${POMPEY_READY}" \
+  "${MEDIA_ROOT}/Movies" \
+  "${MEDIA_ROOT}/TV" \
+  "${MEDIA_ROOT}/Kid Friendly Movies" \
+  "${MEDIA_ROOT}/Kid Friendly TV" \
+  "${MEDIA_ROOT}/downloads/incomplete" \
+  "${MEDIA_ROOT}/downloads/complete" \
+  /config/sonarr \
+  /config/radarr \
+  /config/prowlarr \
+  /config/qBittorrent \
+  /config/seerr

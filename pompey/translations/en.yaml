@@ -23,6 +23,21 @@ configuration:
   lan_networks:
     name: LAN networks
     description: Home CIDRs that may talk to this app without the VPN (Plex, NAS). Supervisor's 172.30.32.0/23 is always included.
+  plex_url:
+    name: Plex address
+    description: Where Plex lives (for example http://172.30.32.1:32400). Reached on the LAN, not through the VPN.
+  plex_token:
+    name: Plex token
+    description: Token from the Plex account that owns the server. Used to sign the household UI into Plex.
+  indexer_url:
+    name: Source URL
+    description: Base URL of one source. Pompey does not ship a catalog; you provide this.
+  indexer_api_key:
+    name: Source key
+    description: API key for that source.
+  media_root:
+    name: Media folder
+    description: Root for libraries and downloads. Default /media. Libraries and in-progress downloads should share a filesystem.
   log_level:
     name: Log level
     description: Verbosity for the app and VPN scripts.

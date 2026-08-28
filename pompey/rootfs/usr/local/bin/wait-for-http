@@ -1,0 +1,15 @@
+#!/command/with-contenv bashio
+# shellcheck shell=bash
+set -euo pipefail
+
+URL="${1:?url}"
+TRIES="${2:-60}"
+i=0
+until curl -fsS -o /dev/null "${URL}"; do
+  i=$((i + 1))
+  if [[ "${i}" -ge "${TRIES}" ]]; then
+    bashio::log.error "Timed out waiting for ${URL}"
+    exit 1
+  fi
+  sleep 2
+done

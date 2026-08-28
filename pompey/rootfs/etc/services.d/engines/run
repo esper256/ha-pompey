@@ -1,0 +1,13 @@
+#!/command/with-contenv bashio
+# shellcheck shell=bash
+set -euo pipefail
+# shellcheck source=/dev/null
+source /usr/local/bin/pompey-env
+
+wait-for-vpn 45
+fetch-engines
+write-engine-configs
+# Only after configs exist so the other services do not start empty.
+touch "${POMPEY_READY}/engines-ready"
+bashio::log.info "Engine fetch complete"
+exec sleep infinity

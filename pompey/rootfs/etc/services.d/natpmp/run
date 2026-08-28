@@ -16,6 +16,7 @@ while true; do
     port="$(printf '%s\n' "${out}" | awk '/Mapped public port/ { print $4; exit }')"
     if [[ -n "${port}" ]]; then
       printf '%s\n' "${port}" >/tmp/vpn/forwarded_port
+      apply-qbit-port /tmp/vpn/forwarded_port || true
     fi
   else
     bashio::log.warning "natpmpc UDP mapping failed (need a Proton config with NAT-PMP enabled)"

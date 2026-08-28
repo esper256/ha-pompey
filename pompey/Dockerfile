@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
-# Pompey — thin local image: search UI + Proton WireGuard.
-# Do not publish this image. Engines and artwork are fetched at runtime.
+# Pompey — thin local image: supervisor, nginx, WireGuard.
+# Engines and Seerr are fetched at runtime after the tunnel is up.
 
 FROM ghcr.io/home-assistant/base:latest
 
@@ -10,19 +10,40 @@ ARG BUILD_DESCRIPTION="Search for a movie or show; Proton WireGuard for all inte
 ARG BUILD_NAME="Pompey"
 ARG BUILD_REF
 ARG BUILD_REPOSITORY="esper256/ha-pompey"
-ARG BUILD_VERSION="0.1.1"
+ARG BUILD_VERSION="0.2.0"
 
 RUN apk add --no-cache \
     bind-tools \
+    ca-certificates \
     curl \
+    icu-data-full \
+    icu-libs \
     iptables \
     iptables-legacy \
     iproute2 \
     jq \
+    krb5-libs \
+    libintl \
     libnatpmp \
+    libstdc++ \
     nginx \
+    python3 \
+    sqlite \
+    tar \
+    tzdata \
+    unzip \
     wireguard-go \
-    wireguard-tools
+    wireguard-tools \
+    zlib
+
+# crane unpacks Seerr's published image at runtime. Not an engine.
+RUN case "${BUILD_ARCH}" in \
+      aarch64) crane_arch="Linux_arm64" ;; \
+      *) crane_arch="Linux_x86_64" ;; \
+    esac \
+ && curl -fsSL "https://github.com/google/go-containerregistry/releases/download/v0.22.0/go-containerregistry_${crane_arch}.tar.gz" \
+    | tar -xz -C /usr/local/bin crane \
+ && chmod +x /usr/local/bin/crane
 
 COPY rootfs/ /
 
@@ -33,8 +54,7 @@ RUN rm -f /etc/nginx/http.d/default.conf \
       /etc/cont-init.d/*.sh \
       /etc/services.d/*/run \
       /etc/services.d/*/finish \
-      /usr/local/bin/wait-for-vpn \
-      /usr/local/bin/vpn-killswitch
+      /usr/local/bin/*
 
 LABEL \
     io.hass.name="${BUILD_NAME}" \
