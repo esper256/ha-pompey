@@ -6,6 +6,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 import time
 import urllib.error
 import urllib.parse
@@ -29,6 +30,24 @@ def wait_sleep() -> float:
 
 def env(name: str, default: str = "") -> str:
     return os.environ.get(name, default).strip()
+
+
+def as_list(value):
+    """HTTP JSON is usually an array of objects; stubs and error bodies often are not."""
+    if isinstance(value, list):
+        return [item for item in value if isinstance(item, dict)]
+    if isinstance(value, dict):
+        for key in ("results", "records", "data", "items"):
+            inner = value.get(key)
+            if isinstance(inner, list):
+                return as_list(inner)
+        if any(
+            key in value
+            for key in ("id", "hostname", "path", "implementation", "name", "address", "owned")
+        ):
+            return [value]
+        return []
+    return []
 
 
 def media_root() -> str:
@@ -70,6 +89,10 @@ def prowlarr_url() -> str:
 def seerr_url() -> str:
     return env("SEERR_URL", "http://127.0.0.1:5055").rstrip("/")
 
+
+def ingress_proxy_url() -> str:
+    return env("POMPEY_INGRESS_PROXY", "http://127.0.0.1:8098").rstrip("/")
+
 # Seerr: REQUEST + AUTO_APPROVE + AUTO_APPROVE_MOVIE + AUTO_APPROVE_TV
 SEERR_HOUSEHOLD_PERMS = 32 + 128 + 256 + 512
 
@@ -81,8 +104,12 @@ def log(msg: str) -> None:
 def mark_status(step: str, label: str, percent: int, error: str = "") -> None:
     script = shutil.which("pompey-status")
     if not script:
+        sibling = os.path.join(os.path.dirname(os.path.abspath(__file__)), "pompey-status")
+        if os.path.isfile(sibling):
+            script = sibling
+    if not script:
         return
-    cmd = [script, step, label, str(percent)]
+    cmd = [sys.executable, script, step, label, str(percent)]
     if error:
         cmd.append(error)
     subprocess.run(cmd, check=False)
@@ -144,7 +171,7 @@ def arr_headers(api_key: str) -> dict:
 
 
 def ensure_root_folder(base: str, api_key: str, path: str) -> None:
-    existing = http("GET", f"{base}/rootfolder", headers=arr_headers(api_key)) or []
+    existing = as_list(http("GET", f"{base}/rootfolder", headers=arr_headers(api_key)))
     if any(item.get("path", "").rstrip("/") == path.rstrip("/") for item in existing):
         return
     http("POST", f"{base}/rootfolder", {"path": path}, headers=arr_headers(api_key))
@@ -152,7 +179,7 @@ def ensure_root_folder(base: str, api_key: str, path: str) -> None:
 
 
 def schema_impl(schema, name: str):
-    for item in schema or []:
+    for item in as_list(schema):
         if item.get("implementation") == name:
             return json.loads(json.dumps(item))
     raise RuntimeError(f"schema missing {name}")
@@ -167,7 +194,7 @@ def fill_fields(resource: dict, values: dict) -> dict:
 
 
 def ensure_download_client(base: str, api_key: str, secrets: dict, kind: str) -> None:
-    existing = http("GET", f"{base}/downloadclient", headers=arr_headers(api_key)) or []
+    existing = as_list(http("GET", f"{base}/downloadclient", headers=arr_headers(api_key)))
     if any(item.get("implementation") == "QBittorrent" for item in existing):
         return
     schema = http("GET", f"{base}/downloadclient/schema", headers=arr_headers(api_key))
@@ -192,7 +219,7 @@ def ensure_download_client(base: str, api_key: str, secrets: dict, kind: str) ->
 
 
 def first_profile(base: str, api_key: str):
-    profiles = http("GET", f"{base}/qualityprofile", headers=arr_headers(api_key)) or []
+    profiles = as_list(http("GET", f"{base}/qualityprofile", headers=arr_headers(api_key)))
     if not profiles:
         raise RuntimeError(f"no quality profiles at {base}")
     return int(profiles[0]["id"]), profiles[0].get("name") or "Default"
@@ -200,7 +227,7 @@ def first_profile(base: str, api_key: str):
 
 def language_profile_id(base: str, api_key: str):
     try:
-        langs = http("GET", f"{base}/languageprofile", headers=arr_headers(api_key)) or []
+        langs = as_list(http("GET", f"{base}/languageprofile", headers=arr_headers(api_key)))
     except Exception:  # noqa: BLE001
         return None
     if not langs:
@@ -209,7 +236,7 @@ def language_profile_id(base: str, api_key: str):
 
 
 def ensure_prowlarr_app(prowlarr: str, pkey: str, name: str, impl: str, base_url: str, api_key: str) -> None:
-    apps = http("GET", f"{prowlarr}/api/v1/applications", headers=arr_headers(pkey)) or []
+    apps = as_list(http("GET", f"{prowlarr}/api/v1/applications", headers=arr_headers(pkey)))
     if any(a.get("name") == name for a in apps):
         return
     schema = http("GET", f"{prowlarr}/api/v1/applications/schema", headers=arr_headers(pkey))
@@ -232,7 +259,7 @@ def ensure_indexer(prowlarr: str, pkey: str) -> None:
     if not indexer_url():
         log("no source URL configured yet")
         return
-    indexers = http("GET", f"{prowlarr}/api/v1/indexer", headers=arr_headers(pkey)) or []
+    indexers = as_list(http("GET", f"{prowlarr}/api/v1/indexer", headers=arr_headers(pkey)))
     if indexers:
         return
     schema = http("GET", f"{prowlarr}/api/v1/indexer/schema", headers=arr_headers(pkey))
@@ -256,6 +283,16 @@ def ensure_indexer(prowlarr: str, pkey: str) -> None:
     indexer["tags"] = []
     http("POST", f"{prowlarr}/api/v1/indexer", indexer, headers=arr_headers(pkey))
     log("added source")
+    try:
+        http(
+            "POST",
+            f"{prowlarr}/api/v1/command",
+            {"name": "ApplicationIndexersSync"},
+            headers=arr_headers(pkey),
+        )
+        log("prowlarr sync")
+    except RuntimeError as exc:
+        log(f"prowlarr sync: {exc}")
 
 
 def qbit_category(name: str) -> None:
@@ -321,7 +358,7 @@ def parse_plex(url: str):
 
 def pick_plex_server(servers, host: str):
     candidates = []
-    for srv in servers or []:
+    for srv in as_list(servers):
         provides = srv.get("provides") or []
         if isinstance(provides, str):
             provides = [provides]
@@ -332,7 +369,7 @@ def pick_plex_server(servers, host: str):
     pool = owned or candidates
     host_l = (host or "").lower()
     for srv in pool:
-        for conn in srv.get("connection") or srv.get("connections") or []:
+        for conn in as_list(srv.get("connection") or srv.get("connections")):
             addr = (conn.get("address") or "").lower()
             if addr == host_l:
                 return srv
@@ -350,16 +387,36 @@ def configure_seerr(secrets: dict, radarr_profile, sonarr_profile, sonarr_lang) 
     else:
         raise RuntimeError("Seerr never became ready")
 
-    if not plex_url() or not plex_token():
-        log("Plex URL/token missing; Seerr setup wizard will be used")
-        return
+    have_plex = bool(plex_url() and plex_token())
+    signed_in = False
+    if not have_plex:
+        log("Plex URL/token missing; Seerr setup wizard will be used for Plex")
 
-    try:
-        s.call("POST", "/api/v1/auth/plex", {"authToken": plex_token()})
-        log("seerr signed in with Plex token")
-    except RuntimeError as exc:
-        log(f"seerr plex login: {exc}")
-        return
+    if have_plex:
+        try:
+            s.call("POST", "/api/v1/auth/plex", {"authToken": plex_token()})
+            log("seerr signed in with Plex token")
+            signed_in = True
+        except RuntimeError as exc:
+            log(f"seerr plex login: {exc}")
+            have_plex = False
+
+    if not signed_in:
+        email = secrets.get("seerr_email") or "pompey@local"
+        password = secrets.get("seerr_password") or ""
+        if password:
+            try:
+                s.call(
+                    "POST",
+                    "/api/v1/auth/local",
+                    {"email": email, "password": password, "name": "Pompey"},
+                )
+                log("seerr signed in with local account")
+                signed_in = True
+            except RuntimeError as exc:
+                log(f"seerr local login: {exc}")
+    if not signed_in:
+        log("seerr has no session yet; TV/movie wiring may wait for the setup wizard")
 
     try:
         main = s.call("GET", "/api/v1/settings/main") or {}
@@ -368,41 +425,42 @@ def configure_seerr(secrets: dict, radarr_profile, sonarr_profile, sonarr_lang) 
     except RuntimeError as exc:
         log(f"seerr api key: {exc}")
 
-    host, port, ssl = parse_plex(plex_url())
-    try:
-        servers = s.call("GET", "/api/v1/settings/plex/devices/servers") or []
-        chosen = pick_plex_server(servers, host)
-        payload = {
-            "ip": host,
-            "port": port,
-            "useSsl": ssl,
-            "webAppUrl": plex_url().rstrip("/"),
-        }
-        if chosen:
-            payload["name"] = chosen.get("name") or "Plex"
-            payload["machineId"] = chosen.get("clientIdentifier") or ""
-        else:
-            payload["name"] = "Plex"
-            payload["machineId"] = "unknown"
-        s.call("POST", "/api/v1/settings/plex", payload)
-        log("plex settings")
-    except RuntimeError as exc:
-        log(f"plex settings: {exc}")
+    if have_plex:
+        host, port, ssl = parse_plex(plex_url())
+        try:
+            servers = as_list(s.call("GET", "/api/v1/settings/plex/devices/servers"))
+            chosen = pick_plex_server(servers, host)
+            payload = {
+                "ip": host,
+                "port": port,
+                "useSsl": ssl,
+                "webAppUrl": plex_url().rstrip("/"),
+            }
+            if chosen:
+                payload["name"] = chosen.get("name") or "Plex"
+                payload["machineId"] = chosen.get("clientIdentifier") or ""
+            else:
+                payload["name"] = "Plex"
+                payload["machineId"] = "unknown"
+            s.call("POST", "/api/v1/settings/plex", payload)
+            log("plex settings")
+        except RuntimeError as exc:
+            log(f"plex settings: {exc}")
 
-    try:
-        s.call("POST", "/api/v1/settings/plex/library/sync")
-        libs = s.call("GET", "/api/v1/settings/plex/library") or []
-        for lib in libs:
-            lib_id = lib.get("id")
-            if not lib_id:
-                continue
-            try:
-                s.call("PUT", f"/api/v1/settings/plex/library/{lib_id}", {"enabled": True})
-            except RuntimeError:
-                pass
-        log("plex libraries enabled")
-    except RuntimeError as exc:
-        log(f"plex libraries: {exc}")
+        try:
+            s.call("POST", "/api/v1/settings/plex/library/sync")
+            libs = as_list(s.call("GET", "/api/v1/settings/plex/library"))
+            for lib in libs:
+                lib_id = lib.get("id")
+                if not lib_id:
+                    continue
+                try:
+                    s.call("PUT", f"/api/v1/settings/plex/library/{lib_id}", {"enabled": True})
+                except RuntimeError:
+                    pass
+            log("plex libraries enabled")
+        except RuntimeError as exc:
+            log(f"plex libraries: {exc}")
 
     radarr_id, radarr_name = radarr_profile
     sonarr_id, sonarr_name = sonarr_profile
@@ -421,6 +479,9 @@ def configure_seerr(secrets: dict, radarr_profile, sonarr_profile, sonarr_lang) 
         "syncEnabled": True,
         "preventSearch": False,
         "tagRequests": True,
+        "urlBase": "",
+        "externalUrl": "",
+        "tags": [],
     }
     sonarr_payload = {
         "name": "Sonarr",
@@ -437,6 +498,9 @@ def configure_seerr(secrets: dict, radarr_profile, sonarr_profile, sonarr_lang) 
         "syncEnabled": True,
         "preventSearch": False,
         "tagRequests": True,
+        "urlBase": "",
+        "externalUrl": "",
+        "tags": [],
     }
     if sonarr_lang is not None:
         sonarr_payload["activeLanguageProfileId"] = sonarr_lang
@@ -444,7 +508,7 @@ def configure_seerr(secrets: dict, radarr_profile, sonarr_profile, sonarr_lang) 
     def upsert_arr(kind: str, payload: dict) -> None:
         path = f"/api/v1/settings/{kind}"
         try:
-            existing = s.call("GET", path) or []
+            existing = as_list(s.call("GET", path))
         except RuntimeError:
             existing = []
         if any(item.get("hostname") == "127.0.0.1" for item in existing):
@@ -507,16 +571,18 @@ def reload_nginx() -> None:
     }}
 
     location / {{
-        proxy_pass {seerr_url()};
+        proxy_pass {ingress_proxy_url()};
         proxy_http_version 1.1;
         proxy_set_header Host $http_host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
         proxy_set_header X-Forwarded-Host $http_host;
+        proxy_set_header X-Ingress-Path $http_x_ingress_path;
+        proxy_set_header X-Forwarded-Prefix $http_x_ingress_path;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection $connection_upgrade;
-        proxy_set_header X-Forwarded-Prefix $http_x_ingress_path;
+        proxy_set_header Accept-Encoding "";
         proxy_read_timeout 86400;
         proxy_buffering off;
         proxy_redirect off;
@@ -529,32 +595,6 @@ def reload_nginx() -> None:
         fh.write(conf)
     os.system("nginx -s reload >/dev/null 2>&1 || true")
     log("ingress now proxies Seerr")
-
-
-def mark_search_live() -> None:
-    """Flip Ingress to Seerr first, then tell the wait page it is safe to reload."""
-    mark_status("ready", "Ready", 100)
-    path = os.path.join(ready_dir(), "status.json")
-    data = {}
-    if os.path.isfile(path) and os.path.getsize(path) > 0:
-        try:
-            with open(path, encoding="utf-8") as fh:
-                data = json.load(fh)
-        except json.JSONDecodeError:
-            data = {}
-    data["updated"] = int(time.time())
-    data["step"] = "ready"
-    data["label"] = "Ready"
-    data["percent"] = 100
-    data["error"] = ""
-    data["handoff"] = True
-    data["search"] = True
-    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-    tmp = path + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as fh:
-        json.dump(data, fh, indent=2)
-        fh.write("\n")
-    os.replace(tmp, path)
 
 
 def main() -> int:
@@ -596,7 +636,8 @@ def main() -> int:
 
     configure_seerr(secrets, rp, sp, sl)
     reload_nginx()
-    mark_search_live()
+    # Wait page reloads when status.search is true; nginx must already proxy Seerr.
+    mark_status("ready", "Ready", 100)
     open(os.path.join(ready_dir(), "wired"), "w").close()
     log("done")
     return 0

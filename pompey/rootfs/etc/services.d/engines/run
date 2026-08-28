@@ -7,10 +7,16 @@ source "$(command -v pompey-env)"
 pompey-status vpn "Waiting for Proton handshake" 15 || true
 wait-for-vpn 45
 pompey-status fetch "Downloading hidden engines" 30 || true
-if ! fetch-engines; then
-  pompey-status fetch "Download failed" 30 "Could not download the household UI or hidden engines. The tunnel may be down." || true
-  exit 1
-fi
+n=0
+until fetch-engines; do
+  n=$((n + 1))
+  if [[ "${n}" -ge 5 ]]; then
+    pompey-status fetch "Download failed" 30 "Could not download the household UI or hidden engines. The tunnel may be down." || true
+    exit 1
+  fi
+  bashio::log.warning "Engine download failed; retry ${n}/5"
+  sleep 15
+done
 write-engine-configs
 # Only after configs exist so the other services do not start empty.
 touch "${POMPEY_READY}/engines-ready"

@@ -69,4 +69,4 @@ Hardware: this stack wants a few GB of RAM on top of Home Assistant. A 2 GB Pi i
 
 ## This repo
 
-`pompey/` is the Home Assistant app for the whole stack. `0.2.0` is the first stab: Proton handshake, kill switch, then a runtime fetch of Seerr (Ingress) and the hidden engines on localhost. Recyclarr/TRaSH quality profiles are not in this cut — engines use their defaults. See the [root README](README.md) for what is done vs not, and whether to install on Home Assistant yet (**not** for household use).
+`pompey/` is the Home Assistant app for the whole stack. `0.2.1` is the first cut meant for a real Home Assistant OS try (Proton file, Plex at a numeric IP, one source). Recyclarr/TRaSH quality profiles are not in this cut — engines use their defaults. See the [root README](README.md).

@@ -9,6 +9,6 @@ until [[ -f "${POMPEY_READY}/engines-ready" ]]; do
 done
 
 exec "${POMPEY_ENGINES}/qbittorrent-nox" \
-  --profile=/config \
+  --profile="${POMPEY_CONFIG}" \
   --webui-port=8080 \
   --confirm-legal-notice

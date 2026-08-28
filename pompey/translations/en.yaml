@@ -25,7 +25,7 @@ configuration:
     description: Home CIDRs that may talk to this app without the VPN (Plex, NAS). Supervisor's 172.30.32.0/23 is always included.
   plex_url:
     name: Plex address
-    description: Where Plex lives (for example http://172.30.32.1:32400). Reached on the LAN, not through the VPN.
+    description: Numeric IP where Plex listens, for example http://192.168.1.10:32400 or http://172.30.32.1:32400. Hostnames will not resolve through Proton DNS.
   plex_token:
     name: Plex token
     description: Token from the Plex account that owns the server. Used to sign the household UI into Plex.

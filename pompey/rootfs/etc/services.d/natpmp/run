@@ -1,6 +1,8 @@
 #!/command/with-contenv bashio
 # shellcheck shell=bash
 set -euo pipefail
+# shellcheck source=/dev/null
+source "$(command -v pompey-env)"
 
 if ! bashio::config.true 'port_forwarding'; then
   bashio::log.info "Port forwarding disabled"
@@ -10,13 +12,14 @@ fi
 wait-for-vpn 45
 GW="$(bashio::config 'wireguard_dns')"
 bashio::log.info "NAT-PMP renew loop against ${GW}"
+mkdir -p "${POMPEY_VPN_TMP}"
 
 while true; do
   if out="$(natpmpc -a 1 0 udp 60 -g "${GW}" 2>/dev/null)"; then
     port="$(printf '%s\n' "${out}" | awk '/Mapped public port/ { print $4; exit }')"
     if [[ -n "${port}" ]]; then
-      printf '%s\n' "${port}" >/tmp/vpn/forwarded_port
-      apply-qbit-port /tmp/vpn/forwarded_port || true
+      printf '%s\n' "${port}" >"${POMPEY_VPN_TMP}/forwarded_port"
+      apply-qbit-port "${POMPEY_VPN_TMP}/forwarded_port" || true
     fi
   else
     bashio::log.warning "natpmpc UDP mapping failed (need a Proton config with NAT-PMP enabled)"

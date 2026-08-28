@@ -36,6 +36,8 @@ touch "${POMPEY_CONFIG}/seerr/DOCKER"
 ln -sfn "${POMPEY_CONFIG}/seerr" "${APP}/config"
 export NODE_ENV=production
 export PORT=5055
+export HOST=127.0.0.1
+export BIND_IP=127.0.0.1
 export CONFIG_DIRECTORY="${POMPEY_CONFIG}/seerr"
 cd "${APP}"
 exec "${NODE}" dist/index.js
