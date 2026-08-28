@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.17
+
+- **Deleted the Ingress rewriter.** `pompey-ingress`, the idle `ingress-proxy` s6 service, and `tests/preview_seerr_ingress.py` were leftover from the 0.2.13–0.2.15 path-rewrite patches. 0.2.16 already published Seerr on host port **5055**. Ingress 8099 is only Pompey's wait/status UI. Tests now fail if those files come back.
+- Seerr's homescreen warning **The /config/seerr volume mount was not configured properly** was a false alarm. Seerr treats a `DOCKER` file in its config dir as "this directory is the image default, not a volume" (the official image leaves that sentinel so a bind-mount hides it). We were creating that file. `/config` is Home Assistant `addon_config` and already persists across restarts. Stop planting the sentinel, and remove a leftover from 0.2.16 installs. Rebuild so the banner says **0.2.17**.
+
 ## 0.2.16
 
 - **Search is no longer stuffed through Home Assistant Ingress.** Seerr is a Next.js app with no runtime basePath. Prefixing `/_next` and `/login` for the sidebar iframe already broke `/login/i` (0.2.13) and `/^\/_next\/data\//` (0.2.15). The next Seerr update would invent another regex. Ingress now stays Pompey's wait/status UI. Seerr is published on host port **5055** with no path rewrite. When the box is ready, the sidebar shows **Open search**. Rebuild so the banner says **0.2.16**.

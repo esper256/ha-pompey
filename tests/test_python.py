@@ -32,7 +32,6 @@ def load(name: str, path: Path):
 
 ws = load("wire_stack", BIN / "wire-stack")
 rr = load("route_rating", BIN / "route-rating")
-ing = load("pompey_ingress", BIN / "pompey-ingress")
 
 
 def png_wh(path: Path) -> tuple[int, int]:
@@ -387,7 +386,16 @@ class Helpers(unittest.TestCase):
         self.assertNotIn("HOST=127.0.0.1", seerr)
         docker = (ROOT / "pompey/Dockerfile").read_text()
         self.assertNotIn("plex", docker.lower())
-        self.assertTrue((ROOT / "pompey/rootfs/etc/services.d/ingress-proxy/down").is_file())
+        self.assertFalse((ROOT / "pompey/rootfs/usr/local/bin/pompey-ingress").exists())
+        self.assertFalse((ROOT / "pompey/rootfs/etc/services.d/ingress-proxy").exists())
+        self.assertFalse((ROOT / "tests/preview_seerr_ingress.py").exists())
+        self.assertNotIn("keep_ingress_as_pompey", (BIN / "wire-stack").read_text())
+        seerr_run = (ROOT / "pompey/rootfs/etc/services.d/seerr/run").read_text()
+        fetch = (ROOT / "pompey/rootfs/usr/local/bin/fetch-engines").read_text()
+        self.assertNotIn('touch "${POMPEY_CONFIG}/seerr/DOCKER"', seerr_run)
+        self.assertNotIn('touch "${POMPEY_CONFIG}/seerr/DOCKER"', fetch)
+        self.assertIn('rm -f "${POMPEY_CONFIG}/seerr/DOCKER"', seerr_run)
+        self.assertIn('rm -f "${POMPEY_CONFIG}/seerr/DOCKER"', fetch)
 
     def test_paste_apply_does_not_echo_keys(self):
         setup = (ROOT / "pompey/rootfs/usr/local/bin/pompey-setup").read_text()
@@ -399,14 +407,11 @@ class Helpers(unittest.TestCase):
         self.assertIn("if=$pompey_accesslog", nginx)
         self.assertIn("/status.json", nginx)
         setup = (ROOT / "pompey/rootfs/usr/local/bin/pompey-setup").read_text()
-        ingress = (ROOT / "pompey/rootfs/usr/local/bin/pompey-ingress").read_text()
         status = (ROOT / "pompey/rootfs/usr/local/bin/pompey-status").read_text()
         wg = (ROOT / "pompey/rootfs/etc/services.d/wireguard/run").read_text()
         self.assertIn("%H:%M:%S", setup)
-        self.assertIn("%H:%M:%S", ingress)
         self.assertIn("%H:%M:%S", status)
         self.assertIn("log_wg_quick", wg)
-        self.assertIn('code in {"200", "304"}', ingress)
 
     def test_ha_store_icon_is_square_logo_is_wide(self):
         icon = ROOT / "pompey/icon.png"
@@ -531,7 +536,6 @@ class WireStack(unittest.TestCase):
         self.assertFalse(self.nginx.exists(), "Ingress must stay the Pompey UI, not a Seerr proxy")
         live = json.loads((self.ready / "status.json").read_text())
         self.assertTrue(live["search"])
-        self.assertTrue(live["handoff"])
         self.assertEqual(live["search_port"], 5055)
         self.assertIsNone(self.state.local_auth)
 
@@ -662,163 +666,6 @@ class RouteRating(unittest.TestCase):
         self.assertNotIn("Unknown", dests)
         self.assertNotIn("Already Kid", dests)
         self.assertNotIn("Adult Show", dests)
-
-
-class IngressRewrite(unittest.TestCase):
-    def test_rewrites_next_and_login(self):
-        prefix = "/api/hassio_ingress/tok"
-        html = '<script src="/_next/static/x.js"></script><a href="/login">in</a>'
-        out = ing.rewrite_seerr_body(html, prefix)
-        self.assertIn(f"{prefix}/_next/static/x.js", out)
-        self.assertIn(f"{prefix}/login", out)
-        self.assertNotIn('src="/_next/', out)
-        again = ing.rewrite_seerr_body(out, prefix)
-        self.assertEqual(out.count(prefix + "/_next"), again.count(prefix + "/_next"))
-
-    def test_quoted_login_and_setup_are_prefixed_regex_literals_are_not(self):
-        """Seerr minified chunks use /login/i. Prefixing that is an invalid regex."""
-        prefix = "/api/hassio_ingress/tok"
-        chunk = (
-            'function n(e){return/login/i.test(e)||/setup/g.test(e)}'
-            'push("/login");goto("/setup");href="/login/plex/loading"'
-        )
-        out = ing.rewrite_seerr_body(chunk, prefix)
-        self.assertIn("/login/i", out)
-        self.assertIn("/setup/g", out)
-        self.assertNotIn(f"{prefix}/login/i", out)
-        self.assertNotIn(f"{prefix}/setup/g", out)
-        self.assertIn(f'push("{prefix}/login")', out)
-        self.assertIn(f'goto("{prefix}/setup")', out)
-        self.assertIn(f'href="{prefix}/login/plex/loading"', out)
-        escaped = r'path:"\/login",next:"\/setup"'
-        escaped_out = ing.rewrite_seerr_body(escaped, prefix)
-        self.assertIn(r'"\/api\/hassio_ingress\/tok\/login"', escaped_out)
-        self.assertIn(r'"\/api\/hassio_ingress\/tok\/setup"', escaped_out)
-        regex_escaped = r"re=/\/login/i"
-        self.assertEqual(ing.rewrite_seerr_body(regex_escaped, prefix), regex_escaped)
-
-    def test_escaped_next_data_regex_stays_valid(self):
-        """Next.js getNextPathnameInfo ships /^\\/_next\\/data\\//. Naive /_next
-        replace turns that into /^\\/api/hassio_ingress/tok/_next\\/data\\//
-        (invalid flags) and the Plex button is a no-op."""
-        prefix = "/api/hassio_ingress/tok"
-        chunk = (
-            'l.pathname.replace(/^\\/_next\\/data\\//,"").replace(/\\.json$/,"")'
-            ';window.open("/login/plex/loading",e,"scrollbars=yes")'
-        )
-        out = ing.rewrite_seerr_body(chunk, prefix)
-        self.assertIn(r"/^\/api\/hassio_ingress\/tok\/_next\/data\//", out)
-        self.assertNotIn(r"/^\/api/hassio_ingress", out)
-        self.assertNotIn(r"/^\/_next\/data\//", out)
-        self.assertIn(f'window.open("{prefix}/login/plex/loading"', out)
-        again = ing.rewrite_seerr_body(out, prefix)
-        self.assertEqual(out, again)
-        self.assertEqual(out.count(prefix), again.count(prefix))
-
-    def test_empty_prefix_leaves_html(self):
-        html = '<script src="/_next/static/x.js"></script>'
-        self.assertEqual(ing.rewrite_seerr_body(html, ""), html)
-
-    def test_location_header(self):
-        self.assertEqual(ing.rewrite_location("/login", "/ing"), "/ing/login")
-        self.assertEqual(ing.rewrite_location("/ing/login", "/ing"), "/ing/login")
-        self.assertEqual(ing.rewrite_location("https://x/y", "/ing"), "https://x/y")
-
-    def test_set_cookie_path(self):
-        self.assertEqual(
-            ing.rewrite_set_cookie("connect.sid=abc; Path=/; HttpOnly", "/api/hassio_ingress/tok"),
-            "connect.sid=abc; Path=/api/hassio_ingress/tok; HttpOnly",
-        )
-        self.assertEqual(
-            ing.rewrite_set_cookie("connect.sid=abc; Path=/login", "/ing"),
-            "connect.sid=abc; Path=/ing/login",
-        )
-        self.assertEqual(
-            ing.rewrite_set_cookie("connect.sid=abc; Path=/ing", "/ing"),
-            "connect.sid=abc; Path=/ing",
-        )
-        self.assertEqual(ing.rewrite_set_cookie("connect.sid=abc; Path=/", ""), "connect.sid=abc; Path=/")
-
-    def test_proxy_rewrites_html_using_ingress_header(self):
-        class Upstream(BaseHTTPRequestHandler):
-            def log_message(self, *_a, **_k):
-                return
-
-            def do_GET(self):
-                body = b'<script src="/_next/static/app.js"></script>'
-                self.send_response(200)
-                self.send_header("Content-Type", "text/html")
-                self.send_header("Content-Length", str(len(body)))
-                self.end_headers()
-                self.wfile.write(body)
-
-        up = ThreadingHTTPServer(("127.0.0.1", 0), Upstream)
-        threading.Thread(target=up.serve_forever, daemon=True).start()
-        uhost, uport = up.server_address
-        os.environ["SEERR_URL"] = f"http://{uhost}:{uport}"
-        proxy = ThreadingHTTPServer(("127.0.0.1", 0), ing.Handler)
-        threading.Thread(target=proxy.serve_forever, daemon=True).start()
-        phost, pport = proxy.server_address
-        try:
-            import urllib.request
-
-            req = urllib.request.Request(
-                f"http://{phost}:{pport}/",
-                headers={"X-Ingress-Path": "/api/hassio_ingress/abc"},
-            )
-            html = urllib.request.urlopen(req, timeout=5).read().decode()
-            self.assertIn("/api/hassio_ingress/abc/_next/static/app.js", html)
-        finally:
-            proxy.shutdown()
-            proxy.server_close()
-            up.shutdown()
-            up.server_close()
-
-    def test_proxy_rewrites_set_cookie_path(self):
-        class Upstream(BaseHTTPRequestHandler):
-            def log_message(self, *_a, **_k):
-                return
-
-            def do_POST(self):
-                n = int(self.headers.get("Content-Length") or 0)
-                if n:
-                    self.rfile.read(n)
-                body = b'{"id":1}'
-                self.send_response(200)
-                self.send_header("Content-Type", "application/json")
-                self.send_header("Set-Cookie", "connect.sid=abc; Path=/; HttpOnly")
-                self.send_header("Content-Length", str(len(body)))
-                self.end_headers()
-                self.wfile.write(body)
-
-        up = ThreadingHTTPServer(("127.0.0.1", 0), Upstream)
-        threading.Thread(target=up.serve_forever, daemon=True).start()
-        uhost, uport = up.server_address
-        os.environ["SEERR_URL"] = f"http://{uhost}:{uport}"
-        proxy = ThreadingHTTPServer(("127.0.0.1", 0), ing.Handler)
-        threading.Thread(target=proxy.serve_forever, daemon=True).start()
-        phost, pport = proxy.server_address
-        try:
-            import urllib.request
-
-            req = urllib.request.Request(
-                f"http://{phost}:{pport}/api/v1/auth/local",
-                data=b'{"email":"a@b.c","password":"x"}',
-                method="POST",
-                headers={
-                    "X-Ingress-Path": "/api/hassio_ingress/abc",
-                    "Content-Type": "application/json",
-                },
-            )
-            resp = urllib.request.urlopen(req, timeout=5)
-            cookie = resp.headers.get("Set-Cookie") or ""
-            self.assertIn("Path=/api/hassio_ingress/abc", cookie)
-            self.assertNotIn("Path=/;", cookie + ";")
-        finally:
-            proxy.shutdown()
-            proxy.server_close()
-            up.shutdown()
-            up.server_close()
 
 
 class ProtonSetup(unittest.TestCase):

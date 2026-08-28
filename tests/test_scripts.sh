@@ -301,10 +301,19 @@ grep -q 'vpn-up' "${ROOT}/pompey/rootfs/etc/services.d/engines/run"
 grep -q 'vpn-up' "${ROOT}/pompey/rootfs/etc/services.d/natpmp/run"
 grep -q -- '--quiet' "${ROOT}/pompey/rootfs/usr/local/bin/wait-for-vpn"
 grep -q '%H:%M:%S' "${ROOT}/pompey/rootfs/usr/local/bin/pompey-setup"
-grep -q '%H:%M:%S' "${ROOT}/pompey/rootfs/usr/local/bin/pompey-ingress"
 grep -q '%H:%M:%S' "${ROOT}/pompey/rootfs/usr/local/bin/wire-stack"
 test -f "${ROOT}/pompey/rootfs/etc/services.d/setup/run"
-test -f "${ROOT}/pompey/rootfs/etc/services.d/ingress-proxy/down"
+test ! -e "${ROOT}/pompey/rootfs/usr/local/bin/pompey-ingress"
+test ! -e "${ROOT}/pompey/rootfs/etc/services.d/ingress-proxy"
+test ! -e "${ROOT}/tests/preview_seerr_ingress.py"
+grep -Fq 'rm -f "${POMPEY_CONFIG}/seerr/DOCKER"' "${ROOT}/pompey/rootfs/etc/services.d/seerr/run"
+grep -Fq 'rm -f "${POMPEY_CONFIG}/seerr/DOCKER"' "${ROOT}/pompey/rootfs/usr/local/bin/fetch-engines"
+if grep -Fq 'touch "${POMPEY_CONFIG}/seerr/DOCKER"' \
+    "${ROOT}/pompey/rootfs/etc/services.d/seerr/run" \
+    "${ROOT}/pompey/rootfs/usr/local/bin/fetch-engines"; then
+  echo "do not plant Seerr's DOCKER sentinel" >&2
+  exit 1
+fi
 grep -q 'POMPEY_CONFIG' "${ROOT}/pompey/rootfs/etc/services.d/radarr/run"
 grep -q 'HOST=0.0.0.0' "${ROOT}/pompey/rootfs/etc/services.d/seerr/run"
 
@@ -317,7 +326,6 @@ python3 "${BIN}/pompey-status" vpn "Starting" 5
 test "$(jq -r '.steps[] | select(.id=="fetch") | .state' "${POMPEY_READY}/status.json")" = pending
 test "$(jq -r .step "${POMPEY_READY}/status.json")" = vpn
 python3 "${BIN}/pompey-status" ready "Ready" 100
-test "$(jq -r .handoff "${POMPEY_READY}/status.json")" = true
 test "$(jq -r .search "${POMPEY_READY}/status.json")" = true
 test "$(jq -r .search_port "${POMPEY_READY}/status.json")" = 5055
 rm -rf "${POMPEY_READY}"

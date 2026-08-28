@@ -29,11 +29,11 @@ Shipping path: copy `pompey/` into `/addons`. Supervisor builds locally. That is
 
 1. Supervisor builds `pompey/Dockerfile` (WireGuard, nginx, crane, our scripts). Engines are **not** in that image.
 2. Supervisor starts one container and writes `/data/options.json`.
-3. Our scripts bring up Proton, apply the kill switch, fetch Seerr + hidden engines onto `/data`, wire them on localhost, then flip Ingress from the wait screen to Seerr.
+3. Our scripts bring up Proton, apply the kill switch, fetch Seerr + hidden engines onto `/data`, wire them on localhost, and leave Ingress as Pompey's wait/status UI. Search is Seerr on host :5055.
 
 s6-overlay: `rootfs/etc/cont-init.d/*` once, then `rootfs/etc/services.d/*`.
 
-`wire-stack` must exit non-zero on a required miss (Prowlarr apps, source indexer when a URL is set, Seerr process up via GET `/settings/public`, Seerr→Radarr/Sonarr **after** Seerr is initialized, qBittorrent category other than 409). Before initialize, the Plex wizard has not created user id 1, so the API key 403s — hand off to the wizard anyway and keep retrying. Plex login, Seerr local login (real Seerr 403s until the wizard creates a user), and Seerr chrome settings are optional. Do not log-and-continue on a required step — that flipped Ingress to a hollow search UI.
+`wire-stack` must exit non-zero on a required miss (Prowlarr apps, source indexer when a URL is set, Seerr process up via GET `/settings/public`, Seerr→Radarr/Sonarr **after** Seerr is initialized, qBittorrent category other than 409). Before initialize, the Plex wizard has not created user id 1, so the API key 403s — mark search ready anyway (the published port is up) and keep retrying Arr. Plex login, Seerr local login (real Seerr 403s until the wizard creates a user), and Seerr chrome settings are optional. Do not log-and-continue on a required step — that marked search ready with a hollow UI.
 
 ## What agents should run here (no HAOS)
 
@@ -42,7 +42,6 @@ s6-overlay: `rootfs/etc/cont-init.d/*` once, then `rootfs/etc/services.d/*`.
 ```bash
 bash tests/run.sh              # options.json + stubs + real Seerr API + Prowlarr unpack + fake-wg0 smoke
 python3 tests/preview.py                 # wait-screen progress UI at http://127.0.0.1:8099/
-# tests/preview_seerr_ingress.py is the old iframe replica (not the household path)
 ```
 
 Realistic stack (still no Proton, still no HAOS). Needs passwordless sudo + `iproute2` for a veth named `wg0`:
