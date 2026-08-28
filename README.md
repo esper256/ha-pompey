@@ -125,7 +125,7 @@ If a download is stuck, the **intended** product is still: handle that in Pompey
 - **Kid vs general** is a rule after the request, from TMDB certification. G / PG / PG-13 and TV-Y / TV-G / TV-PG go to the kid folders. Anything else, **including unknown**, goes to general. Pompey does not guess kid, and it does not stop the request to ask.
 - **Already on Plex** is Seerr’s job. If it is already there, you should see that before you request it.
 - **Confirm if we need you** is for the cases the stack cannot decide — not for every request. Picking a specific torrent by hand is not the default path.
-- **Open sources → History.** Empty Query is not always the Seerr title. Click the row: **top100** (or similar browse) means the source was asked with no name — that is not the request. **Parameters** with IMDb/TMDb is an ID search. The movie name in Query is a title search. RSS is empty Query, empty Parameters, event type RSS. After **0.2.25**, Arr is told to title-search so a request should show the movie name on every source, not top100.
+- **Open sources → History.** Empty Query is not always the Seerr title. Click the row: **top100** (or similar browse) means the source was asked with no name — that is not the request. **Parameters** with IMDb/TMDb is an ID search. The movie name in Query is a title search. RSS is empty Query, empty Parameters, event type RSS. After **0.2.25**, Arr is told to title-search so a request should show the movie name on every source that actually synced into Radarr/Sonarr. A source that fails Prowlarr’s category test (or is blocked by CloudFlare) never becomes an Arr indexer — the app log warns when that happens.
 
 Opening `index.html` as a file on your laptop is only the wait screen. It will never become search.
 

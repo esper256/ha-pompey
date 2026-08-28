@@ -3,6 +3,9 @@
 ## 0.2.25
 
 - Empty Query in Prowlarr History during a Seerr request is often a **top100 browse**, not an IMDb search: Radarr sent an ID (or nothing), the source ignored it, and listed popular torrents. Arr now talks to Prowlarr through a localhost proxy that advertises title search only, so the movie name goes to every source. Open sources stays on port 9696. After wiring, the app log labels History rows as ID, title, RSS, or browse/top100.
+- Prowlarr sources whose list payload omitted RSS/automatic/interactive flags were left unset; those flags are now read from the source detail and turned on.
+- Radarr and Sonarr applications get movie vs TV `syncCategories`. After sync, the app log counts Arr indexers against Prowlarr and warns when a source did not land (category test / CloudFlare). That is why a Seerr movie can title-search only two of five sources.
+- Wiring no longer POSTs Seerr `/auth/local` once the disk API key exists, so the log is not a loop of invalid pompey@local passwords. Sonarr’s deprecated language-profile GET is skipped.
 
 ## 0.2.24
 

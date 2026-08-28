@@ -69,6 +69,8 @@ class FakeState:
         self.download_clients: list[dict] = []
         self.apps: list[dict] = []
         self.indexers: list[dict] = []
+        self.radarr_indexers: list[dict] = []
+        self.sonarr_indexers: list[dict] = []
         self.commands: list[dict] = []
         self.arr_commands: list[dict] = []
         self.history: list[dict] = []
@@ -194,6 +196,9 @@ def handler_for(state: FakeState):
                 if path.endswith("/command") and method == "POST":
                     state.arr_commands.append(body or {})
                     return self._send(201, body or {})
+                if path.endswith("/indexer") and method == "GET":
+                    listed = state.radarr_indexers if role == "radarr" else state.sonarr_indexers
+                    return self._send(body=listed)
                 return self._send(404, {"error": path})
             if role == "prowlarr":
                 if path == "/ping":
@@ -201,11 +206,11 @@ def handler_for(state: FakeState):
                 if path == "/api/v1/applications" and method == "GET":
                     return self._send(body=state.apps)
                 if path == "/api/v1/applications/schema":
-                    fields = [{"name": n} for n in ("prowlarrUrl", "baseUrl", "apiKey")]
+                    fields = [{"name": n} for n in ("prowlarrUrl", "baseUrl", "apiKey", "syncCategories")]
                     return self._send(
                         body=[
-                            {"implementation": "Sonarr", "fields": fields},
-                            {"implementation": "Radarr", "fields": fields},
+                            {"implementation": "Sonarr", "fields": json.loads(json.dumps(fields))},
+                            {"implementation": "Radarr", "fields": json.loads(json.dumps(fields))},
                         ]
                     )
                 if path == "/api/v1/applications" and method == "POST":
@@ -231,6 +236,15 @@ def handler_for(state: FakeState):
                 if path == "/api/v1/indexer/schema":
                     fields = [{"name": n} for n in ("baseUrl", "apiPath", "apiKey")]
                     return self._send(body=[{"implementation": "Torznab", "fields": fields}])
+                if path.startswith("/api/v1/indexer/") and method == "GET":
+                    try:
+                        idx = int(path.rsplit("/", 1)[-1])
+                    except ValueError:
+                        return self._send(404, {"error": path})
+                    for item in state.indexers:
+                        if item.get("id") == idx:
+                            return self._send(body=item)
+                    return self._send(404, {"error": path})
                 if path == "/api/v1/indexer" and method == "POST":
                     if state.fail_indexer:
                         return self._send(500, {"message": "indexer add failed"})
@@ -675,6 +689,16 @@ PersistentKeepalive = 25
         self.assertEqual(resource["fields"][0]["value"], "127.0.0.1")
         self.assertEqual(resource["fields"][1]["value"], 8080)
 
+    def test_set_app_fields_appends_missing(self):
+        resource = {"fields": [{"name": "prowlarrUrl", "value": "http://127.0.0.1:9696"}]}
+        ws.set_app_fields(resource, {"prowlarrUrl": "http://127.0.0.1:9698", "syncCategories": [2000]})
+        fields = {f["name"]: f.get("value") for f in resource["fields"]}
+        self.assertEqual(fields["prowlarrUrl"], "http://127.0.0.1:9698")
+        self.assertEqual(fields["syncCategories"], [2000])
+
+    def test_language_profile_id_skips_http(self):
+        self.assertIsNone(ws.language_profile_id("http://127.0.0.1:8989/api/v3", "k"))
+
     def test_as_list_ignores_non_arrays(self):
         self.assertEqual(ws.as_list({"initialized": False}), [])
         self.assertEqual(ws.as_list("Ok."), [])
@@ -772,6 +796,16 @@ class WireStack(unittest.TestCase):
         for app in self.state.apps:
             fields = {f["name"]: f.get("value") for f in app.get("fields") or []}
             self.assertEqual(fields.get("prowlarrUrl"), "http://127.0.0.1:9698")
+            if app["name"] == "Radarr":
+                self.assertEqual(fields.get("syncCategories"), ws.RADARR_SYNC_CATS)
+            else:
+                self.assertEqual(fields.get("syncCategories"), ws.SONARR_SYNC_CATS)
+        lang_gets = [
+            call
+            for call in self.state.calls
+            if call[1] == "GET" and str(call[2]).endswith("/languageprofile")
+        ]
+        self.assertEqual(lang_gets, [])
         self.assertEqual(len(self.state.indexers), 1)
         self.assertEqual(
             [c.get("name") for c in self.state.commands],
@@ -790,6 +824,12 @@ class WireStack(unittest.TestCase):
         self.assertEqual(live["search_port"], 5055)
         self.assertEqual(live["sources_port"], 9696)
         self.assertIsNone(self.state.local_auth)
+        local_posts = [
+            call
+            for call in self.state.calls
+            if call[0] == "seerr" and call[1] == "POST" and call[2] == "/api/v1/auth/local"
+        ]
+        self.assertEqual(local_posts, [])
 
     def test_wires_when_seerr_returns_objects(self):
         # Plex login creates user id 1; GET /settings/radarr can still be an object.
@@ -861,6 +901,54 @@ class WireStack(unittest.TestCase):
             ["ApplicationIndexerSync"],
         )
 
+    def test_turns_on_search_flags_when_list_omits_them(self):
+        os.environ["INDEXER_URL"] = ""
+        os.environ["INDEXER_API_KEY"] = ""
+        self.state.indexers = [
+            {"id": 1, "name": "LimeTorrents", "enable": True},
+        ]
+        rc = ws.main()
+        self.assertEqual(rc, 0)
+        item = self.state.indexers[0]
+        self.assertTrue(item["enableRss"])
+        self.assertTrue(item["enableAutomaticSearch"])
+        self.assertTrue(item["enableInteractiveSearch"])
+        puts = [
+            call
+            for call in self.state.calls
+            if call[0] == "prowlarr" and call[1] == "PUT" and call[2] == "/api/v1/indexer/1"
+        ]
+        self.assertTrue(puts)
+
+    def test_warns_when_radarr_is_missing_prowlarr_sources(self):
+        os.environ["INDEXER_URL"] = ""
+        os.environ["INDEXER_API_KEY"] = ""
+        flags = {
+            "enableRss": True,
+            "enableAutomaticSearch": True,
+            "enableInteractiveSearch": True,
+        }
+        self.state.indexers = [
+            {"id": 1, "name": "Nyaa.si", "enable": True, **flags},
+            {"id": 2, "name": "LimeTorrents", "enable": True, **flags},
+        ]
+        self.state.radarr_indexers = [{"id": 1, "name": "Nyaa.si", "enable": True}]
+        self.state.sonarr_indexers = [
+            {"id": 1, "name": "Nyaa.si", "enable": True},
+            {"id": 2, "name": "LimeTorrents", "enable": True},
+        ]
+        import io
+        from contextlib import redirect_stdout
+
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rc = ws.main()
+        self.assertEqual(rc, 0)
+        out = buf.getvalue()
+        self.assertIn("Radarr indexers: 1 (Prowlarr enabled 2)", out)
+        self.assertIn("missing Prowlarr source(s): LimeTorrents", out)
+        self.assertIn("Sonarr indexers: 2 (Prowlarr enabled 2)", out)
+
     def test_retries_monitored_titles_still_missing_a_file(self):
         os.environ["INDEXER_URL"] = ""
         os.environ["INDEXER_API_KEY"] = ""
@@ -894,6 +982,7 @@ class WireStack(unittest.TestCase):
         radarr = next(item for item in self.state.apps if item["name"] == "Radarr")
         fields = {f["name"]: f.get("value") for f in radarr.get("fields") or []}
         self.assertEqual(fields.get("prowlarrUrl"), "http://127.0.0.1:9698")
+        self.assertEqual(fields.get("syncCategories"), ws.RADARR_SYNC_CATS)
 
     def test_logs_prowlarr_history_id_search_vs_title(self):
         os.environ["INDEXER_URL"] = ""
@@ -957,6 +1046,12 @@ class WireStack(unittest.TestCase):
         self.assertTrue((self.ready / "wired").exists())
         self.assertFalse((self.ready / "seerr-arr").exists())
         self.assertIsNone(self.state.local_auth)
+        local_posts = [
+            call
+            for call in self.state.calls
+            if call[0] == "seerr" and call[1] == "POST" and call[2] == "/api/v1/auth/local"
+        ]
+        self.assertEqual(local_posts, [])
         self.assertEqual(self.state.seerr_radarr, [])
         self.assertEqual(self.state.seerr_sonarr, [])
         self.assertFalse(self.state.initialized)
@@ -974,6 +1069,12 @@ class WireStack(unittest.TestCase):
         self.assertTrue((self.ready / "seerr-arr").exists())
         self.assertIsNone(self.state.plex_auth)
         self.assertIsNone(self.state.local_auth)
+        local_posts = [
+            call
+            for call in self.state.calls
+            if call[0] == "seerr" and call[1] == "POST" and call[2] == "/api/v1/auth/local"
+        ]
+        self.assertEqual(local_posts, [])
         self.assertEqual(self.state.seerr_radarr[0]["hostname"], "127.0.0.1")
         self.assertFalse(self.state.initialized)
 
@@ -1054,6 +1155,12 @@ class WireStack(unittest.TestCase):
         self.assertTrue((self.ready / "wired").exists())
         self.assertFalse((self.ready / "seerr-arr").exists())
         self.assertEqual(self.state.seerr_radarr, [])
+        local_posts = [
+            call
+            for call in self.state.calls
+            if call[0] == "seerr" and call[1] == "POST" and call[2] == "/api/v1/auth/local"
+        ]
+        self.assertEqual(len(local_posts), 1)
 
     def test_does_not_mark_ready_when_initialized_seerr_cannot_wire_arr(self):
         os.environ["PLEX_URL"] = ""
