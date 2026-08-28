@@ -480,6 +480,30 @@ def ensure_media_management(base: str, api_key: str, kind: str) -> None:
     log(f"{kind} import into library folders (rename on the NAS, skip free-space check)")
 
 
+def tickle_seerr_availability() -> None:
+    """Seerr marks requests available from Plex (recently-added ~5 min) and Arr.
+
+    Import into the library folder is not enough by itself — Seerr has to notice
+    Plex or Radarr/Sonarr. Ask those jobs to run now instead of waiting.
+    """
+    key = seerr_api_key_from_disk()
+    if not key:
+        return
+    s = Seerr()
+    s.api_key = key
+    ran: list[str] = []
+    for job in ("plex-recently-added-scan", "radarr-scan", "sonarr-scan"):
+        try:
+            s.call("POST", f"/api/v1/settings/jobs/{job}/run")
+            ran.append(job)
+        except RuntimeError as exc:
+            if "403" in str(exc):
+                return
+            log(f"seerr {job}: {exc}", "WARNING")
+    if ran:
+        log("seerr checking Plex and Arr for titles that landed in the library")
+
+
 def ensure_download_client_handling(base: str, api_key: str, kind: str) -> None:
     """Keep completed-download handling on. Do not grab the same title again if
     a torrent was dropped before the file was renamed into the library.
@@ -2469,6 +2493,7 @@ def main() -> int:
     open(os.path.join(ready_dir(), "arr-wired"), "w").close()
 
     configure_seerr(secrets, rp, sp, sl)
+    tickle_seerr_availability()
     port = os.environ.get("SEERR_PORT", "5055")
     sources = os.environ.get("PROWLARR_PORT", "9696")
     log(f"search is on 0.0.0.0:{port}; sources on 0.0.0.0:{sources}; Ingress stays Pompey")
@@ -2500,6 +2525,7 @@ def housekeep() -> int:
     log_stuck_imports(sonarr, sk, "sonarr")
     log_titles_waiting_for_library(radarr, rk, "radarr")
     log_titles_waiting_for_library(sonarr, sk, "sonarr")
+    tickle_seerr_availability()
     return 0
 
 

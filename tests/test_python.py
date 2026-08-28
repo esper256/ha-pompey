@@ -276,6 +276,7 @@ class FakeState:
         self.seerr_radarr: list[dict] = []
         self.seerr_sonarr: list[dict] = []
         self.seerr_users: list[dict] = []
+        self.seerr_jobs: list[str] = []
         self.seerr_main: object = None
         self.initialized = False
         self.fail_seerr_radarr = False
@@ -808,6 +809,9 @@ def handler_for(state: FakeState):
                 if path == "/api/v1/settings/initialize":
                     state.initialized = True
                     return self._send(body={"initialized": True})
+                if path.startswith("/api/v1/settings/jobs/") and path.endswith("/run"):
+                    state.seerr_jobs.append(path.rsplit("/", 2)[-2])
+                    return self._send(body={"ok": True})
                 return self._send(404, {"error": path})
             return self._send(500, {"error": "no role"})
 
@@ -1554,6 +1558,10 @@ class WireStack(unittest.TestCase):
         cmd_names = [c.get("name") for c in self.state.arr_commands]
         self.assertIn("DownloadedMoviesScan", cmd_names)
         self.assertIn("DownloadedEpisodesScan", cmd_names)
+        self.assertEqual(
+            self.state.seerr_jobs,
+            ["plex-recently-added-scan", "radarr-scan", "sonarr-scan"],
+        )
         self.assertEqual(self.state.qbit_removed, [])
         self.assertEqual({a["name"] for a in self.state.apps}, {"Sonarr", "Radarr"})
         for app in self.state.apps:
@@ -2123,6 +2131,17 @@ class WireStack(unittest.TestCase):
         self.assertIn("complete/ leftovers are extras only (2 srt/nfo/txt file(s))", out)
         self.assertNotIn("still in complete/:", out)
         self.assertNotIn("English.srt", out)
+
+    def test_housekeep_asks_seerr_to_notice_library_files(self):
+        os.environ["INDEXER_URL"] = ""
+        os.environ["INDEXER_API_KEY"] = ""
+        self.state.seerr_has_admin = True
+        rc = ws.housekeep()
+        self.assertEqual(rc, 0)
+        self.assertEqual(
+            self.state.seerr_jobs,
+            ["plex-recently-added-scan", "radarr-scan", "sonarr-scan"],
+        )
 
     def test_updates_existing_download_client_remove_flag(self):
         os.environ["INDEXER_URL"] = ""
