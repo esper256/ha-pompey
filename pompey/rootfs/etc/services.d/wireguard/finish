@@ -1,9 +1,9 @@
 #!/command/with-contenv bashio
 # shellcheck shell=bash
-wg-quick down wg0 >/dev/null 2>&1 || true
+pompey-log finish "WireGuard" "${1:-0}" "${2:-0}"
 if [[ "${1:-0}" -ne 0 ]] && [[ "${1:-0}" -ne 256 ]]; then
   # Kill switch is iptables OUTPUT, not container death. Halting took Ingress
   # (Supervisor 172.30.32.2 → 8099) down with the tunnel and looked like an
   # nginx failure in Home Assistant.
-  bashio::log.error "WireGuard service exited (${1}); Ingress stays up so the wait screen remains reachable"
+  bashio::log.error "Ingress stays up so the wait screen remains reachable"
 fi

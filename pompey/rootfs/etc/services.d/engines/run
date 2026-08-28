@@ -10,6 +10,7 @@ source "$(command -v pompey-env)"
 until [[ -f "${POMPEY_READY}/vpn-up" ]]; do
   sleep 2
 done
+pompey-log start "engine fetch"
 pompey-status fetch "Downloading hidden engines" 30 || true
 n=0
 until fetch-engines; do

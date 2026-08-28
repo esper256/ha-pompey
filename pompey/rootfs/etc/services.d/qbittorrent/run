@@ -8,7 +8,36 @@ until [[ -f "${POMPEY_READY}/engines-ready" ]]; do
   sleep 2
 done
 
-exec "${POMPEY_ENGINES}/qbittorrent-nox" \
+QBIT="${POMPEY_ENGINES}/qbittorrent-nox"
+if [[ ! -x "${QBIT}" ]]; then
+  bashio::log.error "qBittorrent binary missing (${QBIT})"
+  exit 1
+fi
+
+LOG_DIR="${POMPEY_CONFIG}/qBittorrent/logs"
+mkdir -p "${LOG_DIR}"
+pompey-log start "qBittorrent"
+
+# FileLogger is the source of truth; stdout is almost empty. Tail in this
+# script (do not exec) so a restart does not leak a second tailer.
+pompey-log tail "qBittorrent" "${LOG_DIR}/qbittorrent.log" &
+fwd_pid=$!
+"${QBIT}" \
   --profile="${POMPEY_CONFIG}" \
   --webui-port=8080 \
-  --confirm-legal-notice
+  --confirm-legal-notice &
+qbit_pid=$!
+
+term() {
+  kill -TERM "${qbit_pid}" 2>/dev/null || true
+  kill -TERM "${fwd_pid}" 2>/dev/null || true
+}
+trap term TERM INT
+
+set +e
+wait "${qbit_pid}"
+rc=$?
+set -e
+kill -TERM "${fwd_pid}" 2>/dev/null || true
+wait "${fwd_pid}" 2>/dev/null || true
+exit "${rc}"

@@ -46,4 +46,7 @@ export HOST=0.0.0.0
 export BIND_IP=0.0.0.0
 export CONFIG_DIRECTORY="${POMPEY_CONFIG}/seerr"
 cd "${APP}"
+pompey-log start "Seerr"
+exec > >(pompey-log prefix "Seerr")
+exec 2>&1
 exec "${NODE}" dist/index.js

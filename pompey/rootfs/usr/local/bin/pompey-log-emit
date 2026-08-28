@@ -1,0 +1,51 @@
+#!/usr/bin/env python3
+"""Tag stdin (or argv text) with a service name and flush every line."""
+from __future__ import annotations
+
+import datetime
+import re
+import sys
+
+ERROR_RE = re.compile(
+    r"\(C\)|\[(error|fatal|critical)\]|\|Error\||\|Fatal\||\|Critical\||\berror\b|\bfatal\b|\bcritical\b",
+    re.I,
+)
+WARN_RE = re.compile(
+    r"\(W\)|\[(warn|warning)\]|\|Warn\||\|Warning\||\bwarn(?:ing)?\b|\bfail(?:ed|ure)?\b|\bdenied\b|\bunable\b|\btimeout\b|\bpermission\b",
+    re.I,
+)
+
+
+def level_for(line: str) -> str:
+    if ERROR_RE.search(line):
+        return "ERROR"
+    if WARN_RE.search(line):
+        return "WARNING"
+    return "INFO"
+
+
+def emit(name: str, line: str) -> None:
+    line = line.rstrip("\n")
+    if not line:
+        return
+    tag = level_for(line)
+    ts = datetime.datetime.now().strftime("%H:%M:%S")
+    dest = sys.stderr if tag in ("ERROR", "WARNING") else sys.stdout
+    print(f"[{ts}] {tag}: [{name}] {line}", file=dest, flush=True)
+
+
+def main(argv: list[str]) -> int:
+    if len(argv) < 2:
+        print("usage: pompey-log-emit NAME [TEXT]", file=sys.stderr)
+        return 2
+    name = argv[1]
+    if len(argv) > 2:
+        emit(name, " ".join(argv[2:]))
+        return 0
+    for raw in sys.stdin:
+        emit(name, raw)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv))

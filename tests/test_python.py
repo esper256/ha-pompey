@@ -686,7 +686,37 @@ class WireStack(unittest.TestCase):
         self.assertEqual(rc, 0)
         self.assertTrue((self.ready / "wired").exists())
         self.assertEqual(self.state.indexers, [])
-        self.assertEqual(self.state.commands, [])
+        self.assertEqual(
+            [c.get("name") for c in self.state.commands],
+            ["ApplicationIndexerSync"],
+        )
+
+    def test_syncs_sources_already_in_prowlarr(self):
+        os.environ["INDEXER_URL"] = ""
+        os.environ["INDEXER_API_KEY"] = ""
+        self.state.indexers = [
+            {
+                "name": "Tracker A",
+                "enable": True,
+                "enableRss": True,
+                "enableAutomaticSearch": True,
+                "enableInteractiveSearch": True,
+            },
+            {
+                "name": "Tracker B",
+                "enable": True,
+                "enableRss": True,
+                "enableAutomaticSearch": False,
+                "enableInteractiveSearch": True,
+            },
+        ]
+        rc = ws.main()
+        self.assertEqual(rc, 0)
+        self.assertEqual([item["name"] for item in self.state.indexers], ["Tracker A", "Tracker B"])
+        self.assertEqual(
+            [c.get("name") for c in self.state.commands],
+            ["ApplicationIndexerSync"],
+        )
 
     def test_wires_when_seerr_local_login_is_403(self):
         """Real Seerr /auth/local is login-only; API key 403s until user id 1 exists."""

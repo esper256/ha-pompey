@@ -8,4 +8,7 @@ until [[ -f "${POMPEY_READY}/engines-ready" ]]; do
   sleep 2
 done
 
+pompey-log start "Sonarr"
+exec > >(pompey-log prefix "Sonarr")
+exec 2>&1
 exec "${POMPEY_ENGINES}/Sonarr/Sonarr" -nobrowser -data="${POMPEY_CONFIG}/sonarr"

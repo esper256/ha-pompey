@@ -331,6 +331,7 @@ def ensure_prowlarr_app(prowlarr: str, pkey: str, name: str, impl: str, base_url
     )
     app["name"] = name
     app["syncLevel"] = "fullSync"
+    app["tags"] = []
     http("POST", f"{prowlarr}/api/v1/applications", app, headers=arr_headers(pkey))
     log(f"prowlarr app {name}")
 
@@ -358,11 +359,36 @@ def ensure_indexer(prowlarr: str, pkey: str) -> None:
     )
     indexer["name"] = "Source"
     indexer["enable"] = True
+    indexer["enableRss"] = True
+    indexer["enableAutomaticSearch"] = True
+    indexer["enableInteractiveSearch"] = True
     indexer["priority"] = 25
     indexer["appProfileId"] = 1
     indexer["tags"] = []
     http("POST", f"{prowlarr}/api/v1/indexer", indexer, headers=arr_headers(pkey))
     log("added source")
+
+
+def sync_prowlarr_indexers(prowlarr: str, pkey: str) -> None:
+    """Push every enabled Prowlarr source into Radarr/Sonarr and say how many exist.
+
+    Pompey does not pick which indexer to query — Arr asks Prowlarr, and Prowlarr
+    fans out to every source that is enabled for that search type and category.
+    Household sources are added in Prowlarr's UI; we still sync so Arr sees them.
+    """
+    indexers = as_list(http("GET", f"{prowlarr}/api/v1/indexer", headers=arr_headers(pkey)))
+    enabled = [item for item in indexers if item.get("enable")]
+    log(f"Prowlarr sources: {len(enabled)} enabled / {len(indexers)} total")
+    for item in indexers:
+        name = item.get("name") or "unnamed"
+        on = "on" if item.get("enable") else "off"
+        rss = item.get("enableRss")
+        auto = item.get("enableAutomaticSearch")
+        interactive = item.get("enableInteractiveSearch")
+        log(
+            f"Prowlarr source {name} {on} "
+            f"rss={rss} auto={auto} interactive={interactive}"
+        )
     http(
         "POST",
         f"{prowlarr}/api/v1/command",
@@ -684,6 +710,7 @@ def main() -> int:
     ensure_prowlarr_app(prowlarr, pk, "Sonarr", "Sonarr", sonarr_url(), sk)
     ensure_prowlarr_app(prowlarr, pk, "Radarr", "Radarr", radarr_url(), rk)
     ensure_indexer(prowlarr, pk)
+    sync_prowlarr_indexers(prowlarr, pk)
 
     sp = first_profile(sonarr, sk)
     rp = first_profile(radarr, rk)

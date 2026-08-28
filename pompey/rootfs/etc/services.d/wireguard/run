@@ -18,7 +18,7 @@ log_wg_quick() {
   set -e
   if [[ -n "${out}" ]]; then
     while IFS= read -r line || [[ -n "${line}" ]]; do
-      bashio::log.info "${line}"
+      bashio::log.info "[WireGuard] ${line}"
     done <<<"${out}"
   fi
   return "${rc}"
@@ -47,6 +47,8 @@ mark_vpn_up() {
   mkdir -p "${POMPEY_READY}"
   touch "${POMPEY_READY}/vpn-up"
 }
+
+pompey-log start "WireGuard"
 
 if [[ "${POMPEY_FAKE_VPN:-}" == "1" ]]; then
   bashio::log.info "Fake wg0 (agent/dev): not Proton"
