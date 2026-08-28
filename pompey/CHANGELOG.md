@@ -3,6 +3,7 @@
 ## 0.2.29
 
 - Do not move files out of `downloads/complete` by hand. After a title is in the library (or you already moved it), Pompey drops the qBittorrent torrent **without deleting files**, so a hidden client cannot start downloading the same thing again. It also asks Radarr/Sonarr to import anything still sitting in `complete/`. Rebuild so the banner says **0.2.29**.
+- 0.2.28 could leave the wait screen on **Engines started but wiring failed** and the request quality list on Radarr’s stock names (Any, HD-720p, Ultra-HD). Arr rejects a profile whose quality groups have no id, and it requires every custom format on the profile. Wiring now applies Max / Default / Anything on an existing install, keeps leftover stock names until those three exist, and does not treat a quality-profile hiccup as a full wiring failure.
 
 ## 0.2.28
 

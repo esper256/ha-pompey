@@ -155,7 +155,7 @@ The product should keep those current for you — through the VPN, without you v
 
 - You should still update **Pompey** when we ship a wrapper fix.
 - You should not be expected to open Radarr/Sonarr to click Update.
-- Quality profiles: **0.2.28** puts three choices on the Seerr request: Max, Default, Anything. Recyclarr is not yet refreshing TRaSH scores on a schedule.
+- Quality profiles: **0.2.28** puts three choices on the Seerr request: Max, Default, Anything. **0.2.29** makes that apply on an existing box (0.2.28 could fail wiring and leave Radarr’s stock names). Recyclarr is not yet refreshing TRaSH scores on a schedule.
 
 ### Proton
 
@@ -174,7 +174,7 @@ The journey above is the target. **0.2.29** is a real Home Assistant OS install 
 | In the guide | On the machine today |
 | --- | --- |
 | Request → file on disk → Plex notices | **0.2.27** imports a finished torrent from `downloads/complete` into the Movies/TV folder Seerr used. **0.2.29** drops the hidden qBittorrent torrent if those files were already moved, so it cannot start downloading them again. Automated tests never start the torrent client. |
-| Auto-grab is usually the right quality | **0.2.28** offers **Max** / **Default** / **Anything** on the Seerr request. Default is a 1080p encode (about 2.5–8 GB per 150 minutes). Max allows remux and 4K. Anything takes CAM if that is all there is. Live Recyclarr refresh of TRaSH scores is still later. |
+| Auto-grab is usually the right quality | **0.2.28** offers **Max** / **Default** / **Anything** on the Seerr request. Default is a 1080p encode (about 2.5–8 GB per 150 minutes). Max allows remux and 4K. Anything takes CAM if that is all there is. **0.2.29** applies those three on an existing install (0.2.28 could fail wiring and leave Radarr’s stock Any / HD-720p list). Live Recyclarr refresh of TRaSH scores is still later. |
 | Language, subtitles, dual audio | Home Assistant options score the *release name* (Dual Audio, English Dub, advertised English subs). Seerr has no per-request language picker. Missing subtitles are not downloaded after the file lands (Bazarr is later). |
 | “Confirm if we need you” when quality and seeds disagree | Not built. Seerr is not a download console; we will not fork it into one. |
 | Engines stay current for years | First fetch only. Already-present binaries are skipped on restart. |
@@ -187,7 +187,7 @@ The journey above is the target. **0.2.29** is a real Home Assistant OS install 
 | Jellyfin | Plex only. |
 | Use this from outside the house | Out of scope. Search is on the LAN at :5055. Sources at :9696. Do not port-forward either. |
 
-If search is a blank page on port 5055, or the Plex button on setup does nothing, that is a bug — send the log. Rebuild so the banner says **0.2.29** if a finished download stayed in `downloads/complete`, you moved a file by hand and worry qBittorrent will grab it again, the request screen has no Max/Default/Anything choice, auto-grab picked a huge remux on Default, a Seerr request only title-searched two Prowlarr sources, or you still need tagged app logs, household media-folder defaults, **Open sources**, or an older wait screen.
+If search is a blank page on port 5055, or the Plex button on setup does nothing, that is a bug — send the log. Rebuild so the banner says **0.2.29** if the wait screen says wiring failed and the request quality list is still Any / HD-720p / Ultra-HD (not Max / Default / Anything), a finished download stayed in `downloads/complete`, you moved a file by hand and worry qBittorrent will grab it again, auto-grab picked a huge remux on Default, a Seerr request only title-searched two Prowlarr sources, or you still need tagged app logs, household media-folder defaults, **Open sources**, or an older wait screen.
 
 ## Roadmap
 

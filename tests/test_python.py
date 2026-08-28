@@ -114,6 +114,70 @@ def profile_named(profiles: list[dict], name: str) -> dict:
     return next(item for item in profiles if item.get("name") == name)
 
 
+def quality_profile_reject(body: dict, formats: list[dict], state: "FakeState") -> str | None:
+    """Mimic Radarr QualityProfileController validators that 0.2.28 tripped over."""
+    if state.fail_quality_profiles:
+        return "quality profiles disabled for test"
+    name = (body or {}).get("name")
+    if name in state.reject_profile_names:
+        return "Cutoff must be an allowed quality or group"
+    if not state.strict_quality_profiles:
+        return None
+    if not isinstance(body, dict) or not str(body.get("name") or "").strip():
+        return "Name: not empty"
+    try:
+        min_up = int(body.get("minUpgradeFormatScore") or 0)
+    except (TypeError, ValueError):
+        min_up = 0
+    if min_up < 1:
+        return "MinUpgradeFormatScore: must be greater than or equal to 1"
+    items = body.get("items") or []
+    cutoff = body.get("cutoff")
+    cutoff_ok = False
+    seen: list[str] = []
+    group_ids: list[int] = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        q = item.get("quality") if isinstance(item.get("quality"), dict) else None
+        if q and q.get("name"):
+            seen.append(str(q["name"]))
+            if item.get("allowed") and q.get("id") == cutoff:
+                cutoff_ok = True
+            continue
+        gid = item.get("id")
+        if gid in (None, 0):
+            return "Groups must have an ID"
+        if gid in group_ids:
+            return "Groups must have a unique ID"
+        group_ids.append(gid)
+        if item.get("allowed") and gid == cutoff:
+            cutoff_ok = True
+        for child in item.get("items") or []:
+            if not isinstance(child, dict):
+                continue
+            cq = child.get("quality") if isinstance(child.get("quality"), dict) else None
+            if cq and cq.get("name"):
+                seen.append(str(cq["name"]))
+    if cutoff is not None and not cutoff_ok:
+        return "Cutoff must be an allowed quality or group"
+    missing = [n for n in state.required_quality_names if n not in seen]
+    if missing:
+        return "Items: Must contain all qualities"
+    fmt_ids = {int(fmt["id"]) for fmt in formats if fmt.get("id") is not None}
+    have = {
+        int(item.get("format"))
+        for item in (body.get("formatItems") or [])
+        if item.get("format") is not None
+    }
+    if fmt_ids != have:
+        return (
+            "All Custom Formats and no extra ones need to be present inside your Profile! "
+            "Try refreshing your browser."
+        )
+    return None
+
+
 def png_wh(path: Path) -> tuple[int, int]:
     data = path.read_bytes()
     if data[:8] != b"\x89PNG\r\n\x1a\n" or data[12:16] != b"IHDR":
@@ -155,6 +219,15 @@ class FakeState:
         self.sonarr_defs: list[dict] = sonarr_q["definitions"]
         self.radarr_formats: list[dict] = []
         self.sonarr_formats: list[dict] = []
+        self.required_quality_names = {
+            item["quality"]["name"]
+            for item in radarr_q["profile"]["items"]
+            if isinstance(item.get("quality"), dict) and item["quality"].get("name")
+        }
+        self.strict_quality_profiles = True
+        self.fail_quality_profiles = False
+        self.reject_profile_names: set[str] = set()
+        self.quality_post_empty_body = False
         self.apps: list[dict] = []
         self.indexers: list[dict] = []
         self.radarr_indexers: list[dict] = []
@@ -348,13 +421,23 @@ def handler_for(state: FakeState):
                             clients[i] = saved
                             return self._send(body=saved)
                     return self._send(404, {"error": path})
+                if path.endswith("/qualityprofile/schema"):
+                    schema = json.loads(json.dumps(profiles[0])) if profiles else {"items": []}
+                    schema.pop("id", None)
+                    schema["name"] = ""
+                    return self._send(body=schema)
                 if path.endswith("/qualityprofile") and method == "GET":
                     return self._send(body=profiles)
                 if path.endswith("/qualityprofile") and method == "POST":
                     posted = dict(body or {})
+                    err = quality_profile_reject(posted, formats, state)
+                    if err:
+                        return self._send(400, {"message": err})
                     next_id = max((int(p.get("id") or 0) for p in profiles), default=0) + 1
                     posted["id"] = next_id
                     profiles.append(posted)
+                    if state.quality_post_empty_body:
+                        return self._send(201)
                     return self._send(201, posted)
                 if "/qualityprofile/" in path and method == "DELETE":
                     try:
@@ -371,6 +454,9 @@ def handler_for(state: FakeState):
                         idx = int(path.rsplit("/", 1)[-1])
                     except ValueError:
                         return self._send(404, {"error": path})
+                    err = quality_profile_reject(body or {}, formats, state)
+                    if err:
+                        return self._send(400, {"message": err})
                     for i, item in enumerate(profiles):
                         if item.get("id") == idx:
                             saved = dict(body or item)
@@ -1048,6 +1134,34 @@ PersistentKeepalive = 25
         self.assertIn("Remux-2160p", allowed)
         self.assertIn("BR-DISK", blocked)
 
+    def test_rebuild_assigns_nonzero_group_ids(self):
+        catalog = ws.quality_catalog(any_quality_bundle()["profile"])
+        items = ws.rebuild_profile_items(catalog, ws.DEFAULT_GROUPS)
+        groups = [item for item in items if item.get("quality") is None]
+        self.assertTrue(groups)
+        ids = [int(item["id"]) for item in groups]
+        self.assertTrue(all(gid >= 1000 for gid in ids))
+        self.assertEqual(len(ids), len(set(ids)))
+
+    def test_cutoff_from_items_uses_group_id_not_child_quality(self):
+        items = [
+            {
+                "id": 1001,
+                "name": "WEB 1080p",
+                "allowed": True,
+                "items": [
+                    {"quality": {"id": 11, "name": "WEBDL-1080p"}, "items": [], "allowed": True},
+                    {"quality": {"id": 12, "name": "WEBRip-1080p"}, "items": [], "allowed": True},
+                ],
+            },
+            {"quality": {"id": 13, "name": "Bluray-1080p"}, "items": [], "allowed": True},
+        ]
+        self.assertEqual(
+            ws.cutoff_id_from_items(items, ("WEBDL-1080p", "Bluray-1080p")),
+            1001,
+        )
+        self.assertEqual(ws.cutoff_id_from_items(items, ("Bluray-1080p",)), 13)
+
     def test_language_profile_id_skips_http(self):
         self.assertIsNone(ws.language_profile_id("http://127.0.0.1:8989/api/v3", "k"))
 
@@ -1377,7 +1491,19 @@ class WireStack(unittest.TestCase):
         max_scores = {item["name"]: item["score"] for item in maximum.get("formatItems") or []}
         self.assertEqual(max_scores["Pompey Prefer Remux"], 200)
         self.assertEqual(max_scores["Pompey Prefer lossless audio"], 150)
-        self.assertNotIn("Pompey Reject Remux/DISK", max_scores)
+        self.assertEqual(max_scores.get("Pompey Reject Remux/DISK", 0), 0)
+        cf_item_names = {item["name"] for item in default.get("formatItems") or []}
+        self.assertEqual(cf_item_names, cf_names)
+        self.assertGreaterEqual(default.get("minUpgradeFormatScore") or 0, 1)
+        web_group = next(
+            item
+            for item in default["items"]
+            if item.get("name") == "WEB 1080p" or (
+                isinstance(item.get("quality"), dict) and item["quality"].get("name") == "WEB 1080p"
+            )
+        )
+        if web_group.get("quality") is None:
+            self.assertGreater(int(web_group["id"]), 0)
         web = next(item for item in self.state.radarr_defs if item["quality"]["name"] == "WEBDL-1080p")
         self.assertEqual(web["minSize"], 12.5)
         self.assertEqual(web["preferredSize"], 33.0)
@@ -1390,6 +1516,43 @@ class WireStack(unittest.TestCase):
         self.assertEqual(sonarr_names, {"Max", "Default", "Anything"})
         self.assertEqual(self.state.seerr_main["defaultPermissions"], ws.SEERR_HOUSEHOLD_PERMS)
         self.assertTrue(ws.SEERR_HOUSEHOLD_PERMS & ws.SEERR_REQUEST_ADVANCED)
+
+    def test_quality_post_empty_body_still_wires(self):
+        os.environ["INDEXER_URL"] = ""
+        os.environ["INDEXER_API_KEY"] = ""
+        self.state.quality_post_empty_body = True
+        rc = ws.main()
+        self.assertEqual(rc, 0)
+        self.assertTrue((self.ready / "wired").exists())
+        names = {item.get("name") for item in self.state.radarr_profiles}
+        self.assertEqual(names, {"Max", "Default", "Anything"})
+        self.assertEqual(self.state.seerr_radarr[0]["activeProfileName"], "Default")
+
+    def test_quality_put_400_does_not_block_wire(self):
+        os.environ["INDEXER_URL"] = ""
+        os.environ["INDEXER_API_KEY"] = ""
+        self.state.fail_quality_profiles = True
+        rc = ws.main()
+        self.assertEqual(rc, 0)
+        self.assertTrue((self.ready / "wired").exists())
+        self.assertTrue((self.ready / "seerr-arr").exists())
+        names = {item.get("name") for item in self.state.radarr_profiles}
+        self.assertEqual(names, {"Any"})
+        self.assertEqual(self.state.seerr_radarr[0]["activeProfileName"], "Any")
+
+    def test_keeps_stock_profiles_until_three_exist(self):
+        os.environ["INDEXER_URL"] = ""
+        os.environ["INDEXER_API_KEY"] = ""
+        extra = json.loads(json.dumps(any_quality_bundle(2, "HD-720p")["profile"]))
+        self.state.radarr_profiles.append(extra)
+        self.state.reject_profile_names = {"Max"}
+        rc = ws.main()
+        self.assertEqual(rc, 0)
+        names = {item.get("name") for item in self.state.radarr_profiles}
+        self.assertIn("Default", names)
+        self.assertIn("Anything", names)
+        self.assertIn("HD-720p", names)
+        self.assertNotIn("Max", names)
 
     def test_grants_advanced_requests_to_existing_seerr_user(self):
         os.environ["INDEXER_URL"] = ""
@@ -1409,9 +1572,9 @@ class WireStack(unittest.TestCase):
         self.assertEqual(rc, 0)
         default = profile_named(self.state.radarr_profiles, "Default")
         scores = {item["name"]: item["score"] for item in default.get("formatItems") or []}
-        self.assertNotIn("Pompey Dual Audio", scores)
-        self.assertNotIn("Pompey English dub", scores)
-        self.assertNotIn("Pompey English subs", scores)
+        self.assertEqual(scores.get("Pompey Dual Audio", 0), 0)
+        self.assertEqual(scores.get("Pompey English dub", 0), 0)
+        self.assertEqual(scores.get("Pompey English subs", 0), 0)
 
     def test_share_to_ratio_leaves_torrent_until_ratio(self):
         os.environ["INDEXER_URL"] = ""
