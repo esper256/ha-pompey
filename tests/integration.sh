@@ -39,6 +39,11 @@ cleanup() {
   for pid in "${PIDS[@]:-}"; do
     kill_pid "${pid}"
   done
+  if ip netns list 2>/dev/null | awk '{ print $1 }' | grep -qx pompey-dev; then
+    sudo -n ip netns pids pompey-dev 2>/dev/null | xargs -r sudo -n kill >/dev/null 2>&1 || true
+    sleep 0.3
+    sudo -n ip netns pids pompey-dev 2>/dev/null | xargs -r sudo -n kill -9 >/dev/null 2>&1 || true
+  fi
   bash "${ROOT}/pompey/rootfs/usr/local/bin/pompey-dev-vpn" down >/dev/null 2>&1 || true
   sudo -n rm -rf "${WORK}" 2>/dev/null || rm -rf "${WORK}"
 }
@@ -155,7 +160,8 @@ ns "${POMPEY_ENGINES}/Radarr/Radarr" -nobrowser -data="${POMPEY_CONFIG}/radarr" 
 PIDS+=("$!")
 
 # wire-stack waits on the download-engine WebUI. Answer HTTP only — do not run it.
-ns python3 - "${WORK}" <<'PY'
+log "HTTP stubs (download-engine WebUI + Seerr); no torrent client"
+ns python3 - "${WORK}" >"${WORK}/http-stub.log" 2>&1 <<'PY' &
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json, os, sys, threading
 from urllib.parse import urlparse
@@ -223,7 +229,6 @@ threading.Thread(target=seerr.serve_forever, daemon=True).start()
 open(os.path.join(work, "http-stub.pid"), "w").write(str(os.getpid()))
 threading.Event().wait()
 PY
-> "${WORK}/http-stub.log" 2>&1 &
 PIDS+=("$!")
 
 wait_url http://127.0.0.1:8080/api/v2/app/version 20
