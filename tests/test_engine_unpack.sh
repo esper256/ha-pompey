@@ -166,15 +166,24 @@ while IFS= read -r url; do
   if [[ "${url}" == *qbittorrent-nox ]]; then
     continue
   fi
-  python3 "${LIB}" inspect-url "${url}" "${extra[@]}"
+  python3 "${LIB}" inspect-url "${url}" "${extra[@]}" | tee "${WORK}/inspect.out"
+  if grep -q '^skipped=' "${WORK}/inspect.out"; then
+    echo "skip live fetch $(grep '^skipped=' "${WORK}/inspect.out")" >&2
+  fi
 done <<<"${urls}"
 # Explicit HAOS URL (this VM is glibc; print-urls above is linuxmusl via POMPEY_SERVARR_OS).
 musl_prowlarr="https://prowlarr.servarr.com/v1/update/master/updatefile?os=linuxmusl&runtime=netcore&arch=x64"
-python3 "${LIB}" inspect-url "${musl_prowlarr}" --require-musl
+if python3 "${LIB}" inspect-url "${musl_prowlarr}" --require-musl | tee "${WORK}/inspect.out" | grep -q '^skipped='; then
+  echo "skip live musl Prowlarr inspect $(grep '^skipped=' "${WORK}/inspect.out")" >&2
+fi
 musl_sonarr="https://services.sonarr.tv/v1/download/main/latest?version=4&os=linuxmusl&arch=x64"
-python3 "${LIB}" inspect-url "${musl_sonarr}" --require-musl
+if python3 "${LIB}" inspect-url "${musl_sonarr}" --require-musl | tee "${WORK}/inspect.out" | grep -q '^skipped='; then
+  echo "skip live musl Sonarr inspect $(grep '^skipped=' "${WORK}/inspect.out")" >&2
+fi
 musl_radarr="https://radarr.servarr.com/v1/update/master/updatefile?os=linuxmusl&runtime=netcore&arch=x64"
-python3 "${LIB}" inspect-url "${musl_radarr}" --require-musl
+if python3 "${LIB}" inspect-url "${musl_radarr}" --require-musl | tee "${WORK}/inspect.out" | grep -q '^skipped='; then
+  echo "skip live musl Radarr inspect $(grep '^skipped=' "${WORK}/inspect.out")" >&2
+fi
 
 echo "== real Prowlarr linux-musl tar.gz unpack =="
 CACHE="${POMPEY_ARTIFACT_CACHE:-${HOME}/.cache/pompey/artifacts}"
