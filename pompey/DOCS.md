@@ -2,6 +2,8 @@
 
 Search for a movie or TV show from the Home Assistant sidebar. Confirm if we need you. It lands in the right library and Plex notices.
 
+**This is 0.2.0 experimental.** The [root README](../README.md) lists what is done vs not. Do not install this for the household yet. A first Home Assistant OS try is only useful if you have Proton + Plex + a source and want to report what breaks.
+
 All internet from this app uses Proton WireGuard. If the tunnel is down, internet is dropped.
 
 This app is **not** published as a container image. Copy `pompey/` into `/addons` and let Supervisor build it on the machine. After the tunnel is up, Pompey downloads the household search UI (Seerr) and the hidden engines onto the config share. First start can take several minutes and a few hundred megabytes.
