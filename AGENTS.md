@@ -1,6 +1,6 @@
 # AGENTS.md
 
-This file is for Cursor cloud agents. Household operators should read [DOCS.md](pompey/DOCS.md). The product plan is [VISION.md](VISION.md).
+This file is for Cursor cloud agents. The household guide is [README.md](README.md). Home Assistant Supervisor notes are [pompey/DOCS.md](pompey/DOCS.md). The product plan is [VISION.md](VISION.md).
 
 ## Short answer (why this file mentions Docker)
 
