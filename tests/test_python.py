@@ -307,6 +307,12 @@ class Helpers(unittest.TestCase):
         chosen = ws.pick_plex_server(servers, "172.30.32.1")
         self.assertEqual(chosen["name"], "Home")
 
+    def test_wait_page_reloads_only_when_search_is_live(self):
+        html = (ROOT / "pompey/rootfs/usr/share/pompey/index.html").read_text()
+        self.assertIn("data.search", html)
+        self.assertIn("location.replace", html)
+        self.assertIn("Opening search", html)
+
     def test_fill_fields(self):
         resource = {"fields": [{"name": "host", "value": ""}, {"name": "port", "value": 0}]}
         ws.fill_fields(resource, {"host": "127.0.0.1", "port": 8080})
@@ -387,7 +393,11 @@ class WireStack(unittest.TestCase):
         text = self.nginx.read_text()
         self.assertIn("proxy_pass " + os.environ["SEERR_URL"], text)
         self.assertIn("X-Forwarded-Prefix", text)
+        self.assertIn("status.json", text)
         self.assertNotIn("test-plex-token", text)
+        live = json.loads((self.ready / "status.json").read_text())
+        self.assertTrue(live["search"])
+        self.assertTrue(live["handoff"])
 
 
 class RouteRating(unittest.TestCase):

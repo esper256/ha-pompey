@@ -39,7 +39,7 @@ Do not publish download peer ports on the Home Assistant host.
 
 ## What you see
 
-Open **Pompey** in the sidebar. The first boot shows a wait screen with a progress bar: Proton tunnel, download, start engines, connect search. After that, the sidebar is the search UI.
+Open **Pompey** in the sidebar. The first boot shows a wait screen with a progress bar: Proton tunnel, download, start engines, connect search. When that finishes, the same sidebar entry reloads into the search UI (Seerr). You should not need a second bookmark.
 
 If the bar stays on the tunnel step, the Proton handshake is not up yet (missing/invalid WireGuard file is the usual cause). Opening `index.html` as a file in the editor is only that wait screen and will never become search.
 

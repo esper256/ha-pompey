@@ -144,9 +144,15 @@
         li.append(mark, lab);
         stepsEl.append(li);
       });
-      if (data.handoff && !sessionStorage.getItem("pompey-handoff")) {
-        sessionStorage.setItem("pompey-handoff", "1");
-        setTimeout(() => location.reload(), 400);
+      if (data.search) {
+        now.textContent = "Opening search…";
+        const n = Number(sessionStorage.getItem("pompey-handoff") || "0");
+        if (n < 8) {
+          sessionStorage.setItem("pompey-handoff", String(n + 1));
+          setTimeout(() => {
+            location.replace(location.pathname + location.hash);
+          }, 300);
+        }
       }
     }
 

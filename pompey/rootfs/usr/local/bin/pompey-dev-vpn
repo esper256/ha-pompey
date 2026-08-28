@@ -113,6 +113,9 @@ up() {
   run sysctl -w net.ipv4.conf.default.rp_filter=2 >/dev/null 2>/dev/null || true
 
   run ip netns add "${NS}"
+  # systemd-resolved's 127.0.0.53 is on the host loopback, not this netns.
+  run mkdir -p "/etc/netns/${NS}"
+  printf 'nameserver 1.1.1.1\nnameserver 8.8.8.8\n' | run tee "/etc/netns/${NS}/resolv.conf" >/dev/null
   run ip link add "${WG_IFACE}" type veth peer name "${PEER_IFACE}"
   run ip link set "${WG_IFACE}" netns "${NS}"
   ns ip addr add "${WG_ADDR}" dev "${WG_IFACE}"
@@ -149,6 +152,7 @@ down() {
   if ns_exists; then
     run ip netns del "${NS}" || true
   fi
+  run rm -rf "/etc/netns/${NS}" 2>/dev/null || true
   rm -f "${STATE}"
   log "Fake ${WG_IFACE} down"
 }

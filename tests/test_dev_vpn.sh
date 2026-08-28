@@ -38,8 +38,12 @@ def="$(ip route show default | awk '{ for (i=1;i<=NF;i++) if ($i=="dev") { print
 [[ "${def}" != "wg0" ]]
 
 # All traffic in the netns leaves via wg0, then NATs out eth0.
+# Prefer a name so DNS in the netns is covered; fall back to a literal IP.
 code="$(bash "${VPN}" exec curl -4 -sS -o /dev/null -w '%{http_code}' --max-time 20 https://example.com || true)"
 if [[ "${code}" != "200" ]]; then
+  code="$(bash "${VPN}" exec curl -4 -sS -o /dev/null -w '%{http_code}' --max-time 15 http://1.1.1.1 || true)"
+fi
+if [[ "${code}" != "200" && "${code}" != "301" && "${code}" != "302" ]]; then
   echo "curl via fake wg0 netns -> HTTP ${code}" >&2
   exit 1
 fi

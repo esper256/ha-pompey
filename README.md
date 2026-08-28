@@ -18,7 +18,7 @@ We do not publish a container image. Supervisor builds this app on your machine.
 2. Settings → Apps → Check for updates.
 3. Put a Proton WireGuard config in the app’s config share (or paste the fields).
 4. Fill Plex address + token and one source (URL plus key).
-5. Start **Pompey** and open the UI. First start downloads through the tunnel and can take several minutes. The wait screen shows which step is running (tunnel, download, start, connect). If it stays on the tunnel step, Proton is not up yet.
+5. Start **Pompey** and open the UI. First start downloads through the tunnel and can take several minutes. The wait screen shows which step is running (tunnel, download, start, connect), then reloads into search. If it stays on the tunnel step, Proton is not up yet.
 
 Supervisor builds the Dockerfile locally. That is the only delivery path.
 
