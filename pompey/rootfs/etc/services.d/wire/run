@@ -38,4 +38,11 @@ until python3 /usr/local/bin/wire-stack; do
   sleep 8
 done
 
+# Search is up. Keep applying Seerr→Arr until the Plex wizard creates user id 1
+# (the API key impersonates that row and 403s before then).
+until [[ -f "${POMPEY_READY}/seerr-arr" ]]; do
+  sleep 15
+  python3 /usr/local/bin/wire-stack >/dev/null || true
+done
+
 exec sleep infinity

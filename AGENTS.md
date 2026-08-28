@@ -19,7 +19,7 @@ In this Cursor VM there is no Supervisor. Starting Docker here is only so an age
 | `dockerd` | Already the HAOS host. Not something Pompey starts. | Optional, this VM only. Packages persist; the daemon process does not. |
 | Config | Supervisor writes `/data/options.json` from the app options UI | We supply [`tests/options.json`](tests/options.json) ourselves |
 | VPN / internet | All traffic on Proton `wg0`, else dropped | **Fake `wg0`**: a veth in netns `pompey-dev` that NATs out `eth0`. Same interface name the download engine binds. Not Proton. Set `POMPEY_FAKE_VPN=1`. Do **not** apply the OUTPUT DROP kill switch here (it would kill the agent). Keep host DNS. |
-| What the household sees | Wait screen, then Seerr on Ingress | [`tests/preview.py`](tests/preview.py) is the wait screen. Seerr’s image is Alpine/musl; if you unpack it, run it with the host glibc `node`. |
+| What the household sees | Wait screen, then Seerr on Ingress | [`tests/preview.py`](tests/preview.py) is the wait screen. Seerr’s image is Alpine/musl; CI unpacks it and runs the image’s own `node` via `chroot` (host glibc node cannot load Seerr’s sqlite3 addon). |
 | Engines | musl tarballs after the tunnel is up | glibc (`os=linux`) tarballs on Ubuntu, cached under `~/.cache/pompey/engines`. Tests skip unpacking the torrent client (`POMPEY_SKIP_QBIT=1`). `tests/run.sh` unpacks a Prowlarr-shaped fixture and the real linux-musl Prowlarr `.tar.gz` (cached under `~/.cache/pompey/artifacts`) so HAOS `/tmp` chmod failures and Windows zips are caught without a Supervisor rebuild. |
 | Sources / Plex | Operator URL+key and a real Plex | Empty source + empty Plex token. Tests never speak BitTorrent. |
 
@@ -33,14 +33,14 @@ Shipping path: copy `pompey/` into `/addons`. Supervisor builds locally. That is
 
 s6-overlay: `rootfs/etc/cont-init.d/*` once, then `rootfs/etc/services.d/*`.
 
-`wire-stack` must exit non-zero on a required miss (Prowlarr apps, source indexer when a URL is set, Seerr API key from `settings.json`, Seerr→Radarr/Sonarr, qBittorrent category other than 409). s6 retries; the wait screen stays up. Plex login, Seerr local login (real Seerr 403s until the wizard creates a user), and Seerr chrome settings are optional. Do not log-and-continue on a required step — that flipped Ingress to a hollow search UI.
+`wire-stack` must exit non-zero on a required miss (Prowlarr apps, source indexer when a URL is set, Seerr process up via GET `/settings/public`, Seerr→Radarr/Sonarr **after** Seerr is initialized, qBittorrent category other than 409). Before initialize, the Plex wizard has not created user id 1, so the API key 403s — hand off to the wizard anyway and keep retrying. Plex login, Seerr local login (real Seerr 403s until the wizard creates a user), and Seerr chrome settings are optional. Do not log-and-continue on a required step — that flipped Ingress to a hollow search UI.
 
 ## What agents should run here (no HAOS)
 
-Fast, no Docker. CI unpacks a cached Prowlarr linux-musl tarball (not a torrent client):
+`bash tests/run.sh` (CI) unpacks a cached Prowlarr linux-musl tarball **and** the official Seerr image (crane export, then chroot so musl node/sqlite load). That catches `/auth/local` 403 (login-only) and API-key 403 before user id 1 exists. Arr/qBittorrent/Torznab stay HTTP fakes: tests never speak BitTorrent.
 
 ```bash
-bash tests/run.sh              # options.json + bashio stub + fake engines + Prowlarr unpack + fake-wg0 smoke
+bash tests/run.sh              # options.json + stubs + real Seerr API + Prowlarr unpack + fake-wg0 smoke
 python3 tests/preview.py       # wait-screen progress UI at http://127.0.0.1:8099/
 ```
 
@@ -51,7 +51,7 @@ sudo apt-get install -y iproute2 iptables libicu74
 bash tests/integration.sh      # The Wild Robot via Radarr TMDB lookup, Prowlarr sync of a fake Torznab source into Radarr/Sonarr, then Prowlarr search until the fake qBittorrent WebUI records the magnet add
 ```
 
-That downloads official Radarr/Sonarr/Prowlarr into `~/.cache/pompey/engines` on first run. It looks the movie up on TMDB and adds it to Radarr **without searching or downloading from the internet**. A fake Torznab source (`tests/lib/fake_source.py`) answers Prowlarr (movie hit for The Wild Robot; a dummy TV item so Sonarr's indexer test passes). The test fails if Prowlarr does not sync that source into Radarr/Sonarr, then ends when the fake qBittorrent WebUI records `torrents/add` for the movie magnet. Do not start the torrent client, do not wait on peers, and do not add that wait to CI (`tests/run.sh` only). Seerr unpack is skipped unless `POMPEY_SKIP_SEERR=0` and `crane` is on PATH (then use host `node`, not Alpine’s).
+That downloads official Radarr/Sonarr/Prowlarr into `~/.cache/pompey/engines` on first run. It looks the movie up on TMDB and adds it to Radarr **without searching or downloading from the internet**. A fake Torznab source (`tests/lib/fake_source.py`) answers Prowlarr (movie hit for The Wild Robot; a dummy TV item so Sonarr's indexer test passes). The test fails if Prowlarr does not sync that source into Radarr/Sonarr, then ends when the fake qBittorrent WebUI records `torrents/add` for the movie magnet. Do not start the torrent client, do not wait on peers, and do not add that wait to CI (`tests/run.sh` only). Integration still skips booting Seerr (`POMPEY_SKIP_SEERR=1`); CI already runs the real Seerr API in `tests/test_seerr_real.py`.
 
 Opening `index.html` as a file is only the wait screen.
 

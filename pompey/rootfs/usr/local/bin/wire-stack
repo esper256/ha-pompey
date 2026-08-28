@@ -4,8 +4,9 @@
 Required (must succeed or this process exits non-zero so s6 retries, and
 the wait screen does not flip to search): qBittorrent categories, Arr root
 folders and download clients, Prowlarr↔Radarr/Sonarr apps, the operator
-source indexer when a URL is configured, Seerr API key (from settings.json),
-Seerr→Radarr/Sonarr.
+source indexer when a URL is configured, Seerr process up (GET /settings/public).
+Seerr→Radarr/Sonarr is required after Seerr is initialized. Before that, the
+Plex wizard has not created user id 1, so the API key 403s; we still hand off.
 
 Optional (log and continue): Plex token/login/libraries, Seerr local login
 (403 is normal until the wizard creates a user), Seerr chrome settings
@@ -369,7 +370,7 @@ class Seerr:
         if self.cookie:
             headers["Cookie"] = self.cookie
         if self.api_key:
-            headers["X-Api-Key"] = self.api_key
+            headers["X-API-Key"] = self.api_key
         return headers
 
     def call(self, method: str, path: str, body=None):
@@ -476,8 +477,12 @@ def configure_seerr(secrets: dict, radarr_profile, sonarr_profile, sonarr_lang) 
             log(f"seerr api key: {exc}", "WARNING")
         if not s.api_key:
             s.api_key = seerr_api_key_from_disk()
-    if not s.api_key:
-        raise RuntimeError("seerr has no API key yet; cannot wire Radarr/Sonarr")
+
+    def public_initialized() -> bool:
+        public = s.call("GET", "/api/v1/settings/public") or {}
+        return isinstance(public, dict) and bool(public.get("initialized"))
+
+    initialized = public_initialized()
 
     if have_plex:
         host, port, ssl = parse_plex(plex_url())
@@ -559,16 +564,31 @@ def configure_seerr(secrets: dict, radarr_profile, sonarr_profile, sonarr_lang) 
     if sonarr_lang is not None:
         sonarr_payload["activeLanguageProfileId"] = sonarr_lang
 
-    def upsert_arr(kind: str, payload: dict) -> None:
+    def upsert_arr(kind: str, payload: dict) -> bool:
         path = f"/api/v1/settings/{kind}"
-        existing = as_list(s.call("GET", path))
-        if any(item.get("hostname") == "127.0.0.1" for item in existing):
-            return
-        s.call("POST", path, payload)
-        log(f"seerr {kind}")
+        try:
+            existing = as_list(s.call("GET", path))
+            if any(item.get("hostname") == "127.0.0.1" for item in existing):
+                return True
+            s.call("POST", path, payload)
+            log(f"seerr {kind}")
+            return True
+        except RuntimeError as exc:
+            # API key impersonates user id 1. That row does not exist until the
+            # wizard creates the first admin, so settings 403. Hand off anyway.
+            if "403" in str(exc) and not initialized:
+                log(f"seerr {kind} waits until the Plex wizard creates the first admin")
+                return False
+            if "403" in str(exc):
+                raise RuntimeError("seerr has no Radarr/Sonarr after initialize") from exc
+            raise
 
-    upsert_arr("radarr", radarr_payload)
-    upsert_arr("sonarr", sonarr_payload)
+    wired_arr = upsert_arr("radarr", radarr_payload)
+    wired_arr = upsert_arr("sonarr", sonarr_payload) or wired_arr
+    if wired_arr:
+        open(os.path.join(ready_dir(), "seerr-arr"), "w").close()
+    elif initialized:
+        raise RuntimeError("seerr has no Radarr/Sonarr after initialize")
 
     try:
         s.call(

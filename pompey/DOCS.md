@@ -84,7 +84,7 @@ There is no country dropdown. The Proton file already chose a server. Generate a
 
 Home Assistant’s option list is only Plex and source. It does not ask for WireGuard internals (filename, DNS, LAN CIDRs, log level). Those are fixed: Proton DNS `10.2.0.1`, RFC1918 LAN plus Supervisor `172.30.32.0/23`, media at `/media`.
 
-Plex in the Home Assistant options is a **shortcut**, not a second source of truth. Seerr’s web setup is the canonical Plex connection. If you leave those fields empty, Pompey wires Radarr/Sonarr with Seerr’s own API key (from `settings.json`) and you finish Plex on Seerr’s first screen. That wizard creates the first admin; there is no `pompey@local` password login until then. Pompey does not copy the Plex token back into Home Assistant options. Source URL/key are for Prowlarr; they are not part of that wizard.
+Plex in the Home Assistant options is a **shortcut**, not a second source of truth. Seerr’s web setup is the canonical Plex connection. If you leave those fields empty, the wait screen still hands off to Seerr’s first screen. That wizard creates the first admin; Seerr’s API key cannot talk to Radarr/Sonarr until then, so Pompey retries in the background. There is no `pompey@local` password login until someone sets a local password later. Pompey does not copy the Plex token back into Home Assistant options. Source URL/key are for Prowlarr; they are not part of that wizard.
 
 | Option | Meaning |
 | --- | --- |
@@ -101,7 +101,7 @@ Open **Pompey** in the sidebar. If Proton is not configured yet, paste the `.con
 
 Opening `index.html` as a file in the editor is only that wait screen and will never become search.
 
-If Plex is not filled in yet, Pompey still creates a local search account and wires the TV/movie engines. Seerr stays uninitialized so you land on its Plex setup wizard. Use a **numeric IP** there.
+If Plex is not filled in yet, you land on Seerr’s Plex setup wizard. Use a **numeric IP** there. Pompey wires Radarr/Sonarr after that wizard creates the first admin.
 
 ## Storage
 
