@@ -3,30 +3,28 @@ configuration:
     name: Media folder
     description: >-
       Folder this app can write, from Home Assistant’s point of view.
-      Default /media. A network share added under Settings → System →
-      Storage as Media is /media/<the name you gave it>. In-progress
-      downloads go in downloads/ under this folder. Point Plex at the
-      library folders below, not at downloads.
+      Default /media/dlna (a network share added under Settings →
+      System → Storage as Media named dlna). In-progress downloads go
+      in downloads/ under this folder. Point Plex at the library
+      folders below, not at downloads.
   movies_folder:
     name: Movies
     description: >-
-      General movies, relative to the media folder. Example Movies or
+      General movies, relative to the media folder. Default
       Movies/Not Kid Friendly. Do not nest this inside the kid movies
       folder (Radarr cannot use a root folder that contains another).
   movies_kid_folder:
     name: Kid movies
     description: >-
-      Kid movies, relative to the media folder. Example Kid Friendly
-      Movies or Movies/Kid Friendly. Adults who should also see kid
-      titles can add this folder to the adult Plex movie library as a
-      second location.
+      Kid movies, relative to the media folder. Default Movies/Kid
+      Friendly. Adults who should also see kid titles can add this
+      folder to the adult Plex movie library as a second location.
   tv_folder:
     name: TV
     description: >-
-      General TV, relative to the media folder. Example TV or
+      General TV, relative to the media folder. Default
       TV/Not Kid Friendly.
   tv_kid_folder:
     name: Kid TV
     description: >-
-      Kid TV, relative to the media folder. Example Kid Friendly TV or
-      TV/Kid Friendly.
+      Kid TV, relative to the media folder. Default TV/Kid Friendly.

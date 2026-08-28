@@ -1,6 +1,6 @@
 # https://developers.home-assistant.io/docs/apps/configuration
 name: Pompey
-version: "0.2.20"
+version: "0.2.21"
 slug: pompey
 description: >-
   Search for a movie or TV show. Confirm if we need you. It lands in the
@@ -46,14 +46,15 @@ map:
     read_only: false
 # Media parent is the Home Assistant media share (or a Media network
 # storage folder under it). Library fields are relative to that parent.
+# Defaults match this house: share name dlna, sibling kid/not-kid folders.
 # Plex must already scan those same folders. Proton is wait-screen paste.
 # Sources are Prowlarr on :9696.
 options:
-  media_folder: /media
-  movies_folder: Movies
-  movies_kid_folder: Kid Friendly Movies
-  tv_folder: TV
-  tv_kid_folder: Kid Friendly TV
+  media_folder: /media/dlna
+  movies_folder: Movies/Not Kid Friendly
+  movies_kid_folder: Movies/Kid Friendly
+  tv_folder: TV/Not Kid Friendly
+  tv_kid_folder: TV/Kid Friendly
 schema:
   media_folder: str
   movies_folder: str
