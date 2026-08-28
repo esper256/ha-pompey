@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.26
+
+- Auto-grab prefers **1080p WEB-DL / BluRay encodes**, not remux or 4K. A 26 GB remux was Radarr’s default ranking, not a bad source. The household profile also prefers x265 and WEB-DL, rejects CAM/TS, and caps 1080p size (about 10–15 GB for a two-hour movie). Already-queued grabs are not cancelled. Search still uses this profile after a rebuild.
+
 ## 0.2.25
 
 - Empty Query in Prowlarr History during a Seerr request is often a **top100 browse**, not an IMDb search: Radarr sent an ID (or nothing), the source ignored it, and listed popular torrents. Arr now talks to Prowlarr through a localhost proxy that advertises title search only, so the movie name goes to every source. Open sources stays on port 9696. After wiring, the app log labels History rows as ID, title, RSS, or browse/top100.

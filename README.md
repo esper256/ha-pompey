@@ -4,7 +4,7 @@ Search for a movie or TV show in Home Assistant. Confirm if we need you. It land
 
 Pompey is one Home Assistant OS app. The sidebar is the box: Proton, status, a button to search. Search itself is [Seerr](https://seerr.dev/) on this machine’s port **5055**, not an iframe. Downloads, matching, and the VPN stay inside Pompey. All internet from this app uses Proton WireGuard. If the tunnel is down, internet is dropped. **Plex is a separate Home Assistant app** (or another machine). Pompey does not run Plex.
 
-This is the user guide for the product we are building. It describes the journey as it should feel. [What is not ready yet](#what-is-not-ready-yet) is honest about the current cut (**0.2.25**). The [roadmap](#roadmap) is how we close the gap.
+This is the user guide for the product we are building. It describes the journey as it should feel. [What is not ready yet](#what-is-not-ready-yet) is honest about the current cut (**0.2.26**). The [roadmap](#roadmap) is how we close the gap.
 
 ## How a day with it should feel
 
@@ -151,7 +151,7 @@ The product should keep those current for you — through the VPN, without you v
 
 - You should still update **Pompey** when we ship a wrapper fix.
 - You should not be expected to open Radarr/Sonarr to click Update.
-- Quality profiles stay at each engine’s defaults until Recyclarr/TRaSH is wired (auto-grab may pick a poor release).
+- Quality profiles: **0.2.26** applies a household HD profile. Recyclarr is not yet refreshing TRaSH scores on a schedule.
 
 ### Proton
 
@@ -165,12 +165,12 @@ A private tracker with a stable API key is set-and-forget. Prowlarr copies that 
 
 ## What is not ready yet
 
-The journey above is the target. **0.2.25** is a real Home Assistant OS install of that box, not the finished household app.
+The journey above is the target. **0.2.26** is a real Home Assistant OS install of that box, not the finished household app.
 
 | In the guide | On the machine today |
 | --- | --- |
 | Request → file on disk → Plex notices | Wiring is written. Automated tests never start the torrent client or wait on peers. A title actually landing in Plex is what a real install is still proving. |
-| Auto-grab is usually the right quality | Engines use their own defaults. Recyclarr / TRaSH profiles are not applied. |
+| Auto-grab is usually the right quality | **0.2.26** applies a household HD profile: 1080p WEB-DL/BluRay encodes, no remux or 4K, prefer x265. Live Recyclarr refresh of TRaSH scores is still later. |
 | “Confirm if we need you” when quality and seeds disagree | Not built. Seerr is not a download console; we will not fork it into one. |
 | Engines stay current for years | First fetch only. Already-present binaries are skipped on restart. |
 | Add another source from search/settings | **Open sources** (Prowlarr :9696). A Pompey-native source UI is still roadmap. |
@@ -182,7 +182,7 @@ The journey above is the target. **0.2.25** is a real Home Assistant OS install 
 | Jellyfin | Plex only. |
 | Use this from outside the house | Out of scope. Search is on the LAN at :5055. Sources at :9696. Do not port-forward either. |
 
-If search is a blank page on port 5055, or the Plex button on setup does nothing, that is a bug — send the log. Rebuild so the banner says **0.2.25** if a Seerr request only title-searched two Prowlarr sources and the rest were top100, or if you still need tagged app logs, a wait-screen fix, household media-folder defaults, **Open sources**, or an older wait screen.
+If search is a blank page on port 5055, or the Plex button on setup does nothing, that is a bug — send the log. Rebuild so the banner says **0.2.26** if auto-grab picked a huge remux, a Seerr request only title-searched two Prowlarr sources, or you still need tagged app logs, household media-folder defaults, **Open sources**, or an older wait screen.
 
 ## Roadmap
 
@@ -190,7 +190,7 @@ Work that turns the current box into the guide above, in the order it unblocks t
 
 1. **Prove request → file → Plex** on a real HAOS install. Until that loop is boring, nothing else is the product. Kid/general folders, Plex libraries, and NAT-PMP are already aimed at this.
 2. **Engine and Seerr updates.** After the tunnel is up, check official channels (Servarr update APIs, Seerr’s published image, qBittorrent-nox static builds). Replace on-disk copies when upstream moves, then restart those processes. Tie a check to Pompey add-on updates *and* to a periodic run so a wrapper we do not touch for months still refreshes Radarr. Never require the user to open an engine UI to click Update.
-3. **Quality profiles (Recyclarr / TRaSH).** Apply a sane default profile inside the container so auto-grab is usually right. Keep it off the sidebar. Refresh those profiles when engines update.
+3. **Quality profiles (Recyclarr / TRaSH).** **0.2.26** applies a household HD profile (1080p WEB-DL/BluRay, no remux/4K). Next is keeping TRaSH scores current (Recyclarr or equivalent) when engines update, still off the sidebar.
 4. **Operator status in the sidebar wait/search chrome** — enough to see “downloading / failed / needs you” without Radarr’s queue. This is ours, not a Seerr fork.
 5. **Confirm when we cannot decide.** A small “this file vs that file” step for the rare case. Not v1 if it means becoming a torrent picker. Not a Cloudflare solver.
 6. **Sources without opening Prowlarr.** Adding a source, rotating a key, and “source is down” should be possible from Pompey. Until then, **Open sources** is Prowlarr on :9696. Still no indexer catalog shipped in the repo, and no Home Assistant options for this.
