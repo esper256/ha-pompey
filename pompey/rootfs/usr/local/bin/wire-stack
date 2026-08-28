@@ -97,8 +97,9 @@ def ingress_proxy_url() -> str:
 SEERR_HOUSEHOLD_PERMS = 32 + 128 + 256 + 512
 
 
-def log(msg: str) -> None:
-    print(f"[wire-stack] {msg}", flush=True)
+def log(msg: str, level: str = "INFO") -> None:
+    stamp = time.strftime("%H:%M:%S")
+    print(f"[{stamp}] {level}: [wire-stack] {msg}", flush=True)
 
 
 def mark_status(step: str, label: str, percent: int, error: str = "") -> None:
@@ -568,6 +569,7 @@ def reload_nginx() -> None:
         alias {status};
         default_type application/json;
         add_header Cache-Control "no-store";
+        access_log off;
     }}
 
     location / {{
