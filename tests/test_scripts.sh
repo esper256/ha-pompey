@@ -56,7 +56,7 @@ run() {
   "${ROOT}/tests/with-bashio" "$@"
 }
 
-echo "== banner (fields in options.json) =="
+echo "== banner (empty HA options) =="
 log="$(run "${INIT}/00-banner.sh" 2>&1)"
 printf '%s\n' "${log}"
 grep -q "Pompey" <<<"${log}"
@@ -95,39 +95,23 @@ if grep -q -- "-j DROP" "${IPTABLES_LOG}"; then
 fi
 test "$(jq -r .need_proton "${POMPEY_READY}/status.json")" = true
 
-echo "== banner warns when Plex/source are empty =="
-warn="${WORK}/warn-options.json"
-python3 - "${ROOT}/tests/options.json" "${warn}" <<'PY'
-import json, sys
-data = json.load(open(sys.argv[1], encoding="utf-8"))
-data["plex_token"] = ""
-data["source_url"] = ""
-data["source_key"] = ""
-json.dump(data, open(sys.argv[2], "w"))
-PY
-BASHIO_OPTIONS="${warn}" run "${INIT}/00-banner.sh" >/tmp/pompey-banner-warn.log 2>&1
-grep -q "Plex token is empty" /tmp/pompey-banner-warn.log
-grep -q "No source URL yet" /tmp/pompey-banner-warn.log
-
-echo "== banner warns when Plex address is a hostname =="
-hostn="${WORK}/plex-host.json"
-python3 - "${ROOT}/tests/options.json" "${hostn}" <<'PY'
-import json, sys
-data = json.load(open(sys.argv[1], encoding="utf-8"))
-data["plex_url"] = "http://plex.local:32400"
-json.dump(data, open(sys.argv[2], "w"))
-PY
-BASHIO_OPTIONS="${hostn}" run "${INIT}/00-banner.sh" >/tmp/pompey-banner-host.log 2>&1
-grep -q "numeric IP" /tmp/pompey-banner-host.log
-
 echo "== write-engine-configs from options =="
 run "${BIN}/write-engine-configs"
 test -f "${POMPEY_CONFIG}/sonarr/config.xml"
 test -f "${POMPEY_CONFIG}/radarr/config.xml"
 test -f "${POMPEY_CONFIG}/prowlarr/config.xml"
 test -f "${POMPEY_CONFIG}/qBittorrent/qBittorrent.conf"
-grep -q "127.0.0.1" "${POMPEY_CONFIG}/sonarr/config.xml"
+grep -q "BindAddress>127.0.0.1" "${POMPEY_CONFIG}/sonarr/config.xml"
 grep -q "BindAddress>127.0.0.1" "${POMPEY_CONFIG}/radarr/config.xml"
+grep -Fq 'BindAddress>*</BindAddress>' "${POMPEY_CONFIG}/prowlarr/config.xml"
+if grep -q "BindAddress>127.0.0.1" "${POMPEY_CONFIG}/prowlarr/config.xml"; then
+  echo "Prowlarr must not bind only localhost" >&2
+  exit 1
+fi
+if grep -qi "AuthenticationMethod>None" "${POMPEY_CONFIG}/prowlarr/config.xml"; then
+  echo "Prowlarr AuthenticationMethod None would leave sources open on the LAN" >&2
+  exit 1
+fi
 grep -Fq "WebUI\\Address=127.0.0.1" "${POMPEY_CONFIG}/qBittorrent/qBittorrent.conf"
 grep -Fq "Session\\Interface=wg0" "${POMPEY_CONFIG}/qBittorrent/qBittorrent.conf"
 grep -Fq "Session\\Interface=wg0" "${POMPEY_CONFIG}/qBittorrent/config/qBittorrent.conf"
@@ -140,6 +124,30 @@ assert secrets["qbit_pbkdf2"] in (cfg / "qBittorrent/qBittorrent.conf").read_tex
 assert secrets["qbit_password"] not in (cfg / "qBittorrent/qBittorrent.conf").read_text()
 print("engine configs match secrets; qbit password is hashed")
 PY
+
+echo "== write-engine-configs publishes an existing localhost Prowlarr file =="
+python3 - "${POMPEY_CONFIG}/prowlarr/config.xml" <<'PY'
+from pathlib import Path
+import sys
+Path(sys.argv[1]).write_text(
+    """<Config>
+  <BindAddress>127.0.0.1</BindAddress>
+  <Port>9696</Port>
+  <ApiKey>keep-me</ApiKey>
+  <AuthenticationMethod>None</AuthenticationMethod>
+  <InstanceName>Prowlarr</InstanceName>
+</Config>
+"""
+)
+PY
+run "${BIN}/write-engine-configs"
+grep -Fq 'BindAddress>*</BindAddress>' "${POMPEY_CONFIG}/prowlarr/config.xml"
+grep -q "keep-me" "${POMPEY_CONFIG}/prowlarr/config.xml"
+if grep -qi "AuthenticationMethod>None" "${POMPEY_CONFIG}/prowlarr/config.xml"; then
+  echo "upgrade must drop AuthenticationMethod None" >&2
+  cat "${POMPEY_CONFIG}/prowlarr/config.xml" >&2
+  exit 1
+fi
 
 echo "== vpn config from wg0.conf file + kill switch stub =="
 mkdir -p "${POMPEY_CONFIG}/wireguard"
@@ -316,6 +324,7 @@ if grep -Fq 'touch "${POMPEY_CONFIG}/seerr/DOCKER"' \
 fi
 grep -q 'POMPEY_CONFIG' "${ROOT}/pompey/rootfs/etc/services.d/radarr/run"
 grep -q 'HOST=0.0.0.0' "${ROOT}/pompey/rootfs/etc/services.d/seerr/run"
+grep -q '9696/tcp: 9696' "${ROOT}/pompey/config.yaml"
 
 echo "== status.json writer =="
 python3 "${BIN}/pompey-status" vpn "Waiting for Proton handshake" 15
@@ -328,6 +337,7 @@ test "$(jq -r .step "${POMPEY_READY}/status.json")" = vpn
 python3 "${BIN}/pompey-status" ready "Ready" 100
 test "$(jq -r .search "${POMPEY_READY}/status.json")" = true
 test "$(jq -r .search_port "${POMPEY_READY}/status.json")" = 5055
+test "$(jq -r .sources_port "${POMPEY_READY}/status.json")" = 9696
 rm -rf "${POMPEY_READY}"
 python3 "${BIN}/pompey-status" vpn "Starting" 5
 test -f "${POMPEY_READY}/status.json"

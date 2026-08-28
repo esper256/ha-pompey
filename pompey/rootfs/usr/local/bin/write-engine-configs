@@ -1,23 +1,35 @@
 #!/command/with-contenv bashio
 # shellcheck shell=bash
-# Write localhost-only config.xml / qBittorrent.conf before the engines start.
+# Write engine configs before they start. Radarr/Sonarr/qbit stay localhost.
+# Prowlarr is published on the host so the household can add sources.
+# Seerr has no indexer settings.
 set -euo pipefail
 # shellcheck source=/dev/null
 source "$(command -v pompey-env)"
 pompey-secrets >/dev/null
 
 python3 - "${POMPEY_SECRETS}" "${MEDIA_ROOT}" <<'PY'
-import json, os, sys
+import json, os, re, sys
 
 secrets = json.load(open(sys.argv[1], encoding="utf-8"))
 media = sys.argv[2].rstrip("/")
 
-def write_xml(path, port, api_key, instance):
+
+def set_tag(body: str, tag: str, value: str) -> str:
+    pat = rf"(<{tag}>)[^<]*(</{tag}>)"
+    if re.search(pat, body):
+        return re.sub(pat, rf"\g<1>{value}\g<2>", body, count=1)
+    if "</Config>" in body:
+        return body.replace("</Config>", f"  <{tag}>{value}</{tag}>\n</Config>", 1)
+    return body
+
+
+def write_xml(path, port, api_key, instance, bind="127.0.0.1"):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     if os.path.isfile(path):
         return
     body = f"""<Config>
-  <BindAddress>127.0.0.1</BindAddress>
+  <BindAddress>{bind}</BindAddress>
   <Port>{port}</Port>
   <SslPort>{port + 1000}</SslPort>
   <EnableSsl>False</EnableSsl>
@@ -36,10 +48,39 @@ def write_xml(path, port, api_key, instance):
     with open(path, "w", encoding="utf-8") as fh:
         fh.write(body)
 
+
+def drop_auth_none(body: str) -> str:
+    # Missing AuthenticationMethod makes Prowlarr's first UI visit the login
+    # setup (Servarr wiki). Leave Forms / External alone.
+    return re.sub(
+        r"\s*<AuthenticationMethod>None</AuthenticationMethod>",
+        "",
+        body,
+        count=1,
+        flags=re.I,
+    )
+
+
+def publish_prowlarr(path, api_key):
+    """Listen on all interfaces. First UI visit sets Prowlarr's own login.
+
+    Existing 0.2.16 files were localhost + AuthenticationMethod None. Patch
+    BindAddress so a rebuild publishes the UI without wiping indexers.
+    """
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    if not os.path.isfile(path):
+        write_xml(path, 9696, api_key, "Prowlarr", bind="*")
+    body = open(path, encoding="utf-8").read()
+    body = set_tag(body, "BindAddress", "*")
+    body = drop_auth_none(body)
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write(body)
+
+
 config = os.environ.get("POMPEY_CONFIG", "/config")
 write_xml(f"{config}/sonarr/config.xml", 8989, secrets["sonarr_api_key"], "Sonarr")
 write_xml(f"{config}/radarr/config.xml", 7878, secrets["radarr_api_key"], "Radarr")
-write_xml(f"{config}/prowlarr/config.xml", 9696, secrets["prowlarr_api_key"], "Prowlarr")
+publish_prowlarr(f"{config}/prowlarr/config.xml", secrets["prowlarr_api_key"])
 
 pbk = secrets["qbit_pbkdf2"]
 user = secrets["qbit_user"]

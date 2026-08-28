@@ -318,11 +318,11 @@ class OptionsMatchConfig(unittest.TestCase):
         schema_keys = yaml_indent2_keys(cfg, "schema:")
         trans_keys = yaml_indent2_keys(trans, "configuration:")
         supplied = set(OPTIONS)
-        self.assertTrue(option_keys)
+        self.assertEqual(option_keys, [])
+        self.assertEqual(schema_keys, [])
+        self.assertEqual(trans_keys, [])
+        self.assertEqual(supplied, set())
         self.assertEqual(set(option_keys), set(schema_keys) & set(option_keys))
-        for key in option_keys:
-            self.assertIn(key, supplied)
-            self.assertIn(key, trans_keys)
 
 
 class Helpers(unittest.TestCase):
@@ -370,7 +370,10 @@ class Helpers(unittest.TestCase):
         self.assertIn("data.search", html)
         self.assertIn("open-search", html)
         self.assertIn("Open search", html)
+        self.assertIn("Open sources", html)
+        self.assertIn("open-sources-btn", html)
         self.assertIn("search_port", html)
+        self.assertIn("sources_port", html)
         self.assertNotIn("location.replace", html)
         self.assertNotIn("pompey-handoff", html)
         self.assertIn('src="logo.png"', html)
@@ -381,6 +384,7 @@ class Helpers(unittest.TestCase):
         self.assertIn("protonSubmitted", html)
         cfg = (ROOT / "pompey/config.yaml").read_text()
         self.assertIn("5055/tcp: 5055", cfg)
+        self.assertIn("9696/tcp: 9696", cfg)
         seerr = (ROOT / "pompey/rootfs/etc/services.d/seerr/run").read_text()
         self.assertIn("HOST=0.0.0.0", seerr)
         self.assertNotIn("HOST=127.0.0.1", seerr)
@@ -483,10 +487,10 @@ class WireStack(unittest.TestCase):
                 "POMPEY_SECRETS": str(secrets_path),
                 "POMPEY_READY": str(ready),
                 "MEDIA_ROOT": "/media",
-                "PLEX_URL": OPTIONS["plex_url"],
-                "PLEX_TOKEN": OPTIONS["plex_token"],
-                "INDEXER_URL": OPTIONS["source_url"],
-                "INDEXER_API_KEY": OPTIONS["source_key"],
+                "PLEX_URL": "http://172.30.32.1:32400",
+                "PLEX_TOKEN": "test-plex-token",
+                "INDEXER_URL": "https://example-source.test",
+                "INDEXER_API_KEY": "test-source-key",
                 "QBIT_URL": urls["qbit"],
                 "SONARR_URL": urls["sonarr"],
                 "RADARR_URL": urls["radarr"],
@@ -537,6 +541,7 @@ class WireStack(unittest.TestCase):
         live = json.loads((self.ready / "status.json").read_text())
         self.assertTrue(live["search"])
         self.assertEqual(live["search_port"], 5055)
+        self.assertEqual(live["sources_port"], 9696)
         self.assertIsNone(self.state.local_auth)
 
     def test_wires_when_seerr_returns_objects(self):

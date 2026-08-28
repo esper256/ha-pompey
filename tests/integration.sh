@@ -124,12 +124,9 @@ bash "${BIN}/pompey-dev-vpn" up
 ns ip -o addr show wg0 | grep -q '10.2.0.2'
 run wait-for-vpn 5
 
-python3 - "${ROOT}/tests/options.json" "${BASHIO_OPTIONS}" "${MEDIA_ROOT}" <<'PY'
+python3 - "${ROOT}/tests/options.json" "${BASHIO_OPTIONS}" <<'PY'
 import json, sys
 data = json.load(open(sys.argv[1], encoding="utf-8"))
-data["source_url"] = ""
-data["source_key"] = ""
-data["plex_token"] = ""
 json.dump(data, open(sys.argv[2], "w"), indent=2)
 PY
 

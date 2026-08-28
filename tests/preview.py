@@ -5,8 +5,8 @@
 
 Then open http://127.0.0.1:8099/ — the bar moves through the same steps the
 addon reports. This is the Pompey sidebar (wait/status). Search is Seerr on
-host port 5055, not this page (`status.json` has `"search": true` plus
-`"search_port"`).
+host port 5055 and sources are Prowlarr on 9696, not this page (`status.json`
+has `"search": true` plus `"search_port"` and `"sources_port"`).
 """
 from __future__ import annotations
 

@@ -161,6 +161,10 @@
       text-decoration: none;
     }
 
+    #open-search a + a {
+      margin-left: 0.5rem;
+    }
+
     #open-search .hint {
       margin-top: 0.6rem;
     }
@@ -179,6 +183,7 @@
     </form>
     <div id="open-search" hidden>
       <a id="open-search-btn" href="#" target="_blank" rel="noopener">Open search</a>
+      <a id="open-sources-btn" href="#" target="_blank" rel="noopener">Open sources</a>
       <p class="hint" id="open-search-url"></p>
     </div>
     <p id="file-hint" hidden>This file is only the wait screen. On Home Assistant it lives in the sidebar after Proton is up. In this repo run <code>python3 tests/preview.py</code> to watch progress here.</p>
@@ -195,6 +200,7 @@
     const wgGo = document.getElementById("wg-go");
     const openSearch = document.getElementById("open-search");
     const openSearchBtn = document.getElementById("open-search-btn");
+    const openSourcesBtn = document.getElementById("open-sources-btn");
     const openSearchUrl = document.getElementById("open-search-url");
     const marks = { pending: "·", active: "›", done: "✓", error: "!" };
     let protonSubmitted = false;
@@ -216,6 +222,7 @@
         data.need_proton,
         data.search,
         data.search_port,
+        data.sources_port,
         data.steps,
       ]);
       if (sig === lastSig) {
@@ -245,11 +252,14 @@
       });
       if (data.search && !data.need_proton && !showForm) {
         const port = Number(data.search_port) || 5055;
+        const sourcesPort = Number(data.sources_port) || 9696;
         const url = "http://" + location.hostname + ":" + port + "/";
+        const sourcesUrl = "http://" + location.hostname + ":" + sourcesPort + "/";
         now.textContent = "Search is ready. This sidebar stays Pompey; open search on port " + port + ".";
         openSearch.hidden = false;
         openSearchBtn.href = url;
-        openSearchUrl.textContent = url + " — if this host is Home Assistant Cloud, use this machine’s LAN IP instead. Plex is a separate app.";
+        openSourcesBtn.href = sourcesUrl;
+        openSearchUrl.textContent = url + " is search. " + sourcesUrl + " is sources (Prowlarr) — Seerr cannot add indexers. First visit to sources asks you to set a login. If this host is Home Assistant Cloud, use this machine’s LAN IP. Plex is a separate app. Do not put either port on the public internet.";
       } else {
         openSearch.hidden = true;
       }
