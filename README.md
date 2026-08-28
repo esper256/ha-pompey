@@ -2,7 +2,7 @@
 
 **Pompey** is a Home Assistant OS app: one sidebar entry, one search. The household face is [Seerr](https://seerr.dev/). Pompey is the box around it — Proton WireGuard, kill switch, hidden engines, no extra consoles.
 
-Version **0.2.6**. We do not publish a container image. Supervisor builds this app on the machine. After the tunnel is up, the app fetches the official programs it needs.
+Version **0.2.8**. We do not publish a container image. Supervisor builds this app on the machine. After the tunnel is up, the app fetches the official programs it needs.
 
 The plan is [VISION.md](VISION.md). Operator steps (including Plex in another Docker) are [pompey/DOCS.md](pompey/DOCS.md).
 
@@ -21,7 +21,7 @@ Copy `pompey/` into `/addons`, or add `https://github.com/esper256/ha-pompey` as
 
 **Not yet a household app.** A request becoming a file on disk that Plex notices has not been proven. Quality profiles are engine defaults (no Recyclarr). If search is a blank page after the wait screen, that is the bug to send back.
 
-## What is done (0.2.6)
+## What is done (0.2.8)
 
 | Piece | What “done” means |
 | --- | --- |

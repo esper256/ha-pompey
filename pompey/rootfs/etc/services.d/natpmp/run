@@ -12,19 +12,27 @@ fi
 until [[ -f "${POMPEY_READY}/vpn-applied" ]]; do
   sleep 2
 done
-wait-for-vpn 45
+WAIT_FOR_VPN_QUIET=1 wait-for-vpn 45
 bashio::log.info "NAT-PMP renew loop against ${POMPEY_WG_DNS}"
 mkdir -p "${POMPEY_VPN_TMP}"
 
+fail=0
 while true; do
   if out="$(natpmpc -a 1 0 udp 60 -g "${POMPEY_WG_DNS}" 2>/dev/null)"; then
     port="$(printf '%s\n' "${out}" | awk '/Mapped public port/ { print $4; exit }')"
     if [[ -n "${port}" ]]; then
       printf '%s\n' "${port}" >"${POMPEY_VPN_TMP}/forwarded_port"
       apply-qbit-port "${POMPEY_VPN_TMP}/forwarded_port" || true
+      if [[ "${fail}" -gt 0 ]]; then
+        bashio::log.info "NAT-PMP mapped UDP port ${port}"
+      fi
     fi
+    fail=0
   else
-    bashio::log.warning "natpmpc UDP mapping failed (need a Proton config with NAT-PMP enabled)"
+    fail=$((fail + 1))
+    if [[ "${fail}" -eq 1 || $((fail % 20)) -eq 0 ]]; then
+      bashio::log.warning "natpmpc UDP mapping failed (need a Proton config with NAT-PMP enabled); will keep trying"
+    fi
   fi
   natpmpc -a 1 0 tcp 60 -g "${POMPEY_WG_DNS}" >/dev/null 2>&1 || true
   sleep 45

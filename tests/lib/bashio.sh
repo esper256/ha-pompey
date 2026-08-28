@@ -24,9 +24,9 @@ bashio::config.true() {
   [[ "${val}" == "true" || "${val}" == "1" || "${val}" == "yes" ]]
 }
 
-bashio::log.info() { printf 'INFO: %s\n' "$*"; }
-bashio::log.warning() { printf 'WARNING: %s\n' "$*" >&2; }
-bashio::log.error() { printf 'ERROR: %s\n' "$*" >&2; }
+bashio::log.info() { printf '[%s] INFO: %s\n' "$(date +%H:%M:%S)" "$*"; }
+bashio::log.warning() { printf '[%s] WARNING: %s\n' "$(date +%H:%M:%S)" "$*" >&2; }
+bashio::log.error() { printf '[%s] ERROR: %s\n' "$(date +%H:%M:%S)" "$*" >&2; }
 
 bashio::exit.nok() {
   bashio::log.error "$*"
