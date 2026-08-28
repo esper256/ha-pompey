@@ -32,20 +32,16 @@ if [[ "${extract}" -eq 1 ]]; then
     echo "tar extract must pass -C under POMPEY_ENGINES, not the process cwd" >&2
     exit 1
   fi
+  if [[ -z "${POMPEY_ENGINES:-}" ]]; then
+    echo "POMPEY_ENGINES must be set so tests can see unpack is not a /tmp mktemp" >&2
+    exit 1
+  fi
   case "${target}" in
-    /tmp|/tmp/*)
-      echo "tar -C ${target} is AppArmor-hostile on HAOS; unpack under /data/engines" >&2
+    "${POMPEY_ENGINES}"|"${POMPEY_ENGINES}"/*) ;;
+    *)
+      echo "tar -C ${target} is not under POMPEY_ENGINES=${POMPEY_ENGINES}" >&2
       exit 1
       ;;
   esac
-  if [[ -n "${POMPEY_ENGINES:-}" ]]; then
-    case "${target}" in
-      "${POMPEY_ENGINES}"|"${POMPEY_ENGINES}"/*) ;;
-      *)
-        echo "tar -C ${target} is not under POMPEY_ENGINES=${POMPEY_ENGINES}" >&2
-        exit 1
-        ;;
-    esac
-  fi
 fi
 exec "${REAL_TAR}" "$@"

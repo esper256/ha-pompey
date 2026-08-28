@@ -22,6 +22,7 @@ export POMPEY_DATA="${WORK}/data/pompey"
 export POMPEY_ENGINES="${WORK}/data/engines"
 export POMPEY_SECRETS="${POMPEY_DATA}/secrets.json"
 export POMPEY_READY="${WORK}/tmp/pompey"
+export MEDIA_ROOT="${WORK}/media"
 export POMPEY_SKIP_QBIT=1
 export POMPEY_SKIP_SEERR=1
 export POMPEY_SKIP_SONARR=1
@@ -29,7 +30,7 @@ export POMPEY_SKIP_RADARR=1
 export POMPEY_SERVARR_OS=linuxmusl
 
 mkdir -p "${WORK}/bin" "${POMPEY_ENGINES}" "${POMPEY_CONFIG}" "${POMPEY_READY}" \
-  "${WORK}/www"
+  "${WORK}/www" "${MEDIA_ROOT}"
 cp "${ROOT}/tests/stubs/tar-haos" "${WORK}/bin/tar"
 chmod +x "${WORK}/bin/tar" "${ROOT}/tests/with-bashio"
 # Real tar for fixture creation lives at /usr/bin/tar; wrapper execs that.
@@ -89,11 +90,18 @@ BASE="http://127.0.0.1:${port}"
 
 echo "== unpack Prowlarr-shaped linux-musl fixture =="
 rm -rf "${POMPEY_ENGINES}/Prowlarr" "${POMPEY_ENGINES}/.partial-Prowlarr"
+set +e
 log="$(
   POMPEY_PROWLARR_URL="${BASE}/Prowlarr.master.linux-musl-core-x64.tar.gz" \
     run "${BIN}/fetch-engines" 2>&1
 )"
+rc=$?
+set -e
 printf '%s\n' "${log}"
+if [[ "${rc}" -ne 0 ]]; then
+  echo "fixture unpack failed" >&2
+  exit 1
+fi
 grep -q 'linux-musl-core-x64' <<<"${log}"
 grep -q 'Prowlarr ready (ELF)' <<<"${log}"
 test -x "${POMPEY_ENGINES}/Prowlarr/Prowlarr"
@@ -190,7 +198,11 @@ rm -rf "${POMPEY_ENGINES}/Prowlarr"
 log="$(
   POMPEY_PROWLARR_URL="${BASE}/${real_name}" \
     run "${BIN}/fetch-engines" 2>&1
-)"
+)" || {
+  printf '%s\n' "${log}"
+  echo "real Prowlarr unpack failed" >&2
+  exit 1
+}
 printf '%s\n' "${log}"
 grep -q "${real_name}" <<<"${log}" || grep -q 'linux-musl' <<<"${log}"
 test -x "${POMPEY_ENGINES}/Prowlarr/Prowlarr"
