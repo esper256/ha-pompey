@@ -101,7 +101,8 @@ def filename_from_headers(header_text: str) -> str:
 
 def _curl(args: list[str], timeout: int = 60) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        ["curl", "-sS", "-L", "--max-time", str(timeout), *args],
+        ["curl", "-sS", "-L", "--retry", "3", "--retry-delay", "2", "--retry-all-errors",
+         "--max-time", str(timeout), *args],
         check=True,
         text=True,
         capture_output=True,

@@ -69,6 +69,7 @@ class FakeState:
         self.apps: list[dict] = []
         self.indexers: list[dict] = []
         self.commands: list[dict] = []
+        self.arr_commands: list[dict] = []
         self.plex_auth: object = None
         self.local_auth: object = None
         self.allow_seerr_local = False
@@ -188,6 +189,9 @@ def handler_for(state: FakeState):
                 if "/series/" in path and method == "PUT":
                     state.moved.append(body)
                     return self._send(body=body)
+                if path.endswith("/command") and method == "POST":
+                    state.arr_commands.append(body or {})
+                    return self._send(201, body or {})
                 return self._send(404, {"error": path})
             if role == "prowlarr":
                 if path == "/ping":
@@ -215,6 +219,16 @@ def handler_for(state: FakeState):
                         return self._send(500, {"message": "indexer add failed"})
                     state.indexers.append(body)
                     return self._send(201, body)
+                if path.startswith("/api/v1/indexer/") and method == "PUT":
+                    try:
+                        idx = int(path.rsplit("/", 1)[-1])
+                    except ValueError:
+                        return self._send(404, {"error": path})
+                    for i, item in enumerate(state.indexers):
+                        if item.get("id") == idx:
+                            state.indexers[i] = body or item
+                            return self._send(body=state.indexers[i])
+                    return self._send(404, {"error": path})
                 if path == "/api/v1/command" and method == "POST":
                     state.commands.append(body or {})
                     return self._send(201, body or {"name": "ApplicationIndexerSync"})
@@ -696,6 +710,7 @@ class WireStack(unittest.TestCase):
         os.environ["INDEXER_API_KEY"] = ""
         self.state.indexers = [
             {
+                "id": 1,
                 "name": "Tracker A",
                 "enable": True,
                 "enableRss": True,
@@ -703,6 +718,7 @@ class WireStack(unittest.TestCase):
                 "enableInteractiveSearch": True,
             },
             {
+                "id": 2,
                 "name": "Tracker B",
                 "enable": True,
                 "enableRss": True,
@@ -713,10 +729,26 @@ class WireStack(unittest.TestCase):
         rc = ws.main()
         self.assertEqual(rc, 0)
         self.assertEqual([item["name"] for item in self.state.indexers], ["Tracker A", "Tracker B"])
+        tracker_b = next(item for item in self.state.indexers if item["name"] == "Tracker B")
+        self.assertTrue(tracker_b["enableAutomaticSearch"])
         self.assertEqual(
             [c.get("name") for c in self.state.commands],
             ["ApplicationIndexerSync"],
         )
+
+    def test_retries_monitored_titles_still_missing_a_file(self):
+        os.environ["INDEXER_URL"] = ""
+        os.environ["INDEXER_API_KEY"] = ""
+        self.state.movies = [
+            {"id": 99, "title": "Waiting", "monitored": True, "hasFile": False},
+            {"id": 100, "title": "Done", "monitored": True, "hasFile": True},
+        ]
+        rc = ws.main()
+        self.assertEqual(rc, 0)
+        names = [c.get("name") for c in self.state.arr_commands]
+        self.assertTrue(any(n.startswith("Movies") and n.endswith("Search") for n in names))
+        movie_retry = next(c for c in self.state.arr_commands if str(c.get("name", "")).startswith("Movies"))
+        self.assertEqual(movie_retry.get("movieIds"), [99])
 
     def test_wires_when_seerr_local_login_is_403(self):
         """Real Seerr /auth/local is login-only; API key 403s until user id 1 exists."""

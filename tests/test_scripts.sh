@@ -374,7 +374,15 @@ grep -q -- '--no-same-permissions' "${BIN}/fetch-engines"
 grep -q '.partial-' "${BIN}/fetch-engines"
 while IFS= read -r url; do
   [[ -n "${url}" ]] || continue
-  out="$(curl -sS -o /dev/null -w '%{http_code}' -r 0-256 -L --max-time 40 "${url}")"
+  out=""
+  for attempt in 1 2 3 4; do
+    out="$(curl -sS -o /dev/null -w '%{http_code}' -r 0-256 -L \
+      --retry 2 --retry-delay 2 --retry-all-errors --max-time 40 "${url}" || true)"
+    if [[ "${out}" == "200" || "${out}" == "206" ]]; then
+      break
+    fi
+    sleep "${attempt}"
+  done
   if [[ "${out}" != "200" && "${out}" != "206" ]]; then
     echo "bad ${out} ${url}" >&2
     exit 1

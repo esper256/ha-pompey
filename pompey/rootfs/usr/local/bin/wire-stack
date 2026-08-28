@@ -375,7 +375,30 @@ def sync_prowlarr_indexers(prowlarr: str, pkey: str) -> None:
     Pompey does not pick which indexer to query — Arr asks Prowlarr, and Prowlarr
     fans out to every source that is enabled for that search type and category.
     Household sources are added in Prowlarr's UI; we still sync so Arr sees them.
+    Enabled sources with search switched off would be skipped on the next request.
     """
+    indexers = as_list(http("GET", f"{prowlarr}/api/v1/indexer", headers=arr_headers(pkey)))
+    for item in indexers:
+        if not item.get("enable") or item.get("id") is None:
+            continue
+        patch = False
+        for key in ("enableRss", "enableAutomaticSearch", "enableInteractiveSearch"):
+            if item.get(key) is False:
+                item[key] = True
+                patch = True
+        if not patch:
+            continue
+        name = item.get("name") or "unnamed"
+        try:
+            http(
+                "PUT",
+                f"{prowlarr}/api/v1/indexer/{item['id']}",
+                item,
+                headers=arr_headers(pkey),
+            )
+            log(f"Prowlarr source {name} search flags turned on")
+        except RuntimeError as exc:
+            log(f"Prowlarr source {name} could not enable search: {exc}", "WARNING")
     indexers = as_list(http("GET", f"{prowlarr}/api/v1/indexer", headers=arr_headers(pkey)))
     enabled = [item for item in indexers if item.get("enable")]
     log(f"Prowlarr sources: {len(enabled)} enabled / {len(indexers)} total")
@@ -396,6 +419,58 @@ def sync_prowlarr_indexers(prowlarr: str, pkey: str) -> None:
         headers=arr_headers(pkey),
     )
     log("prowlarr sync")
+
+
+def retry_unfilled_titles(radarr: str, radarr_key: str, sonarr: str, sonarr_key: str) -> None:
+    """Search monitored titles that still have no file. Seerr already handed off.
+
+    A request that searched too few indexers stays approved in Seerr; Arr will
+    not try again until RSS or a missing-search cycle unless we ask.
+    """
+    try:
+        movies = as_list(http("GET", f"{radarr}/movie", headers=arr_headers(radarr_key)))
+        movie_ids = [
+            int(item["id"])
+            for item in movies
+            if item.get("monitored") is True
+            and item.get("hasFile") is False
+            and item.get("id") is not None
+        ][:20]
+        if movie_ids:
+            http(
+                "POST",
+                f"{radarr}/command",
+                {"name": "MoviesSearch", "movieIds": movie_ids},
+                headers=arr_headers(radarr_key),
+            )
+            log(f"searching again for {len(movie_ids)} movie(s) still missing a file")
+    except RuntimeError as exc:
+        log(f"could not retry movie search: {exc}", "WARNING")
+    try:
+        missing = http(
+            "GET",
+            f"{sonarr}/wanted/missing?pageSize=20",
+            headers=arr_headers(sonarr_key),
+        )
+        records = as_list(missing)
+        if isinstance(missing, dict) and not records:
+            records = as_list(missing.get("records"))
+        episode_ids = [
+            int(item["id"])
+            for item in records
+            if item.get("id") is not None
+        ][:20]
+        if episode_ids:
+            http(
+                "POST",
+                f"{sonarr}/command",
+                {"name": "EpisodeSearch", "episodeIds": episode_ids},
+                headers=arr_headers(sonarr_key),
+            )
+            log(f"searching again for {len(episode_ids)} missing episode(s)")
+    except RuntimeError as exc:
+        if "404" not in str(exc):
+            log(f"could not retry episode search: {exc}", "WARNING")
 
 
 def qbit_category(name: str) -> None:
@@ -711,6 +786,7 @@ def main() -> int:
     ensure_prowlarr_app(prowlarr, pk, "Radarr", "Radarr", radarr_url(), rk)
     ensure_indexer(prowlarr, pk)
     sync_prowlarr_indexers(prowlarr, pk)
+    retry_unfilled_titles(radarr, rk, sonarr, sk)
 
     sp = first_profile(sonarr, sk)
     rp = first_profile(radarr, rk)
