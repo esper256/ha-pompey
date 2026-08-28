@@ -4,7 +4,7 @@ Search for a movie or TV show in Home Assistant. Confirm if we need you. It land
 
 Pompey is one Home Assistant OS app. The sidebar is the box: Proton, status, a button to search. Search itself is [Seerr](https://seerr.dev/) on this machine’s port **5055**, not an iframe. Downloads, matching, and the VPN stay inside Pompey. All internet from this app uses Proton WireGuard. If the tunnel is down, internet is dropped. **Plex is a separate Home Assistant app** (or another machine). Pompey does not run Plex.
 
-This is the user guide for the product we are building. It describes the journey as it should feel. [What is not ready yet](#what-is-not-ready-yet) is honest about the current cut (**0.2.29**). The [roadmap](#roadmap) is how we close the gap.
+This is the user guide for the product we are building. It describes the journey as it should feel. [What is not ready yet](#what-is-not-ready-yet) is honest about the current cut (**0.2.30**). The [roadmap](#roadmap) is how we close the gap.
 
 ## How a day with it should feel
 
@@ -155,7 +155,7 @@ The product should keep those current for you — through the VPN, without you v
 
 - You should still update **Pompey** when we ship a wrapper fix.
 - You should not be expected to open Radarr/Sonarr to click Update.
-- Quality profiles: **0.2.28** puts three choices on the Seerr request: Max, Default, Anything. **0.2.29** makes that apply on an existing box (0.2.28 could fail wiring and leave Radarr’s stock names). Recyclarr is not yet refreshing TRaSH scores on a schedule.
+- Quality profiles: **0.2.28** puts three choices on the Seerr request: Max, Default, Anything. **0.2.30** makes that apply on an existing box (0.2.28 could fail wiring and leave Radarr’s stock names). Recyclarr is not yet refreshing TRaSH scores on a schedule.
 
 ### Proton
 
@@ -169,12 +169,12 @@ A private tracker with a stable API key is set-and-forget. Prowlarr copies that 
 
 ## What is not ready yet
 
-The journey above is the target. **0.2.29** is a real Home Assistant OS install of that box, not the finished household app.
+The journey above is the target. **0.2.30** is a real Home Assistant OS install of that box, not the finished household app.
 
 | In the guide | On the machine today |
 | --- | --- |
 | Request → file on disk → Plex notices | **0.2.27** imports a finished torrent from `downloads/complete` into the Movies/TV folder Seerr used. **0.2.29** drops the hidden qBittorrent torrent if those files were already moved, so it cannot start downloading them again. Automated tests never start the torrent client. |
-| Auto-grab is usually the right quality | **0.2.28** offers **Max** / **Default** / **Anything** on the Seerr request. Default is a 1080p encode (about 2.5–8 GB per 150 minutes). Max allows remux and 4K. Anything takes CAM if that is all there is. **0.2.29** applies those three on an existing install (0.2.28 could fail wiring and leave Radarr’s stock Any / HD-720p list). Live Recyclarr refresh of TRaSH scores is still later. |
+| Auto-grab is usually the right quality | **0.2.28** offers **Max** / **Default** / **Anything** on the Seerr request. Default is a 1080p encode (about 2.5–8 GB per 150 minutes). Max allows remux and 4K. Anything takes CAM if that is all there is. **0.2.30** applies those three on an existing install (0.2.28 could fail wiring and leave Radarr’s stock Any / HD-720p list). Live Recyclarr refresh of TRaSH scores is still later. |
 | Language, subtitles, dual audio | Home Assistant options score the *release name* (Dual Audio, English Dub, advertised English subs). Seerr has no per-request language picker. Missing subtitles are not downloaded after the file lands (Bazarr is later). |
 | “Confirm if we need you” when quality and seeds disagree | Not built. Seerr is not a download console; we will not fork it into one. |
 | Engines stay current for years | First fetch only. Already-present binaries are skipped on restart. |
@@ -187,7 +187,7 @@ The journey above is the target. **0.2.29** is a real Home Assistant OS install 
 | Jellyfin | Plex only. |
 | Use this from outside the house | Out of scope. Search is on the LAN at :5055. Sources at :9696. Do not port-forward either. |
 
-If search is a blank page on port 5055, or the Plex button on setup does nothing, that is a bug — send the log. Rebuild so the banner says **0.2.29** if the wait screen says wiring failed and the request quality list is still Any / HD-720p / Ultra-HD (not Max / Default / Anything), a finished download stayed in `downloads/complete`, you moved a file by hand and worry qBittorrent will grab it again, auto-grab picked a huge remux on Default, a Seerr request only title-searched two Prowlarr sources, or you still need tagged app logs, household media-folder defaults, **Open sources**, or an older wait screen.
+If search is a blank page on port 5055, or the Plex button on setup does nothing, that is a bug — send the log. Rebuild so the banner says **0.2.30** if the wait screen says wiring failed and the request quality list is still Any / HD-720p / Ultra-HD (not Max / Default / Anything). Rebuild to **0.2.29** if a finished download stayed in `downloads/complete`, or you moved a file by hand and worry qBittorrent will grab it again. Also rebuild if auto-grab picked a huge remux on Default, a Seerr request only title-searched two Prowlarr sources, or you still need tagged app logs, household media-folder defaults, **Open sources**, or an older wait screen.
 
 ## Roadmap
 
