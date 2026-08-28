@@ -39,7 +39,17 @@ Do not publish download peer ports on the Home Assistant host.
 
 ## What you see
 
-Open **Pompey** in the sidebar. The first boot shows a short wait screen while the tunnel comes up and the official programs are fetched. After that, the sidebar is the search UI: type a title, pick the right one, request it. Household requests auto-approve. Kid-friendly vs general is decided from the title’s certification on the way to disk (unknown goes to general).
+Open **Pompey** in the sidebar. The first boot shows a wait screen with a progress bar: Proton tunnel, download, start engines, connect search. After that, the sidebar is the search UI.
+
+If the bar stays on the tunnel step, the Proton handshake is not up yet (missing/invalid WireGuard file is the usual cause). Opening `index.html` as a file in the editor is only that wait screen and will never become search.
+
+This cloud/dev VM is not Supervisor. To watch the wait screen here:
+
+```bash
+python3 tests/preview.py
+```
+
+http://127.0.0.1:8099/
 
 If Plex is not filled in yet, you will land on that UI’s setup wizard instead.
 

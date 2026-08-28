@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
+import subprocess
 import time
 import urllib.error
 import urllib.parse
@@ -74,6 +76,16 @@ SEERR_HOUSEHOLD_PERMS = 32 + 128 + 256 + 512
 
 def log(msg: str) -> None:
     print(f"[wire-stack] {msg}", flush=True)
+
+
+def mark_status(step: str, label: str, percent: int, error: str = "") -> None:
+    script = shutil.which("pompey-status")
+    if not script:
+        return
+    cmd = [script, step, label, str(percent)]
+    if error:
+        cmd.append(error)
+    subprocess.run(cmd, check=False)
 
 
 def load_secrets() -> dict:
@@ -548,6 +560,7 @@ def main() -> int:
     open(os.path.join(ready_dir(), "arr-wired"), "w").close()
 
     configure_seerr(secrets, rp, sp, sl)
+    mark_status("ready", "Ready", 100)
     reload_nginx()
     open(os.path.join(ready_dir(), "wired"), "w").close()
     log("done")
@@ -559,4 +572,10 @@ if __name__ == "__main__":
         raise SystemExit(main())
     except Exception as exc:  # noqa: BLE001
         log(str(exc))
+        mark_status(
+            "wire",
+            "Could not finish connecting search",
+            80,
+            str(exc)[:240],
+        )
         raise SystemExit(1)

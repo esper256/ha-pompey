@@ -141,6 +141,18 @@ echo "== nginx ingress port from stub =="
 run "${INIT}/20-nginx.sh"
 grep -q "listen 8099" "${NGINX_INGRESS_CONF}"
 grep -qv "%%port%%" "${NGINX_INGRESS_CONF}"
+grep -q "status.json" "${NGINX_INGRESS_CONF}"
+
+echo "== status.json writer =="
+python3 "${BIN}/pompey-status" vpn "Waiting for Proton handshake" 15
+python3 "${BIN}/pompey-status" fetch "Downloading hidden engines" 35
+test "$(jq -r .step "${POMPEY_READY}/status.json")" = fetch
+test "$(jq -r '.steps[] | select(.id=="vpn") | .state' "${POMPEY_READY}/status.json")" = done
+python3 "${BIN}/pompey-status" vpn "Starting" 5
+test "$(jq -r '.steps[] | select(.id=="fetch") | .state' "${POMPEY_READY}/status.json")" = pending
+test "$(jq -r .step "${POMPEY_READY}/status.json")" = vpn
+python3 "${BIN}/pompey-status" ready "Ready" 100
+test "$(jq -r .handoff "${POMPEY_READY}/status.json")" = true
 
 echo "== fetch URL construction (range GET, not a full download) =="
 python3 - <<'PY'

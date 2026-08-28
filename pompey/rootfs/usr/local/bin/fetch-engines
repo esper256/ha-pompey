@@ -28,7 +28,8 @@ fetch_tarball() {
     return 0
   fi
 
-  bashio::log.info "Downloading ${name}"
+  bashio::log.info "Downloading hidden engines"
+  pompey-status fetch "Downloading hidden engines" 35 || true
   local tmp
   tmp="$(mktemp -d)"
   curl -fsSL --retry 3 --retry-delay 2 -o "${tmp}/app.tar.gz" "${url}"
@@ -51,7 +52,8 @@ fetch_qbit() {
     bashio::log.info "qBittorrent-nox already present"
     return 0
   fi
-  bashio::log.info "Downloading qBittorrent-nox (${qbit_arch})"
+  bashio::log.info "Downloading the download engine"
+  pompey-status fetch "Downloading the download engine" 45 || true
   curl -fsSL --retry 3 --retry-delay 2 -o "${dest}" \
     "https://github.com/userdocs/qbittorrent-nox-static/releases/latest/download/${qbit_arch}-qbittorrent-nox"
   chmod 755 "${dest}"
@@ -63,7 +65,8 @@ fetch_seerr() {
     bashio::log.info "Seerr already present"
     return 0
   fi
-  bashio::log.info "Unpacking Seerr image ghcr.io/seerr-team/seerr:latest (${crane_platform})"
+  bashio::log.info "Unpacking the household UI"
+  pompey-status fetch "Downloading the household UI" 55 || true
   local tmp
   tmp="$(mktemp -d)"
   crane export --platform "${crane_platform}" ghcr.io/seerr-team/seerr:latest | tar -x -C "${tmp}"

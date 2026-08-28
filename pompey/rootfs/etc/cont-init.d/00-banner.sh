@@ -5,6 +5,7 @@ set -euo pipefail
 source "$(command -v pompey-env)"
 
 bashio::log.info "Pompey ${BUILD_VERSION:-0.2.0} starting"
+pompey-status vpn "Starting" 5 || true
 
 mkdir -p "${POMPEY_CONFIG}/wireguard" "${POMPEY_WG_ETC}" "${POMPEY_VPN_TMP}" "${POMPEY_NGINX_RUN}"
 chmod 700 "${POMPEY_CONFIG}/wireguard" "${POMPEY_WG_ETC}"
@@ -25,6 +26,7 @@ if bashio::config.has_value 'wireguard_private_key' \
 fi
 
 if [[ "${HAS_FILE}" != "true" && "${HAS_FIELDS}" != "true" ]]; then
+  pompey-status vpn "Need a Proton WireGuard config" 5 "Put a Proton WireGuard file in the app config share, or fill private key, address, peer public key, and endpoint." || true
   bashio::exit.nok "Need a Proton WireGuard config: put it at ${WG_FILE} or fill private key, address, peer public key, and endpoint."
 fi
 

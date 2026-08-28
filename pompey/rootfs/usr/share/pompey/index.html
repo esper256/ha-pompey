@@ -3,7 +3,6 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta http-equiv="refresh" content="5">
   <title>Pompey</title>
   <style>
     :root {
@@ -11,6 +10,9 @@
       --bg: #12141a;
       --fg: #ece8e1;
       --muted: #9a948a;
+      --line: #2a2d36;
+      --focus: #e8c07a;
+      --err: #e08a7a;
     }
 
     * { box-sizing: border-box; }
@@ -41,7 +43,7 @@
       margin: 0 0 1.25rem;
     }
 
-    p {
+    p, li {
       margin: 0;
       font-family: ui-sans-serif, system-ui, sans-serif;
       font-size: 0.95rem;
@@ -49,7 +51,52 @@
       color: var(--muted);
     }
 
-    p + p {
+    .bar {
+      height: 0.35rem;
+      background: var(--line);
+      border-radius: 99px;
+      overflow: hidden;
+      margin: 0 0 1.25rem;
+    }
+
+    .bar > span {
+      display: block;
+      height: 100%;
+      width: 0%;
+      background: var(--focus);
+      transition: width 0.4s ease;
+    }
+
+    ol {
+      list-style: none;
+      padding: 0;
+      margin: 0 0 1.25rem;
+    }
+
+    li {
+      display: grid;
+      grid-template-columns: 1.25rem 1fr;
+      gap: 0.6rem;
+      margin-top: 0.45rem;
+    }
+
+    li .mark {
+      color: var(--line);
+    }
+
+    li.active { color: var(--fg); }
+    li.active .mark { color: var(--focus); }
+    li.done { color: var(--fg); }
+    li.done .mark { color: var(--focus); }
+    li.error { color: var(--err); }
+    li.error .mark { color: var(--err); }
+
+    .now {
+      color: var(--fg);
+    }
+
+    .error {
+      color: var(--err);
       margin-top: 0.75rem;
     }
   </style>
@@ -57,8 +104,65 @@
 <body>
   <main>
     <h1>Pompey</h1>
-    <p>Bringing the fleet to heel…</p>
-    <p>Search appears here when the box is ready. The first start downloads the household UI and hidden engines through the tunnel and can take several minutes.</p>
+    <div class="bar" aria-hidden="true"><span id="fill"></span></div>
+    <ol id="steps"></ol>
+    <p class="now" id="now">Bringing the fleet to heel…</p>
+    <p id="file-hint" hidden>This file is only the wait screen. On Home Assistant it lives in the sidebar after Proton is up. In this repo run <code>python3 tests/preview.py</code> to watch progress here.</p>
+    <p class="error" id="err" hidden></p>
   </main>
+  <script>
+    const fileHint = document.getElementById("file-hint");
+    const fill = document.getElementById("fill");
+    const now = document.getElementById("now");
+    const err = document.getElementById("err");
+    const stepsEl = document.getElementById("steps");
+    const marks = { pending: "·", active: "›", done: "✓", error: "!" };
+
+    if (location.protocol === "file:") {
+      fileHint.hidden = false;
+    }
+
+    function render(data) {
+      fill.style.width = Math.max(0, Math.min(100, data.percent || 0)) + "%";
+      now.textContent = data.label || "Bringing the fleet to heel…";
+      if (data.error) {
+        err.hidden = false;
+        err.textContent = data.error;
+      } else {
+        err.hidden = true;
+        err.textContent = "";
+      }
+      stepsEl.replaceChildren();
+      (data.steps || []).forEach((step) => {
+        const li = document.createElement("li");
+        li.className = step.state || "pending";
+        const mark = document.createElement("span");
+        mark.className = "mark";
+        mark.textContent = marks[step.state] || "·";
+        const lab = document.createElement("span");
+        lab.textContent = step.label || step.id;
+        li.append(mark, lab);
+        stepsEl.append(li);
+      });
+      if (data.handoff && !sessionStorage.getItem("pompey-handoff")) {
+        sessionStorage.setItem("pompey-handoff", "1");
+        setTimeout(() => location.reload(), 400);
+      }
+    }
+
+    async function tick() {
+      if (location.protocol === "file:") return;
+      try {
+        const res = await fetch("status.json", { cache: "no-store" });
+        if (!res.ok) return;
+        render(await res.json());
+      } catch (_exc) {
+        now.textContent = "Waiting for the box to start…";
+      }
+    }
+
+    tick();
+    setInterval(tick, 1000);
+  </script>
 </body>
 </html>

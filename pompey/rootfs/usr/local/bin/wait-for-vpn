@@ -21,6 +21,7 @@ until handshake_ok; do
   i=$((i + 1))
   if [[ "${i}" -ge "${TRIES}" ]]; then
     bashio::log.error "WireGuard ${IFACE} has no fresh handshake"
+    pompey-status vpn "Waiting for Proton handshake" 15 "The tunnel is not up yet. Check the Proton WireGuard file and that this app has NET_ADMIN /dev/net/tun." || true
     exit 1
   fi
   sleep 2

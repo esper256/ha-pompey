@@ -4,10 +4,16 @@ set -euo pipefail
 # shellcheck source=/dev/null
 source "$(command -v pompey-env)"
 
+pompey-status vpn "Waiting for Proton handshake" 15 || true
 wait-for-vpn 45
-fetch-engines
+pompey-status fetch "Downloading hidden engines" 30 || true
+if ! fetch-engines; then
+  pompey-status fetch "Download failed" 30 "Could not download the household UI or hidden engines. The tunnel may be down." || true
+  exit 1
+fi
 write-engine-configs
 # Only after configs exist so the other services do not start empty.
 touch "${POMPEY_READY}/engines-ready"
+pompey-status start "Starting hidden engines" 70 || true
 bashio::log.info "Engine fetch complete"
 exec sleep infinity
