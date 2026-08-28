@@ -1,8 +1,12 @@
 # Changelog
 
+## 0.2.24
+
+- Enabled Prowlarr sources get RSS, automatic, and interactive search turned on. After wiring, Radarr and Sonarr search titles that still have no file, so a request that hit too few indexers is tried again. You do not wait for the next Arr cycle, and you do not cancel the Seerr request.
+
 ## 0.2.23
 
-- The app log is the mux for every hidden service (s6 already joins their stdout). Each line is tagged with the service name. You see when a service **starts** and **stops**. qBittorrent’s file log — previously invisible from Home Assistant — is copied in. Radarr, Sonarr, Prowlarr, Seerr, and nginx were already in this log and now carry the same tag so an error is not anonymous. After wiring, the log lists each Prowlarr source and whether search is on. Enabled sources with search switched off are turned back on. Titles that are still missing a file are searched again, so a request that hit too few indexers does not wait for the next Arr cycle.
+- The app log is the mux for every hidden service (s6 already joins their stdout). Each line is tagged with the service name. You see when a service **starts** and **stops**. qBittorrent’s file log — previously invisible from Home Assistant — is copied in. Radarr, Sonarr, Prowlarr, Seerr, and nginx were already in this log and now carry the same tag so an error is not anonymous. After wiring, the log lists each Prowlarr source and whether search is on.
 
 ## 0.2.22
 
