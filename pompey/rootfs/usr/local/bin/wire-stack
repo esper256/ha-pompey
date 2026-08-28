@@ -134,6 +134,18 @@ def downloads_complete() -> str:
     return f"{media_root()}/downloads/complete"
 
 
+def download_scan_paths() -> list[str]:
+    """Old qBittorrent categories used complete/radarr and complete/sonarr.
+
+    New wiring sets the category save path to complete/ itself, so in-progress
+    files sit in incomplete/ with no category folder. Arr's folder scan of
+    complete/ can treat a leftover 'radarr' directory as a movie name and never
+    look inside it.
+    """
+    root = downloads_complete()
+    return [root, os.path.join(root, "radarr"), os.path.join(root, "sonarr")]
+
+
 def plex_url() -> str:
     # Not an HA option. Household finishes Plex in Seerr. Tests may inject.
     return env("PLEX_URL")
@@ -1643,16 +1655,53 @@ def forget_moved_torrents() -> None:
 def scan_download_drop(base: str, api_key: str, kind: str) -> None:
     """Import anything sitting in complete/ even if qBittorrent already forgot it."""
     name = "DownloadedMoviesScan" if kind == "radarr" else "DownloadedEpisodesScan"
+    for path in download_scan_paths():
+        try:
+            http(
+                "POST",
+                f"{base}/command",
+                {"name": name, "path": path, "importMode": "Move"},
+                headers=arr_headers(api_key),
+            )
+            log(f"{kind} scanning {path} for files to import")
+        except RuntimeError as exc:
+            log(f"{kind} complete-folder scan {path}: {exc}", "WARNING")
+
+
+def log_complete_drop_contents() -> None:
+    """Household log: what is still under complete/, not a full HA dump."""
+    root = downloads_complete()
+    if not os.path.isdir(root):
+        log(f"complete folder is missing: {root}", "WARNING")
+        return
+    found: list[str] = []
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [name for name in dirnames if not name.startswith(".")]
+        for name in filenames:
+            if name.startswith("."):
+                continue
+            full = os.path.join(dirpath, name)
+            rel = os.path.relpath(full, root)
+            try:
+                size = os.path.getsize(full)
+            except OSError:
+                size = -1
+            found.append(f"{rel} ({size} bytes)")
+            if len(found) >= 20:
+                break
+        if len(found) >= 20:
+            break
+    if found:
+        extra = " …" if len(found) >= 20 else ""
+        log(f"still in complete/: {'; '.join(found)}{extra}", "WARNING")
+        return
     try:
-        http(
-            "POST",
-            f"{base}/command",
-            {"name": name, "path": downloads_complete(), "importMode": "Move"},
-            headers=arr_headers(api_key),
-        )
-        log(f"{kind} scanning complete folder for files to import")
-    except RuntimeError as exc:
-        log(f"{kind} complete-folder scan: {exc}", "WARNING")
+        names = [name for name in os.listdir(root) if not name.startswith(".")]
+    except OSError as exc:
+        log(f"complete folder unreadable: {exc}", "WARNING")
+        return
+    if names:
+        log(f"complete/ has folders but no files yet: {', '.join(names[:20])}", "WARNING")
 
 
 class Seerr:
@@ -2004,6 +2053,7 @@ def main() -> int:
     scan_download_drop(radarr, rk, "radarr")
     scan_download_drop(sonarr, sk, "sonarr")
     forget_moved_torrents()
+    log_complete_drop_contents()
     log_stuck_imports(radarr, rk, "radarr")
     log_stuck_imports(sonarr, sk, "sonarr")
     log_recent_prowlarr_searches(prowlarr, pk)
@@ -2037,6 +2087,7 @@ def housekeep() -> int:
     scan_download_drop(radarr, rk, "radarr")
     scan_download_drop(sonarr, sk, "sonarr")
     forget_moved_torrents()
+    log_complete_drop_contents()
     log_stuck_imports(radarr, rk, "radarr")
     log_stuck_imports(sonarr, sk, "sonarr")
     return 0

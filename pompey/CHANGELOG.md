@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.32
+
+- Older downloads can sit in `downloads/complete/radarr` (qBittorrent used a category subfolder). Newer ones go to `incomplete/` then `complete/` with no `radarr/` folder. Arr’s scan of `complete/` can treat that leftover `radarr` directory as a title and never look inside. Housekeeping now scans `complete/radarr` and `complete/sonarr` too, and the app log lists what is still under `complete/` (names and sizes, not a full Home Assistant dump). Rebuild so the banner says **0.2.32**.
+
 ## 0.2.31
 
 - The wait screen could stay on **Could not finish connecting search** with Sonarr `MinimumFreeSpaceWhenImporting` must be ≥ 100. **0.2.27** set that field to 0 so a NAS that reports no free space would still import; Sonarr rejects 0, and that PUT runs *before* quality profiles, so Max / Default / Anything never applied. The skip-free-space flag stays on (that is what ignores a 0-byte NAS). The number is 100. A media-management 400 no longer fails wiring. Rebuild so the banner says **0.2.31**.

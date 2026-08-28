@@ -1043,6 +1043,18 @@ PersistentKeepalive = 25
         self.assertIn('"deleteFiles": "false"', src)
         self.assertNotIn('"deleteFiles": "true"', src)
 
+    def test_download_scan_paths_include_legacy_category_folders(self):
+        os.environ["MEDIA_ROOT"] = "/media/dlna"
+        paths = ws.download_scan_paths()
+        self.assertEqual(
+            paths,
+            [
+                "/media/dlna/downloads/complete",
+                "/media/dlna/downloads/complete/radarr",
+                "/media/dlna/downloads/complete/sonarr",
+            ],
+        )
+
     def test_fill_fields(self):
         resource = {"fields": [{"name": "host", "value": ""}, {"name": "port", "value": 0}]}
         ws.fill_fields(resource, {"host": "127.0.0.1", "port": 8080})
@@ -1661,6 +1673,30 @@ class WireStack(unittest.TestCase):
         self.assertEqual(self.state.qbit_removed[0]["deleteFiles"], "false")
         self.assertNotIn("true", self.state.qbit_removed[0]["deleteFiles"].lower())
         self.assertFalse(any(item.get("hash") == "44" * 20 for item in self.state.qbit_torrents))
+
+    def test_housekeep_scans_legacy_complete_radarr_folder(self):
+        os.environ["INDEXER_URL"] = ""
+        os.environ["INDEXER_API_KEY"] = ""
+        os.environ["MEDIA_ROOT"] = str(self.tmp)
+        stuck = self.tmp / "downloads" / "complete" / "radarr"
+        stuck.mkdir(parents=True)
+        (stuck / "stuck-title.mkv").write_bytes(b"x" * 50)
+        from io import StringIO
+        from contextlib import redirect_stdout
+
+        buf = StringIO()
+        with redirect_stdout(buf):
+            rc = ws.housekeep()
+        self.assertEqual(rc, 0)
+        movie_scans = [
+            item
+            for item in self.state.arr_commands
+            if item.get("name") == "DownloadedMoviesScan"
+        ]
+        scan_paths = {item.get("path") for item in movie_scans}
+        self.assertIn(str(self.tmp / "downloads" / "complete"), scan_paths)
+        self.assertIn(str(stuck), scan_paths)
+        self.assertIn("still in complete/: radarr/stuck-title.mkv (50 bytes)", buf.getvalue())
 
     def test_updates_existing_download_client_remove_flag(self):
         os.environ["INDEXER_URL"] = ""
