@@ -167,6 +167,9 @@ wait_url http://127.0.0.1:8080/api/v2/app/version 20
 wait_url http://127.0.0.1:5055/api/v1/settings/public 20
 wait_url "http://127.0.0.1:9117/api?t=caps" 20
 wait_url http://127.0.0.1:9696/ping 60
+ns python3 "${BIN}/prowlarr-arr-proxy" >"${WORK}/prowlarr-arr.log" 2>&1 &
+PIDS+=("$!")
+wait_url http://127.0.0.1:9698/ping 20
 wait_url http://127.0.0.1:8989/ping 60
 wait_url http://127.0.0.1:7878/ping 60
 

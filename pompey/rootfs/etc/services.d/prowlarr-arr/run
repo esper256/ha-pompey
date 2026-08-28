@@ -1,0 +1,18 @@
+#!/command/with-contenv bashio
+# shellcheck shell=bash
+set -euo pipefail
+# shellcheck source=/dev/null
+source "$(command -v pompey-env)"
+
+until [[ -f "${POMPEY_READY}/engines-ready" ]]; do
+  sleep 2
+done
+
+pompey-log start "Prowlarr-Arr"
+exec > >(pompey-log prefix "Prowlarr-Arr")
+exec 2>&1
+wait-for-http http://127.0.0.1:9696/ping 90
+export PROWLARR_URL="${PROWLARR_URL:-http://127.0.0.1:9696}"
+export PROWLARR_ARR_BIND="${PROWLARR_ARR_BIND:-127.0.0.1}"
+export PROWLARR_ARR_PORT="${PROWLARR_ARR_PORT:-9698}"
+exec python3 /usr/local/bin/prowlarr-arr-proxy

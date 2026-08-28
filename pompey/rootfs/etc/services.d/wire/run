@@ -13,6 +13,7 @@ pompey-status wire "Connecting search to your library" 80 || true
 
 wait-for-http http://127.0.0.1:8080/api/v2/app/version 90 || true
 wait-for-http http://127.0.0.1:9696/ping 90
+wait-for-http http://127.0.0.1:9698/ping 90
 wait-for-http http://127.0.0.1:8989/ping 90
 wait-for-http http://127.0.0.1:7878/ping 90
 wait-for-http http://127.0.0.1:5055/api/v1/settings/public 90

@@ -132,6 +132,11 @@ def prowlarr_url() -> str:
     return env("PROWLARR_URL", "http://127.0.0.1:9696").rstrip("/")
 
 
+def prowlarr_arr_url() -> str:
+    """Radarr/Sonarr talk to Prowlarr through the title-search caps proxy."""
+    return env("PROWLARR_ARR_URL", "http://127.0.0.1:9698").rstrip("/")
+
+
 def seerr_url() -> str:
     return env("SEERR_URL", "http://127.0.0.1:5055").rstrip("/")
 
@@ -316,15 +321,35 @@ def language_profile_id(base: str, api_key: str):
 
 
 def ensure_prowlarr_app(prowlarr: str, pkey: str, name: str, impl: str, base_url: str, api_key: str) -> None:
+    want = prowlarr_arr_url()
     apps = as_list(http("GET", f"{prowlarr}/api/v1/applications", headers=arr_headers(pkey)))
-    if any(a.get("name") == name for a in apps):
+    for existing in apps:
+        if existing.get("name") != name:
+            continue
+        current = ""
+        for field in existing.get("fields") or []:
+            if field.get("name") == "prowlarrUrl":
+                current = str(field.get("value") or "").rstrip("/")
+        if current == want:
+            return
+        if existing.get("id") is None:
+            return
+        updated = json.loads(json.dumps(existing))
+        fill_fields(updated, {"prowlarrUrl": want})
+        http(
+            "PUT",
+            f"{prowlarr}/api/v1/applications/{existing['id']}",
+            updated,
+            headers=arr_headers(pkey),
+        )
+        log(f"prowlarr app {name} Arr URL {want}")
         return
     schema = http("GET", f"{prowlarr}/api/v1/applications/schema", headers=arr_headers(pkey))
     app = schema_impl(schema, impl)
     fill_fields(
         app,
         {
-            "prowlarrUrl": f"{prowlarr_url()}",
+            "prowlarrUrl": want,
             "baseUrl": base_url,
             "apiKey": api_key,
         },
@@ -460,6 +485,9 @@ def describe_prowlarr_history_row(record: dict, indexer_names: dict | None = Non
         ids.append(f"TVDb {data['tvdbid']}")
     id_bit = " ".join(ids)
     via = f" via {source}" if source else ""
+    url = (data.get("url") or "").lower()
+    if "top100" in url or "top-100" in url or "top_100" in url:
+        return f"{name}{via} browse/top100 (not the Seerr title)"
     if event in (3, "indexerRss", "IndexerRss") or event_s == "indexerrss":
         return f"{name}{via} RSS (no title term)"
     if id_bit and not query:

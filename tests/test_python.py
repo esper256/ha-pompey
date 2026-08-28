@@ -31,6 +31,7 @@ def load(name: str, path: Path):
 
 
 ws = load("wire_stack", BIN / "wire-stack")
+arrp = load("prowlarr_arr_proxy", BIN / "prowlarr-arr-proxy")
 rr = load("route_rating", BIN / "route-rating")
 wqc = load("wg_quick_contract", ROOT / "tests/lib/wg_quick_contract.py")
 
@@ -208,8 +209,23 @@ def handler_for(state: FakeState):
                         ]
                     )
                 if path == "/api/v1/applications" and method == "POST":
-                    state.apps.append(body)
-                    return self._send(201, body)
+                    posted = dict(body or {})
+                    if posted.get("id") is None:
+                        posted["id"] = len(state.apps) + 1
+                    state.apps.append(posted)
+                    return self._send(201, posted)
+                if path.startswith("/api/v1/applications/") and method == "PUT":
+                    try:
+                        idx = int(path.rsplit("/", 1)[-1])
+                    except ValueError:
+                        return self._send(404, {"error": path})
+                    for i, item in enumerate(state.apps):
+                        if item.get("id") == idx:
+                            state.apps[i] = body or item
+                            if isinstance(state.apps[i], dict):
+                                state.apps[i]["id"] = idx
+                            return self._send(body=state.apps[i])
+                    return self._send(404, {"error": path})
                 if path == "/api/v1/indexer" and method == "GET":
                     return self._send(body=state.indexers)
                 if path == "/api/v1/indexer/schema":
@@ -499,6 +515,48 @@ class Helpers(unittest.TestCase):
         )
         self.assertIn("empty query (no IDs)", line)
 
+    def test_history_row_top100_is_browse_not_id_search(self):
+        line = ws.describe_prowlarr_history_row(
+            {
+                "indexerId": 6,
+                "eventType": "indexerQuery",
+                "data": {
+                    "query": "",
+                    "queryType": "movie",
+                    "url": "https://tracker.example/top100",
+                    "source": "Radarr",
+                },
+            },
+            {6: "RARBG"},
+        )
+        self.assertIn("browse/top100", line)
+        self.assertIn("not the Seerr title", line)
+        self.assertNotIn("ID search", line)
+
+    def test_caps_xml_drops_id_params_keeps_title_and_tv_season(self):
+        xml = """
+        <caps>
+          <searching>
+            <search available="yes" supportedParams="q"/>
+            <tv-search available="yes" supportedParams="q,season,ep,imdbid,tmdbid,tvdbid"/>
+            <movie-search available="yes" supportedParams="q,imdbid,tmdbid"/>
+          </searching>
+        </caps>
+        """
+        out = arrp.rewrite_caps_xml(xml)
+        self.assertIn('supportedParams="q,season,ep"', out)
+        self.assertIn('<movie-search available="yes" supportedParams="q"/>', out)
+        self.assertNotIn("imdbid", out)
+        self.assertNotIn("tmdbid", out)
+        self.assertNotIn("tvdbid", out)
+
+    def test_caps_xml_inserts_q_if_only_ids_were_advertised(self):
+        xml = '<movie-search available="yes" supportedParams="imdbid,tmdbid"/>'
+        self.assertEqual(
+            arrp.rewrite_caps_xml(xml),
+            '<movie-search available="yes" supportedParams="q"/>',
+        )
+
     def test_parse_plex(self):
         self.assertEqual(ws.parse_plex("http://172.30.32.1:32400"), ("172.30.32.1", 32400, False))
         self.assertEqual(ws.parse_plex("https://plex.example")[2], True)
@@ -711,6 +769,9 @@ class WireStack(unittest.TestCase):
         )
         self.assertEqual(len(self.state.download_clients), 2)
         self.assertEqual({a["name"] for a in self.state.apps}, {"Sonarr", "Radarr"})
+        for app in self.state.apps:
+            fields = {f["name"]: f.get("value") for f in app.get("fields") or []}
+            self.assertEqual(fields.get("prowlarrUrl"), "http://127.0.0.1:9698")
         self.assertEqual(len(self.state.indexers), 1)
         self.assertEqual(
             [c.get("name") for c in self.state.commands],
@@ -813,6 +874,26 @@ class WireStack(unittest.TestCase):
         self.assertTrue(any(n.startswith("Movies") and n.endswith("Search") for n in names))
         movie_retry = next(c for c in self.state.arr_commands if str(c.get("name", "")).startswith("Movies"))
         self.assertEqual(movie_retry.get("movieIds"), [99])
+
+    def test_points_existing_prowlarr_apps_at_title_search_proxy(self):
+        os.environ["INDEXER_URL"] = ""
+        os.environ["INDEXER_API_KEY"] = ""
+        self.state.apps = [
+            {
+                "id": 3,
+                "name": "Radarr",
+                "fields": [
+                    {"name": "prowlarrUrl", "value": "http://127.0.0.1:9696"},
+                    {"name": "baseUrl", "value": "http://127.0.0.1:7878"},
+                    {"name": "apiKey", "value": "radarr-key"},
+                ],
+            }
+        ]
+        rc = ws.main()
+        self.assertEqual(rc, 0)
+        radarr = next(item for item in self.state.apps if item["name"] == "Radarr")
+        fields = {f["name"]: f.get("value") for f in radarr.get("fields") or []}
+        self.assertEqual(fields.get("prowlarrUrl"), "http://127.0.0.1:9698")
 
     def test_logs_prowlarr_history_id_search_vs_title(self):
         os.environ["INDEXER_URL"] = ""

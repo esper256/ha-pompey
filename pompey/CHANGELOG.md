@@ -2,7 +2,7 @@
 
 ## 0.2.25
 
-- An empty Query in Prowlarr History is usually an IMDb/TMDB ID search, not a blank request. We leave that alone. After wiring, the app log lists recent source searches as ID, title, or RSS so you can confirm from History (Parameters column) without guessing.
+- Empty Query in Prowlarr History during a Seerr request is often a **top100 browse**, not an IMDb search: Radarr sent an ID (or nothing), the source ignored it, and listed popular torrents. Arr now talks to Prowlarr through a localhost proxy that advertises title search only, so the movie name goes to every source. Open sources stays on port 9696. After wiring, the app log labels History rows as ID, title, RSS, or browse/top100.
 
 ## 0.2.24
 
