@@ -6,7 +6,7 @@
 - `as_list` no longer treats an error object (`{"message": ...}`) or a name-only dict as an existing indexer/app. That hid failed GETs.
 - HTTP 502/503/504 to the engines is retried a couple of times (boot race). 4xx is not.
 - Dropped leftover `indexer_url` / `indexer_api_key` option fallbacks (schema is `source_url` / `source_key`).
-- nginx reload failure is a hard error when nginx is on PATH (tests without nginx still write the conf).
+- nginx reload failure is a hard error when the master process is up. A missing `nginx.pid` (CI / this VM, no addon nginx) only warns; the conf is still written.
 
 ## 0.2.11
 
