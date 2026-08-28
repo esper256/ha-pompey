@@ -4,6 +4,7 @@ set -euo pipefail
 # shellcheck source=/dev/null
 source "$(command -v pompey-env)"
 
+pompey-svc start "NAT-PMP"
 if [[ "${POMPEY_FAKE_VPN:-}" == "1" ]]; then
   bashio::log.info "Fake VPN: skip Proton NAT-PMP"
   exec sleep infinity

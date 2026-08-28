@@ -88,19 +88,57 @@ incomplete = f"{media}/downloads/incomplete"
 complete = f"{media}/downloads/complete"
 
 
+log_dir = f"{config}/qBittorrent/logs"
+
+
 def patch_qbit_paths(text: str) -> str:
     for key, value in (
         (r"Session\DefaultSavePath", complete),
         (r"Session\TempPath", incomplete),
         (r"Downloads\SavePath", complete),
         (r"Downloads\TempPath", incomplete),
+        (r"FileLogger\Path", log_dir),
+        (r"FileLogger\Enabled", "true"),
     ):
         pat = rf"(?m)^{re.escape(key)}=.*$"
         if re.search(pat, text):
             text = re.sub(pat, lambda _m, k=key, v=value: f"{k}={v}", text, count=1)
+    if not re.search(rf"(?m)^{re.escape(r'FileLogger\Path')}=", text):
+        if re.search(rf"(?m)^{re.escape(r'FileLogger\Enabled')}=", text):
+            text = re.sub(
+                rf"(?m)^({re.escape(r'FileLogger\Enabled')}=.*)$",
+                lambda m: f"{m.group(1)}\nFileLogger\\Path={log_dir}",
+                text,
+                count=1,
+            )
+        elif re.search(r"(?m)^\[Application\]\s*$", text):
+            text = re.sub(
+                r"(?m)^(\[Application\])\s*$",
+                lambda m: (
+                    f"{m.group(1)}\nFileLogger\\Enabled=true\n"
+                    f"FileLogger\\Path={log_dir}"
+                ),
+                text,
+                count=1,
+            )
+        else:
+            text = (
+                "[Application]\n"
+                "FileLogger\\Enabled=true\n"
+                f"FileLogger\\Path={log_dir}\n\n"
+                + text
+            )
+    if not re.search(rf"(?m)^{re.escape(r'FileLogger\Enabled')}=", text):
+        text = re.sub(
+            rf"(?m)^({re.escape(r'FileLogger\Path')}=.*)$",
+            lambda m: f"FileLogger\\Enabled=true\n{m.group(1)}",
+            text,
+            count=1,
+        )
     return text
 qbit_text = f"""[Application]
 FileLogger\\Enabled=true
+FileLogger\\Path={config}/qBittorrent/logs
 
 [AutoRun]
 enabled=false

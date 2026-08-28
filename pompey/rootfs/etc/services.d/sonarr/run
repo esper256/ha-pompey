@@ -8,4 +8,5 @@ until [[ -f "${POMPEY_READY}/engines-ready" ]]; do
   sleep 2
 done
 
+pompey-svc start "Sonarr"
 exec "${POMPEY_ENGINES}/Sonarr/Sonarr" -nobrowser -data="${POMPEY_CONFIG}/sonarr"

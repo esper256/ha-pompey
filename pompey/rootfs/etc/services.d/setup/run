@@ -1,3 +1,4 @@
 #!/command/with-contenv bashio
 # shellcheck shell=bash
+pompey-svc start "setup"
 exec python3 /usr/local/bin/pompey-setup

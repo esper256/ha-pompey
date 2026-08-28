@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.23
+
+- The app log records when each hidden service **starts** and **stops**. qBittorrent warnings and errors are copied into that log; they used to stay in a file you cannot see from Home Assistant.
+
 ## 0.2.22
 
 - Fixed the wait screen getting stuck on **Could not finish connecting search** after a media-folder change. Search already had Radarr; updating the library path is allowed again.

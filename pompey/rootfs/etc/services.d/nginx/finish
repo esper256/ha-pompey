@@ -1,5 +1,3 @@
 #!/command/with-contenv bashio
 # shellcheck shell=bash
-if [[ "${1:-0}" -ne 0 ]] && [[ "${1:-0}" -ne 256 ]]; then
-  bashio::log.warning "nginx crashed (${1}); leaving VPN up"
-fi
+pompey-svc finish "nginx" "${1:-0}" "${2:-0}"

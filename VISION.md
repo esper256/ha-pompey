@@ -70,4 +70,4 @@ Hardware: this stack wants a few GB of RAM on top of Home Assistant. A 2 GB Pi i
 
 ## This repo
 
-`pompey/` is the Home Assistant app for the whole stack. The household guide (install, first run, which URLs you open, updates, what is not ready, roadmap) is the [root README](README.md). `0.2.22` is the current cut on real Home Assistant OS. Recyclarr/TRaSH quality profiles are not in this cut — engines use their defaults.
+`pompey/` is the Home Assistant app for the whole stack. The household guide (install, first run, which URLs you open, updates, what is not ready, roadmap) is the [root README](README.md). `0.2.23` is the current cut on real Home Assistant OS. Recyclarr/TRaSH quality profiles are not in this cut — engines use their defaults.

@@ -2,5 +2,5 @@
 # shellcheck shell=bash
 set -euo pipefail
 
-bashio::log.info "Starting Ingress nginx"
+pompey-svc start "nginx"
 exec nginx -g 'daemon off;'

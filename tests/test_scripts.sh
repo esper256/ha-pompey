@@ -114,6 +114,8 @@ if grep -qi "AuthenticationMethod>None" "${POMPEY_CONFIG}/prowlarr/config.xml"; 
   exit 1
 fi
 grep -Fq "WebUI\\Address=127.0.0.1" "${POMPEY_CONFIG}/qBittorrent/qBittorrent.conf"
+grep -Fq "FileLogger\\Enabled=true" "${POMPEY_CONFIG}/qBittorrent/qBittorrent.conf"
+grep -Fq "FileLogger\\Path=${POMPEY_CONFIG}/qBittorrent/logs" "${POMPEY_CONFIG}/qBittorrent/qBittorrent.conf"
 grep -Fq "Session\\Interface=wg0" "${POMPEY_CONFIG}/qBittorrent/qBittorrent.conf"
 grep -Fq "Session\\Interface=wg0" "${POMPEY_CONFIG}/qBittorrent/config/qBittorrent.conf"
 grep -Fq "Session\\DefaultSavePath=${MEDIA_ROOT}/downloads/complete" "${POMPEY_CONFIG}/qBittorrent/qBittorrent.conf"
@@ -404,5 +406,68 @@ POMPEY_FAKE_VPN=1 run "${BIN}/wait-for-vpn" 1
 echo "== banner allows empty Proton when POMPEY_FAKE_VPN=1 =="
 BASHIO_OPTIONS="${empty}" POMPEY_FAKE_VPN=1 run "${INIT}/00-banner.sh" >/tmp/pompey-banner-fake.log 2>&1
 grep -q "Fake VPN" /tmp/pompey-banner-fake.log
+
+echo "== every s6 service logs start and stop =="
+svc="${ROOT}/pompey/rootfs/etc/services.d"
+missing=0
+for runf in "${svc}"/*/run; do
+  if ! grep -q 'pompey-svc start' "${runf}"; then
+    echo "missing pompey-svc start in ${runf}" >&2
+    missing=1
+  fi
+done
+for fin in "${svc}"/*/finish; do
+  if ! grep -q 'pompey-svc finish' "${fin}"; then
+    echo "missing pompey-svc finish in ${fin}" >&2
+    missing=1
+  fi
+done
+if [[ "${missing}" -ne 0 ]]; then
+  exit 1
+fi
+grep -q 'pompey-svc qbit-line' "${svc}/qbittorrent/run"
+grep -q 'qBittorrent/logs' "${svc}/qbittorrent/run"
+grep -q 'tail' "${svc}/qbittorrent/run"
+test -x "${BIN}/pompey-svc"
+
+echo "== pompey-svc start/finish/qbit-line =="
+out="$(run pompey-svc start "qBittorrent" 2>&1)"
+grep -q "Starting qBittorrent" <<<"${out}"
+out="$(run pompey-svc finish "qBittorrent" 0 0 2>&1)"
+grep -q "qBittorrent stopped" <<<"${out}"
+out="$(run pompey-svc finish "Radarr" 256 15 2>&1)"
+grep -q "Radarr stopped" <<<"${out}"
+out="$(run pompey-svc finish "Sonarr" 1 0 2>&1)"
+grep -q "Sonarr exited (1)" <<<"${out}"
+out="$(run pompey-svc finish "nginx" 256 9 2>&1)"
+grep -q "killed (signal 9)" <<<"${out}"
+out="$(run pompey-svc qbit-line "(I) WebUI started" 2>&1)"
+if grep -q "WebUI started" <<<"${out}"; then
+  echo "info qBittorrent lines must not flood the app log" >&2
+  exit 1
+fi
+out="$(run pompey-svc qbit-line "(W) Could not listen on the torrent port" 2>&1)"
+grep -q "\[qBittorrent\]" <<<"${out}"
+grep -qi "WARNING" <<<"${out}"
+out="$(run pompey-svc qbit-line "(C) Permission denied writing to disk" 2>&1)"
+grep -q "\[qBittorrent\]" <<<"${out}"
+grep -qi "ERROR" <<<"${out}"
+run "${svc}/qbittorrent/finish" 1 0 >/tmp/pompey-qbit-finish.log 2>&1
+grep -q "qBittorrent exited (1)" /tmp/pompey-qbit-finish.log
+
+echo "== write-engine-configs adds FileLogger to an existing qbit conf =="
+python3 - "${POMPEY_CONFIG}/qBittorrent/qBittorrent.conf" <<'PY'
+from pathlib import Path
+import sys
+Path(sys.argv[1]).write_text(
+    "[BitTorrent]\n"
+    "Session\\DefaultSavePath=/old/complete\n"
+    "Session\\Interface=wg0\n"
+)
+PY
+run "${BIN}/write-engine-configs"
+grep -Fq "FileLogger\\Enabled=true" "${POMPEY_CONFIG}/qBittorrent/qBittorrent.conf"
+grep -Fq "FileLogger\\Path=${POMPEY_CONFIG}/qBittorrent/logs" "${POMPEY_CONFIG}/qBittorrent/qBittorrent.conf"
+grep -Fq "Session\\DefaultSavePath=${MEDIA_ROOT}/downloads/complete" "${POMPEY_CONFIG}/qBittorrent/qBittorrent.conf"
 
 echo "script tests ok (${WORK})"

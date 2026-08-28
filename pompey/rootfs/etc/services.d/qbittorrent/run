@@ -8,7 +8,55 @@ until [[ -f "${POMPEY_READY}/engines-ready" ]]; do
   sleep 2
 done
 
-exec "${POMPEY_ENGINES}/qbittorrent-nox" \
+QBIT="${POMPEY_ENGINES}/qbittorrent-nox"
+if [[ ! -x "${QBIT}" ]]; then
+  bashio::log.error "qBittorrent binary missing (${QBIT})"
+  exit 1
+fi
+
+LOG_DIR="${POMPEY_CONFIG}/qBittorrent/logs"
+mkdir -p "${LOG_DIR}"
+pompey-svc start "qBittorrent"
+
+forward_qbit_logs() {
+  local logf="" i
+  for i in $(seq 1 60); do
+    if [[ -f "${LOG_DIR}/qbittorrent.log" ]]; then
+      logf="${LOG_DIR}/qbittorrent.log"
+      break
+    fi
+    logf="$(ls -t "${LOG_DIR}"/*.log 2>/dev/null | head -n1 || true)"
+    [[ -n "${logf}" ]] && break
+    sleep 1
+  done
+  if [[ -z "${logf}" ]]; then
+    bashio::log.warning "qBittorrent has not created a log file after 60s (${LOG_DIR})"
+    return 0
+  fi
+  bashio::log.info "qBittorrent file log ${logf} (warnings also go to this app log)"
+  tail -n +1 -F "${logf}" 2>/dev/null | while IFS= read -r line || [[ -n "${line}" ]]; do
+    pompey-svc qbit-line "${line}"
+  done
+}
+
+forward_qbit_logs &
+fwd_pid=$!
+"${QBIT}" \
   --profile="${POMPEY_CONFIG}" \
   --webui-port=8080 \
-  --confirm-legal-notice
+  --confirm-legal-notice &
+qbit_pid=$!
+
+term() {
+  kill -TERM "${qbit_pid}" 2>/dev/null || true
+  kill -TERM "${fwd_pid}" 2>/dev/null || true
+}
+trap term TERM INT
+
+set +e
+wait "${qbit_pid}"
+rc=$?
+set -e
+kill -TERM "${fwd_pid}" 2>/dev/null || true
+wait "${fwd_pid}" 2>/dev/null || true
+exit "${rc}"

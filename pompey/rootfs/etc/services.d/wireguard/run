@@ -48,6 +48,8 @@ mark_vpn_up() {
   touch "${POMPEY_READY}/vpn-up"
 }
 
+pompey-svc start "WireGuard"
+
 if [[ "${POMPEY_FAKE_VPN:-}" == "1" ]]; then
   bashio::log.info "Fake wg0 (agent/dev): not Proton"
   pompey-status vpn "Bringing up fake wg0" 10 || true
