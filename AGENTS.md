@@ -18,7 +18,7 @@ In this Cursor VM there is no Supervisor. Starting Docker here is only so an age
 | Who starts the container | Supervisor (one container, `NET_ADMIN`, `/dev/net/tun`) | Nobody, unless an agent is checking the Dockerfile. The operator never starts it. |
 | `dockerd` | Already the HAOS host. Not something Pompey starts. | Optional, this VM only. Packages persist; the daemon process does not. |
 | Config | Supervisor writes `/data/options.json` from the app options UI | We supply [`tests/options.json`](tests/options.json) ourselves |
-| VPN / internet | All traffic on Proton `wg0`, else dropped | **Fake `wg0`**: a veth in netns `pompey-dev` that NATs out `eth0`. Same interface name the download engine binds. Not Proton. Set `POMPEY_FAKE_VPN=1`. Do **not** apply the OUTPUT DROP kill switch here (it would kill the agent). Keep host DNS. |
+| VPN / internet | All traffic on Proton `wg0`, else dropped | **Fake `wg0`**: a veth in netns `pompey-dev` that NATs out `eth0` (same name the download engine binds; not Proton; `POMPEY_FAKE_VPN=1`). **Generated WireGuard**: `tests/test_wg_quick.sh` runs a local client+server (no Proton) through `apply-vpn-config` + `wg-quick`, with HAOS-hostile `resolvconf`/`sysctl` helpers, and checks a handshake when sudo+kernel WG exist. Do **not** apply the OUTPUT DROP kill switch on the host (it would kill the agent). |
 | What the household sees | Wait screen, then Seerr on Ingress | [`tests/preview.py`](tests/preview.py) is the wait screen. Seerr’s image is Alpine/musl; if you unpack it, run it with the host glibc `node`. |
 | Engines | musl tarballs after the tunnel is up | glibc (`os=linux`) tarballs on Ubuntu, cached under `~/.cache/pompey/engines`. Tests skip unpacking the torrent client (`POMPEY_SKIP_QBIT=1`). |
 | Sources / Plex | Operator URL+key and a real Plex | Empty source + empty Plex token. Tests never speak BitTorrent. |
@@ -38,7 +38,7 @@ s6-overlay: `rootfs/etc/cont-init.d/*` once, then `rootfs/etc/services.d/*`.
 Fast, no Docker, no engines download:
 
 ```bash
-bash tests/run.sh              # options.json + bashio stub + fake engines + fake-wg0 smoke
+bash tests/run.sh              # options.json + bashio stub + fake engines + wg-quick contract + fake-wg0 smoke
 python3 tests/preview.py       # wait-screen progress UI at http://127.0.0.1:8099/
 ```
 

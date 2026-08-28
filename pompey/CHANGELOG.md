@@ -3,6 +3,7 @@
 ## 0.2.10
 
 - `Table = off` belongs in `[Interface]`. 0.2.9 appended it after `[Peer]`, so `wg addconf` said `Line unrecognized: Table=off` and deleted `wg0`. Rebuild so the banner says **0.2.10**.
+- CI now runs a **local WireGuard client and server** (generated keys, no Proton) through `apply-vpn-config` and `wg-quick`, so the next “line unrecognized” / resolvconf / sysctl rollback is caught without an HAOS reinstall.
 
 ## 0.2.9
 
