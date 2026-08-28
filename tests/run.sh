@@ -28,6 +28,9 @@ python3 tests/test_python.py -v
 echo "== addon scripts with bashio stub =="
 bash tests/test_scripts.sh
 
+echo "== wg-quick contract + local handshake (no Proton) =="
+bash tests/test_wg_quick.sh
+
 echo "== wait-screen preview (--once) =="
 python3 tests/preview.py --once --port 18099
 

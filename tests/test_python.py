@@ -33,6 +33,7 @@ def load(name: str, path: Path):
 ws = load("wire_stack", BIN / "wire-stack")
 rr = load("route_rating", BIN / "route-rating")
 ing = load("pompey_ingress", BIN / "pompey-ingress")
+wqc = load("wg_quick_contract", ROOT / "tests/lib/wg_quick_contract.py")
 
 
 def png_wh(path: Path) -> tuple[int, int]:
@@ -358,6 +359,36 @@ class Helpers(unittest.TestCase):
         setup = (ROOT / "pompey/rootfs/usr/local/bin/pompey-setup").read_text()
         self.assertIn("do not send the Proton key", setup)
         self.assertIn("The Proton file was saved", setup)
+
+    def test_table_after_peer_would_fail_wg_addconf(self):
+        bad = """
+[Interface]
+PrivateKey = AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+Address = 10.2.0.2/32
+
+[Peer]
+PublicKey = BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB=
+AllowedIPs = 0.0.0.0/0
+Endpoint = 127.0.0.1:51820
+Table = off
+"""
+        errs = wqc.check_text(bad)
+        self.assertTrue(any("table" in e.lower() and "peer" in e.lower() for e in errs), errs)
+
+    def test_table_in_interface_is_ok_for_wg_addconf(self):
+        good = """
+[Interface]
+PrivateKey = AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+Address = 10.2.0.2/32
+Table = off
+
+[Peer]
+PublicKey = BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB=
+AllowedIPs = 0.0.0.0/0
+Endpoint = 127.0.0.1:51820
+PersistentKeepalive = 25
+"""
+        self.assertEqual(wqc.check_text(good), [])
 
     def test_logs_use_clock_prefix_and_skip_status_polls(self):
         nginx = (ROOT / "pompey/rootfs/etc/nginx/nginx.conf").read_text()
