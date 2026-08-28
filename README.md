@@ -36,3 +36,6 @@ Tests do not need Home Assistant OS. They supply the same `options.json` Supervi
 bash tests/run.sh
 ```
 
+Agents: [AGENTS.md](AGENTS.md) (what Docker is for in this VM vs what HAOS does).
+
+
