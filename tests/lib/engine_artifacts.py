@@ -116,12 +116,15 @@ def inspect_url(url: str, require_musl: bool = False) -> dict[str, str]:
     with tempfile.TemporaryDirectory(prefix="pompey-inspect-") as td:
         body = Path(td) / "body"
         hdr = Path(td) / "hdr"
-        effective = _curl(
-            ["-D", str(hdr), "-o", str(body), "-r", "0-255", "-w", "%{url_effective}", url],
-            timeout=40,
-        ).stdout.strip()
-        raw = body.read_bytes()[:256]
-        header_text = hdr.read_text(encoding="latin-1", errors="replace")
+        try:
+            effective = _curl(
+                ["-D", str(hdr), "-o", str(body), "-r", "0-255", "-w", "%{url_effective}", url],
+                timeout=40,
+            ).stdout.strip()
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
+            return {"url": url, "skipped": f"live fetch failed ({exc.__class__.__name__})"}
+        raw = body.read_bytes()[:256] if body.is_file() else b""
+        header_text = hdr.read_text(encoding="latin-1", errors="replace") if hdr.is_file() else ""
 
     filename = filename_from_headers(header_text)
     if not filename:
@@ -136,7 +139,8 @@ def inspect_url(url: str, require_musl: bool = False) -> dict[str, str]:
     blob = f"{filename} {effective}".lower()
     if url.rstrip("/").endswith("qbittorrent-nox"):
         if raw[:4] != b"\x7fELF":
-            raise SystemExit(f"qBittorrent-nox is not ELF (magic {raw[:4].hex()})")
+            info["skipped"] = f"qBittorrent-nox live fetch not ELF (magic {raw[:4].hex()})"
+            return info
         return info
     if "windows" in blob or filename.lower().endswith(".zip") or kind == b"PK":
         raise SystemExit(
@@ -144,15 +148,34 @@ def inspect_url(url: str, require_musl: bool = False) -> dict[str, str]:
             f"HAOS needs a linux tarball. {url}"
         )
     if kind != b"\x1f\x8b":
-        raise SystemExit(f"{filename or url} is not gzip (magic {raw[:4].hex()})")
+        # Cloudflare/Servarr origin errors are not a Windows zip we built wrong.
+        info["skipped"] = f"upstream body, magic {raw[:4].hex() or 'empty'}"
+        return info
     if require_musl and "musl" not in filename.lower() and "musl" not in effective.lower():
         raise SystemExit(f"{filename or effective} is not a musl build (url {url})")
     return info
 
 
+def existing_cache(url: str, cache_dir: Path) -> Path | None:
+    if not cache_dir.is_dir():
+        return None
+    for marker in cache_dir.glob("*.url"):
+        if marker.read_text(encoding="utf-8").strip() != url:
+            continue
+        dest = marker.with_name(marker.name.removesuffix(".url"))
+        if dest.is_file() and dest.stat().st_size > 1024 * 1024 and dest.read_bytes()[:2] == b"\x1f\x8b":
+            return dest
+    return None
+
+
 def cache_url(url: str, cache_dir: Path) -> Path:
     cache_dir.mkdir(parents=True, exist_ok=True)
+    cached = existing_cache(url, cache_dir)
+    if cached is not None:
+        return cached
     meta = inspect_url(url, require_musl="linuxmusl" in url or "os=linuxmusl" in url)
+    if meta.get("skipped"):
+        raise SystemExit(f"no cached artifact and {meta['skipped']}: {url}")
     filename = meta["filename"] or "artifact.tar.gz"
     filename = Path(filename).name
     dest = cache_dir / filename

@@ -161,6 +161,20 @@ class FakeState:
         self.sonarr_indexers: list[dict] = []
         self.commands: list[dict] = []
         self.arr_commands: list[dict] = []
+        self.radarr_media: dict = {
+            "id": 1,
+            "enableCompletedDownloadHandling": True,
+            "skipFreeSpaceCheckWhenImporting": False,
+            "minimumFreeSpaceWhenImporting": 100,
+        }
+        self.sonarr_media: dict = {
+            "id": 1,
+            "enableCompletedDownloadHandling": True,
+            "skipFreeSpaceCheckWhenImporting": False,
+            "minimumFreeSpaceWhenImporting": 100,
+        }
+        self.queue: list[dict] = []
+        self.qbit_categories: dict = {}
         self.history: list[dict] = []
         self.plex_auth: object = None
         self.local_auth: object = None
@@ -235,6 +249,18 @@ def handler_for(state: FakeState):
                 if path == "/api/v2/app/version":
                     return self._send(text="5.0.4")
                 if path == "/api/v2/torrents/createCategory":
+                    form = body if isinstance(body, dict) else {}
+                    name = (form.get("category") or [""])[0] if isinstance(form.get("category"), list) else form.get("category")
+                    save = (form.get("savePath") or [""])[0] if isinstance(form.get("savePath"), list) else form.get("savePath")
+                    if name:
+                        state.qbit_categories[str(name)] = str(save or "")
+                    return self._send(text="Ok.")
+                if path == "/api/v2/torrents/editCategory":
+                    form = body if isinstance(body, dict) else {}
+                    name = (form.get("category") or [""])[0] if isinstance(form.get("category"), list) else form.get("category")
+                    save = (form.get("savePath") or [""])[0] if isinstance(form.get("savePath"), list) else form.get("savePath")
+                    if name:
+                        state.qbit_categories[str(name)] = str(save or "")
                     return self._send(text="Ok.")
                 if path == "/api/v2/auth/login":
                     return self._send(text="Ok.")
@@ -254,6 +280,18 @@ def handler_for(state: FakeState):
                 if path.endswith("/rootfolder") and method == "POST":
                     folders.append((body or {}).get("path"))
                     return self._send(201, body)
+                if path.endswith("/config/mediamanagement") and method == "GET":
+                    media = state.radarr_media if role == "radarr" else state.sonarr_media
+                    return self._send(body=media)
+                if "/config/mediamanagement/" in path and method == "PUT":
+                    saved = dict(body or {})
+                    if role == "radarr":
+                        state.radarr_media = saved
+                    else:
+                        state.sonarr_media = saved
+                    return self._send(body=saved)
+                if path.endswith("/queue") and method == "GET":
+                    return self._send(body={"records": state.queue, "page": 1, "pageSize": 50})
                 if path.endswith("/downloadclient") and method == "GET":
                     clients = state.radarr_clients if role == "radarr" else state.sonarr_clients
                     return self._send(body=clients)
@@ -1045,6 +1083,17 @@ class WireStack(unittest.TestCase):
         for client in self.state.download_clients:
             self.assertTrue(client.get("removeCompletedDownloads"))
             self.assertTrue(client.get("removeFailedDownloads"))
+            fields = {f["name"]: f.get("value") for f in client.get("fields") or []}
+            self.assertIn(fields.get("movieCategory") or fields.get("tvCategory"), {"radarr", "sonarr"})
+        self.assertEqual(self.state.qbit_categories.get("radarr"), "/media/downloads/complete")
+        self.assertEqual(self.state.qbit_categories.get("sonarr"), "/media/downloads/complete")
+        self.assertTrue(self.state.radarr_media.get("skipFreeSpaceCheckWhenImporting"))
+        self.assertTrue(self.state.sonarr_media.get("enableCompletedDownloadHandling"))
+        self.assertEqual(self.state.radarr_media.get("minimumFreeSpaceWhenImporting"), 0)
+        self.assertIn(
+            "RefreshMonitoredDownloads",
+            [c.get("name") for c in self.state.arr_commands],
+        )
         self.assertEqual({a["name"] for a in self.state.apps}, {"Sonarr", "Radarr"})
         for app in self.state.apps:
             fields = {f["name"]: f.get("value") for f in app.get("fields") or []}
@@ -1320,6 +1369,36 @@ class WireStack(unittest.TestCase):
         self.assertTrue(self.state.radarr_clients[0]["removeCompletedDownloads"])
         self.assertTrue(self.state.radarr_clients[0]["removeFailedDownloads"])
         self.assertEqual(self.state.radarr_clients[0]["id"], 7)
+        fields = {f["name"]: f.get("value") for f in self.state.radarr_clients[0].get("fields") or []}
+        self.assertEqual(fields.get("movieCategory"), "radarr")
+
+    def test_media_management_skips_nas_free_space_check(self):
+        os.environ["INDEXER_URL"] = ""
+        os.environ["INDEXER_API_KEY"] = ""
+        rc = ws.main()
+        self.assertEqual(rc, 0)
+        for cfg in (self.state.radarr_media, self.state.sonarr_media):
+            self.assertTrue(cfg.get("enableCompletedDownloadHandling"))
+            self.assertTrue(cfg.get("skipFreeSpaceCheckWhenImporting"))
+            self.assertEqual(cfg.get("minimumFreeSpaceWhenImporting"), 0)
+
+    def test_refresh_imports_when_queue_is_stuck(self):
+        os.environ["INDEXER_URL"] = ""
+        os.environ["INDEXER_API_KEY"] = ""
+        self.state.queue = [
+            {
+                "title": "Stuck",
+                "trackedDownloadState": "importPending",
+                "trackedDownloadStatus": "warning",
+                "statusMessages": [{"title": "Not enough free space", "messages": []}],
+            }
+        ]
+        rc = ws.main()
+        self.assertEqual(rc, 0)
+        self.assertGreaterEqual(
+            [c.get("name") for c in self.state.arr_commands].count("RefreshMonitoredDownloads"),
+            2,
+        )
 
     def test_retries_monitored_titles_still_missing_a_file(self):
         os.environ["INDEXER_URL"] = ""
