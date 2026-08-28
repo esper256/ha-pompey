@@ -115,6 +115,9 @@ fi
 grep -Fq "WebUI\\Address=127.0.0.1" "${POMPEY_CONFIG}/qBittorrent/qBittorrent.conf"
 grep -Fq "Session\\Interface=wg0" "${POMPEY_CONFIG}/qBittorrent/qBittorrent.conf"
 grep -Fq "Session\\Interface=wg0" "${POMPEY_CONFIG}/qBittorrent/config/qBittorrent.conf"
+grep -Fq "Session\\DefaultSavePath=${MEDIA_ROOT}/downloads/complete" "${POMPEY_CONFIG}/qBittorrent/qBittorrent.conf"
+test -d "${MEDIA_ROOT}/Movies"
+test -d "${MEDIA_ROOT}/Kid Friendly Movies"
 python3 - "${POMPEY_SECRETS}" "${POMPEY_CONFIG}" <<'PY'
 import json, pathlib, sys
 secrets = json.load(open(sys.argv[1], encoding="utf-8"))
@@ -148,6 +151,22 @@ if grep -qi "AuthenticationMethod>None" "${POMPEY_CONFIG}/prowlarr/config.xml"; 
   cat "${POMPEY_CONFIG}/prowlarr/config.xml" >&2
   exit 1
 fi
+
+echo "== write-engine-configs patches qbit save path when media folder changes =="
+export MEDIA_ROOT="${WORK}/media-nas"
+export MEDIA_MOVIES="Movies/Not Kid Friendly"
+export MEDIA_MOVIES_KID="Movies/Kid Friendly"
+export MEDIA_TV="TV/Not Kid Friendly"
+export MEDIA_TV_KID="TV/Kid Friendly"
+run "${BIN}/write-engine-configs"
+grep -Fq "Session\\DefaultSavePath=${MEDIA_ROOT}/downloads/complete" "${POMPEY_CONFIG}/qBittorrent/qBittorrent.conf"
+grep -Fq "Session\\DefaultSavePath=${MEDIA_ROOT}/downloads/complete" "${POMPEY_CONFIG}/qBittorrent/config/qBittorrent.conf"
+test -d "${MEDIA_ROOT}/Movies/Not Kid Friendly"
+test -d "${MEDIA_ROOT}/Movies/Kid Friendly"
+test -d "${MEDIA_ROOT}/TV/Not Kid Friendly"
+test -d "${MEDIA_ROOT}/downloads/incomplete"
+export MEDIA_ROOT="${WORK}/media"
+unset MEDIA_MOVIES MEDIA_MOVIES_KID MEDIA_TV MEDIA_TV_KID
 
 echo "== vpn config from wg0.conf file + kill switch stub =="
 mkdir -p "${POMPEY_CONFIG}/wireguard"

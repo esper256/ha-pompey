@@ -1,6 +1,6 @@
 # https://developers.home-assistant.io/docs/apps/configuration
 name: Pompey
-version: "0.2.19"
+version: "0.2.20"
 slug: pompey
 description: >-
   Search for a movie or TV show. Confirm if we need you. It lands in the
@@ -44,8 +44,19 @@ map:
     read_only: false
   - type: media
     read_only: false
-# Plex is Seerr's wizard. Sources are Prowlarr on :9696. Proton is
-# wait-screen paste. Re-add a field here only when the household must
-# answer it in Home Assistant.
-options: {}
-schema: {}
+# Media parent is the Home Assistant media share (or a Media network
+# storage folder under it). Library fields are relative to that parent.
+# Plex must already scan those same folders. Proton is wait-screen paste.
+# Sources are Prowlarr on :9696.
+options:
+  media_folder: /media
+  movies_folder: Movies
+  movies_kid_folder: Kid Friendly Movies
+  tv_folder: TV
+  tv_kid_folder: Kid Friendly TV
+schema:
+  media_folder: str
+  movies_folder: str
+  movies_kid_folder: str
+  tv_folder: str
+  tv_kid_folder: str

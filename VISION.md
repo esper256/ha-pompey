@@ -62,12 +62,12 @@ These are decided so we can build:
 - **Other engines:** official Linux musl tarballs for the TV/movie/indexer apps. Recyclarr/TRaSH quality so auto-grab is usually right.
 - **Seerr itself:** they ship Docker, not a tarball. We download *their* published image at runtime and unpack the app directory. We still do not publish an image of our own, and we do not compile them from source.
 - **Not v1:** picking a specific file when quality and seeds disagree; Cloudflare challenge solvers; Jellyfin; exposing search or sources on the public internet; stuffing Seerr under Ingress.
-- **Plex:** a separate Home Assistant app or another machine. Pompey never runs Plex. Library folders on `/media` (same filesystem as downloads).
+- **Plex:** a separate Home Assistant app or another machine. Pompey never runs Plex. Library folders under the media folder option (same filesystem as downloads).
 - **Kid vs general:** after a request, TMDB certification routes the root folder. G/PG/PG-13 and TV-Y/TV-G/TV-PG → kid libraries. Everything else, including unknown, → general. We do not guess kid. We do not block the request to ask.
-- **Sources:** we do not ship a catalog of indexers. Add or rotate sources in Prowlarr on :9696. Home Assistant has no Pompey options for this.
+- **Sources:** we do not ship a catalog of indexers. Add or rotate sources in Prowlarr on :9696.
 
 Hardware: this stack wants a few GB of RAM on top of Home Assistant. A 2 GB Pi is not a target.
 
 ## This repo
 
-`pompey/` is the Home Assistant app for the whole stack. The household guide (install, first run, which URLs you open, updates, what is not ready, roadmap) is the [root README](README.md). `0.2.19` is the current cut on real Home Assistant OS. Recyclarr/TRaSH quality profiles are not in this cut — engines use their defaults.
+`pompey/` is the Home Assistant app for the whole stack. The household guide (install, first run, which URLs you open, updates, what is not ready, roadmap) is the [root README](README.md). `0.2.20` is the current cut on real Home Assistant OS. Recyclarr/TRaSH quality profiles are not in this cut — engines use their defaults.

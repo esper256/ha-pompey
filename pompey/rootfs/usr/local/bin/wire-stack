@@ -74,6 +74,30 @@ def media_root() -> str:
     return env("MEDIA_ROOT", "/media").rstrip("/")
 
 
+def library_dir(env_name: str, default: str) -> str:
+    rel = env(env_name, default).replace("\\", "/").strip().strip("/")
+    parts = [p for p in rel.split("/") if p]
+    if not parts or any(p == ".." for p in parts):
+        parts = [p for p in default.replace("\\", "/").strip().strip("/").split("/") if p]
+    return f"{media_root()}/{'/'.join(parts)}"
+
+
+def movies_dir() -> str:
+    return library_dir("MEDIA_MOVIES", "Movies")
+
+
+def movies_kid_dir() -> str:
+    return library_dir("MEDIA_MOVIES_KID", "Kid Friendly Movies")
+
+
+def tv_dir() -> str:
+    return library_dir("MEDIA_TV", "TV")
+
+
+def tv_kid_dir() -> str:
+    return library_dir("MEDIA_TV_KID", "Kid Friendly TV")
+
+
 def plex_url() -> str:
     # Not an HA option. Household finishes Plex in Seerr. Tests may inject.
     return env("PLEX_URL")
@@ -532,7 +556,7 @@ def configure_seerr(secrets: dict, radarr_profile, sonarr_profile, sonarr_lang) 
         "useSsl": False,
         "activeProfileId": radarr_id,
         "activeProfileName": radarr_name,
-        "activeDirectory": f"{media_root()}/Movies",
+        "activeDirectory": movies_dir(),
         "isDefault": True,
         "is4k": False,
         "minimumAvailability": "released",
@@ -551,7 +575,7 @@ def configure_seerr(secrets: dict, radarr_profile, sonarr_profile, sonarr_lang) 
         "useSsl": False,
         "activeProfileId": sonarr_id,
         "activeProfileName": sonarr_name,
-        "activeDirectory": f"{media_root()}/TV",
+        "activeDirectory": tv_dir(),
         "isDefault": True,
         "is4k": False,
         "enableSeasonFolders": True,
@@ -569,7 +593,20 @@ def configure_seerr(secrets: dict, radarr_profile, sonarr_profile, sonarr_lang) 
         path = f"/api/v1/settings/{kind}"
         try:
             existing = as_list(s.call("GET", path))
-            if any(item.get("hostname") == "127.0.0.1" for item in existing):
+            match = next(
+                (item for item in existing if item.get("hostname") == "127.0.0.1"),
+                None,
+            )
+            if match:
+                want = (payload.get("activeDirectory") or "").rstrip("/")
+                have = (match.get("activeDirectory") or "").rstrip("/")
+                server_id = match.get("id")
+                if server_id is not None and want and want != have:
+                    update = dict(match)
+                    update.update(payload)
+                    update["id"] = server_id
+                    s.call("PUT", f"{path}/{server_id}", update)
+                    log(f"seerr {kind} directory {want}")
                 return True
             s.call("POST", path, payload)
             log(f"seerr {kind}")
@@ -637,10 +674,10 @@ def main() -> int:
 
     qbit_category("sonarr")
     qbit_category("radarr")
-    ensure_root_folder(sonarr, sk, f"{media_root()}/TV")
-    ensure_root_folder(sonarr, sk, f"{media_root()}/Kid Friendly TV")
-    ensure_root_folder(radarr, rk, f"{media_root()}/Movies")
-    ensure_root_folder(radarr, rk, f"{media_root()}/Kid Friendly Movies")
+    ensure_root_folder(sonarr, sk, tv_dir())
+    ensure_root_folder(sonarr, sk, tv_kid_dir())
+    ensure_root_folder(radarr, rk, movies_dir())
+    ensure_root_folder(radarr, rk, movies_kid_dir())
     ensure_download_client(sonarr, sk, secrets, "sonarr")
     ensure_download_client(radarr, rk, secrets, "radarr")
     ensure_prowlarr_app(prowlarr, pk, "Sonarr", "Sonarr", sonarr_url(), sk)

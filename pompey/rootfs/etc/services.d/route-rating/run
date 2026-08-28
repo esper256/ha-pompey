@@ -8,5 +8,5 @@ until [[ -f "${POMPEY_READY}/wired" ]]; do
   sleep 5
 done
 
-export POMPEY_SECRETS MEDIA_ROOT
+export POMPEY_SECRETS MEDIA_ROOT MEDIA_MOVIES MEDIA_MOVIES_KID MEDIA_TV MEDIA_TV_KID
 exec python3 /usr/local/bin/route-rating

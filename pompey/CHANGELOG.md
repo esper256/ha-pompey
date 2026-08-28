@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.20
+
+- Home Assistant options for **where files go**: media folder (default `/media`) plus movies, kid movies, TV, and kid TV folders relative to it. In-progress downloads use `downloads/` under the media folder. Point Plex at those same library folders. A network Media share is `/media/<the name you gave it>`. Saving the options and restarting the app updates an existing install.
+
 ## 0.2.19
 
 - Home Assistant no longer has Plex or source fields for this app. Connect Plex in Seerr’s first-run wizard. Add sources with **Open sources** (Prowlarr).
