@@ -714,6 +714,7 @@ class ProtonSetup(unittest.TestCase):
 class TestsNeverUseBitTorrent(unittest.TestCase):
     def test_torznab_fixture_is_gone(self):
         self.assertFalse((ROOT / "tests/dev/torznab.py").exists())
+        self.assertTrue((ROOT / "tests/lib/fake_source.py").is_file())
 
 
 if __name__ == "__main__":
