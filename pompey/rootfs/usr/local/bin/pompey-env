@@ -19,7 +19,28 @@ POMPEY_LAN_FILE="${POMPEY_LAN_FILE:-/etc/pompey-lan-networks}"
 POMPEY_RESOLV="${POMPEY_RESOLV:-/etc/resolv.conf}"
 POMPEY_NGINX_RUN="${POMPEY_NGINX_RUN:-/run/nginx}"
 NGINX_INGRESS_CONF="${NGINX_INGRESS_CONF:-/etc/nginx/http.d/ingress.conf}"
+
+if declare -F bashio::config >/dev/null 2>&1; then
+  : "${MEDIA_ROOT:=$(bashio::config 'media_folder')}"
+  : "${MEDIA_MOVIES:=$(bashio::config 'movies_folder')}"
+  : "${MEDIA_MOVIES_KID:=$(bashio::config 'movies_kid_folder')}"
+  : "${MEDIA_TV:=$(bashio::config 'tv_folder')}"
+  : "${MEDIA_TV_KID:=$(bashio::config 'tv_kid_folder')}"
+fi
 MEDIA_ROOT="${MEDIA_ROOT:-/media}"
+MEDIA_MOVIES="${MEDIA_MOVIES:-Movies}"
+MEDIA_MOVIES_KID="${MEDIA_MOVIES_KID:-Kid Friendly Movies}"
+MEDIA_TV="${MEDIA_TV:-TV}"
+MEDIA_TV_KID="${MEDIA_TV_KID:-Kid Friendly TV}"
+MEDIA_ROOT="${MEDIA_ROOT%/}"
+MEDIA_MOVIES="${MEDIA_MOVIES#/}"
+MEDIA_MOVIES="${MEDIA_MOVIES%/}"
+MEDIA_MOVIES_KID="${MEDIA_MOVIES_KID#/}"
+MEDIA_MOVIES_KID="${MEDIA_MOVIES_KID%/}"
+MEDIA_TV="${MEDIA_TV#/}"
+MEDIA_TV="${MEDIA_TV%/}"
+MEDIA_TV_KID="${MEDIA_TV_KID#/}"
+MEDIA_TV_KID="${MEDIA_TV_KID%/}"
 
 mkdir -p \
   "${POMPEY_DATA}" \
@@ -31,10 +52,10 @@ mkdir -p \
   "${POMPEY_CONFIG}/prowlarr" \
   "${POMPEY_CONFIG}/qBittorrent" \
   "${POMPEY_CONFIG}/seerr" \
-  "${MEDIA_ROOT}/Movies" \
-  "${MEDIA_ROOT}/TV" \
-  "${MEDIA_ROOT}/Kid Friendly Movies" \
-  "${MEDIA_ROOT}/Kid Friendly TV" \
+  "${MEDIA_ROOT}/${MEDIA_MOVIES}" \
+  "${MEDIA_ROOT}/${MEDIA_TV}" \
+  "${MEDIA_ROOT}/${MEDIA_MOVIES_KID}" \
+  "${MEDIA_ROOT}/${MEDIA_TV_KID}" \
   "${MEDIA_ROOT}/downloads/incomplete" \
   "${MEDIA_ROOT}/downloads/complete"
 chmod 700 "${POMPEY_CONFIG}/wireguard" 2>/dev/null || true

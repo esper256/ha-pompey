@@ -311,10 +311,17 @@ class SupervisorConfigSchema(unittest.TestCase):
         self.raw = load_yaml(self.config_path)
 
     def test_household_options_only(self):
-        # Empty on purpose: Plex is Seerr's wizard, sources are Prowlarr,
-        # Proton is wait-screen paste. Re-add a field only when HA must ask.
-        self.assertEqual(self.raw["options"], {})
-        self.assertEqual(self.raw["schema"], {})
+        self.assertEqual(
+            set(self.raw["options"]),
+            {
+                "media_folder",
+                "movies_folder",
+                "movies_kid_folder",
+                "tv_folder",
+                "tv_kid_folder",
+            },
+        )
+        self.assertEqual(set(self.raw["schema"]), set(self.raw["options"]))
         for leaked in (
             "wireguard_config",
             "wireguard_private_key",

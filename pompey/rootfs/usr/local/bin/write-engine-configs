@@ -86,6 +86,19 @@ pbk = secrets["qbit_pbkdf2"]
 user = secrets["qbit_user"]
 incomplete = f"{media}/downloads/incomplete"
 complete = f"{media}/downloads/complete"
+
+
+def patch_qbit_paths(text: str) -> str:
+    for key, value in (
+        (r"Session\DefaultSavePath", complete),
+        (r"Session\TempPath", incomplete),
+        (r"Downloads\SavePath", complete),
+        (r"Downloads\TempPath", incomplete),
+    ):
+        pat = rf"(?m)^{re.escape(key)}=.*$"
+        if re.search(pat, text):
+            text = re.sub(pat, lambda _m, k=key, v=value: f"{k}={v}", text, count=1)
+    return text
 qbit_text = f"""[Application]
 FileLogger\\Enabled=true
 
@@ -136,8 +149,13 @@ for qconf in (
     f"{config}/qBittorrent/config/qBittorrent.conf",
 ):
     os.makedirs(os.path.dirname(qconf), exist_ok=True)
-    if not os.path.isfile(qconf):
+    if os.path.isfile(qconf):
+        body = patch_qbit_paths(open(qconf, encoding="utf-8").read())
         with open(qconf, "w", encoding="utf-8") as fh:
-            fh.write(qbit_text)
+            fh.write(body)
         os.chmod(qconf, 0o600)
+        continue
+    with open(qconf, "w", encoding="utf-8") as fh:
+        fh.write(qbit_text)
+    os.chmod(qconf, 0o600)
 PY

@@ -1,1 +1,7 @@
-{}
+{
+  "media_folder": "/media",
+  "movies_folder": "Movies",
+  "movies_kid_folder": "Kid Friendly Movies",
+  "tv_folder": "TV",
+  "tv_kid_folder": "Kid Friendly TV"
+}

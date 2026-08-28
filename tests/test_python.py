@@ -282,6 +282,20 @@ def handler_for(state: FakeState):
                 if path == "/api/v1/settings/sonarr" and method == "POST":
                     state.seerr_sonarr.append(body)
                     return self._send(201, body)
+                if path.startswith("/api/v1/settings/radarr/") and method == "PUT":
+                    updated = dict(body or {})
+                    if state.seerr_radarr:
+                        state.seerr_radarr[0] = updated
+                    else:
+                        state.seerr_radarr.append(updated)
+                    return self._send(body=updated)
+                if path.startswith("/api/v1/settings/sonarr/") and method == "PUT":
+                    updated = dict(body or {})
+                    if state.seerr_sonarr:
+                        state.seerr_sonarr[0] = updated
+                    else:
+                        state.seerr_sonarr.append(updated)
+                    return self._send(body=updated)
                 if path == "/api/v1/settings/network":
                     return self._send(body=body)
                 if path == "/api/v1/settings/initialize":
@@ -319,11 +333,11 @@ class OptionsMatchConfig(unittest.TestCase):
         schema_keys = yaml_indent2_keys(cfg, "schema:")
         trans_keys = yaml_indent2_keys(trans, "configuration:")
         supplied = set(OPTIONS)
-        self.assertEqual(option_keys, [])
-        self.assertEqual(schema_keys, [])
-        self.assertEqual(trans_keys, [])
-        self.assertEqual(supplied, set())
+        self.assertTrue(option_keys)
         self.assertEqual(set(option_keys), set(schema_keys) & set(option_keys))
+        for key in option_keys:
+            self.assertIn(key, supplied)
+            self.assertIn(key, trans_keys)
 
 
 class Helpers(unittest.TestCase):
@@ -347,6 +361,37 @@ class Helpers(unittest.TestCase):
         self.assertTrue(rr.in_root("/media/Movies/Foo", "/media/Movies"))
         self.assertFalse(rr.in_root("/media/Movies Extra/Foo", "/media/Movies"))
         self.assertFalse(rr.in_root("/media/Kid Friendly Movies/Foo", "/media/Movies"))
+
+    def test_library_dir_nested_under_media_root(self):
+        old = {
+            key: os.environ.get(key)
+            for key in (
+                "MEDIA_ROOT",
+                "MEDIA_MOVIES",
+                "MEDIA_MOVIES_KID",
+                "MEDIA_TV",
+                "MEDIA_TV_KID",
+            )
+        }
+        try:
+            os.environ["MEDIA_ROOT"] = "/media/dlna"
+            os.environ["MEDIA_MOVIES"] = "Movies/Not Kid Friendly"
+            os.environ["MEDIA_MOVIES_KID"] = "Movies/Kid Friendly"
+            os.environ["MEDIA_TV"] = "TV/Not Kid Friendly"
+            os.environ["MEDIA_TV_KID"] = "TV/Kid Friendly"
+            self.assertEqual(rr.movies_dir(), "/media/dlna/Movies/Not Kid Friendly")
+            self.assertEqual(rr.movies_kid_dir(), "/media/dlna/Movies/Kid Friendly")
+            self.assertEqual(rr.tv_dir(), "/media/dlna/TV/Not Kid Friendly")
+            self.assertEqual(rr.tv_kid_dir(), "/media/dlna/TV/Kid Friendly")
+            self.assertEqual(ws.movies_dir(), "/media/dlna/Movies/Not Kid Friendly")
+            os.environ["MEDIA_MOVIES"] = "../escape"
+            self.assertEqual(rr.movies_dir(), "/media/dlna/Movies")
+        finally:
+            for key, value in old.items():
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
 
     def test_parse_plex(self):
         self.assertEqual(ws.parse_plex("http://172.30.32.1:32400"), ("172.30.32.1", 32400, False))
@@ -518,6 +563,10 @@ class WireStack(unittest.TestCase):
                 "POMPEY_SECRETS": str(secrets_path),
                 "POMPEY_READY": str(ready),
                 "MEDIA_ROOT": "/media",
+                "MEDIA_MOVIES": "Movies",
+                "MEDIA_MOVIES_KID": "Kid Friendly Movies",
+                "MEDIA_TV": "TV",
+                "MEDIA_TV_KID": "Kid Friendly TV",
                 "PLEX_URL": "http://172.30.32.1:32400",
                 "PLEX_TOKEN": "test-plex-token",
                 "INDEXER_URL": "https://example-source.test",
@@ -639,6 +688,59 @@ class WireStack(unittest.TestCase):
         self.assertIsNone(self.state.local_auth)
         self.assertEqual(self.state.seerr_radarr[0]["hostname"], "127.0.0.1")
         self.assertFalse(self.state.initialized)
+
+    def test_updates_seerr_directory_when_media_folder_changes(self):
+        """An existing Seerr Radarr/Sonarr row must pick up the new library folders."""
+        self.state.seerr_has_admin = True
+        self.state.initialized = True
+        self.state.seerr_radarr = [
+            {
+                "id": 1,
+                "name": "Radarr",
+                "hostname": "127.0.0.1",
+                "activeDirectory": "/media/Movies",
+            }
+        ]
+        self.state.seerr_sonarr = [
+            {
+                "id": 1,
+                "name": "Sonarr",
+                "hostname": "127.0.0.1",
+                "activeDirectory": "/media/TV",
+            }
+        ]
+        os.environ["PLEX_URL"] = ""
+        os.environ["PLEX_TOKEN"] = ""
+        os.environ["MEDIA_ROOT"] = "/media/dlna"
+        os.environ["MEDIA_MOVIES"] = "Movies/Not Kid Friendly"
+        os.environ["MEDIA_MOVIES_KID"] = "Movies/Kid Friendly"
+        os.environ["MEDIA_TV"] = "TV/Not Kid Friendly"
+        os.environ["MEDIA_TV_KID"] = "TV/Kid Friendly"
+        rc = ws.main()
+        self.assertEqual(rc, 0)
+        self.assertEqual(
+            self.state.seerr_radarr[0]["activeDirectory"],
+            "/media/dlna/Movies/Not Kid Friendly",
+        )
+        self.assertEqual(
+            self.state.seerr_sonarr[0]["activeDirectory"],
+            "/media/dlna/TV/Not Kid Friendly",
+        )
+        self.assertEqual(
+            set(self.state.radarr_folders),
+            {
+                "/media/dlna/Movies/Not Kid Friendly",
+                "/media/dlna/Movies/Kid Friendly",
+            },
+        )
+        self.assertEqual(
+            set(self.state.sonarr_folders),
+            {
+                "/media/dlna/TV/Not Kid Friendly",
+                "/media/dlna/TV/Kid Friendly",
+            },
+        )
+        self.assertTrue((self.ready / "seerr-arr").exists())
 
     def test_marks_ready_before_wizard_without_seerr_api_key(self):
         os.environ["PLEX_URL"] = ""

@@ -15,6 +15,30 @@ def media_root() -> str:
     return os.environ.get("MEDIA_ROOT", "/media").rstrip("/")
 
 
+def library_dir(env_name: str, default: str) -> str:
+    rel = (os.environ.get(env_name) or default).replace("\\", "/").strip().strip("/")
+    parts = [p for p in rel.split("/") if p]
+    if not parts or any(p == ".." for p in parts):
+        parts = [p for p in default.replace("\\", "/").strip().strip("/").split("/") if p]
+    return f"{media_root()}/{'/'.join(parts)}"
+
+
+def movies_dir() -> str:
+    return library_dir("MEDIA_MOVIES", "Movies")
+
+
+def movies_kid_dir() -> str:
+    return library_dir("MEDIA_MOVIES_KID", "Kid Friendly Movies")
+
+
+def tv_dir() -> str:
+    return library_dir("MEDIA_TV", "TV")
+
+
+def tv_kid_dir() -> str:
+    return library_dir("MEDIA_TV_KID", "Kid Friendly TV")
+
+
 def radarr_url() -> str:
     return os.environ.get("RADARR_URL", "http://127.0.0.1:7878").rstrip("/")
 
@@ -92,8 +116,8 @@ def in_root(path: str, root: str) -> bool:
 
 def route_movies(key: str) -> None:
     movies = as_list(http_json("GET", f"{radarr_url()}/api/v3/movie", headers=headers(key)))
-    kid_root = f"{media_root()}/Kid Friendly Movies"
-    gen_root = f"{media_root()}/Movies"
+    kid_root = movies_kid_dir()
+    gen_root = movies_dir()
     for movie in movies:
         cert = title_cert(movie)
         path = movie.get("path") or movie.get("rootFolderPath") or ""
@@ -119,8 +143,8 @@ def route_movies(key: str) -> None:
 
 def route_series(key: str) -> None:
     series = as_list(http_json("GET", f"{sonarr_url()}/api/v3/series", headers=headers(key)))
-    kid_root = f"{media_root()}/Kid Friendly TV"
-    gen_root = f"{media_root()}/TV"
+    kid_root = tv_kid_dir()
+    gen_root = tv_dir()
     for show in series:
         cert = title_cert(show)
         path = show.get("path") or ""
