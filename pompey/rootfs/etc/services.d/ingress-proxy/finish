@@ -1,5 +1,0 @@
-#!/command/with-contenv bashio
-# shellcheck shell=bash
-if [[ "${1:-0}" -ne 0 ]] && [[ "${1:-0}" -ne 256 ]]; then
-  bashio::log.warning "ingress proxy exited (${1})"
-fi

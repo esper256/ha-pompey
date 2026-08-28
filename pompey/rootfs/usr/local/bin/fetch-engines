@@ -245,7 +245,9 @@ fetch_seerr() {
   rm -rf "${dest}"
   mv "${staging}" "${dest}"
   mkdir -p "${POMPEY_CONFIG}/seerr"
-  touch "${POMPEY_CONFIG}/seerr/DOCKER"
+  # Do not plant Seerr's DOCKER sentinel — that is how it detects a missing
+  # bind-mount. /config/seerr is persisted by Home Assistant addon_config.
+  rm -f "${POMPEY_CONFIG}/seerr/DOCKER"
   rm -rf "${dest}/app/config"
   ln -sfn "${POMPEY_CONFIG}/seerr" "${dest}/app/config"
 }

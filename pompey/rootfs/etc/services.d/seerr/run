@@ -32,7 +32,11 @@ if ! node_works "${NODE}" || [[ ! -d "${APP}" ]]; then
 fi
 
 mkdir -p "${POMPEY_CONFIG}/seerr"
-touch "${POMPEY_CONFIG}/seerr/DOCKER"
+# Seerr banners "volume mount was not configured" when a DOCKER sentinel
+# exists. The official image uses that file so a bind-mount hides it.
+# /config is Home Assistant addon_config and already persists. 0.2.16
+# planted the sentinel; remove leftovers and do not recreate it.
+rm -f "${POMPEY_CONFIG}/seerr/DOCKER"
 ln -sfn "${POMPEY_CONFIG}/seerr" "${APP}/config"
 export NODE_ENV=production
 export PORT="${SEERR_PORT:-5055}"

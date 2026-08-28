@@ -4,7 +4,7 @@ Search for a movie or TV show in Home Assistant. Confirm if we need you. It land
 
 Pompey is one Home Assistant OS app. The sidebar is the box: Proton, status, a button to search. Search itself is [Seerr](https://seerr.dev/) on this machine’s port **5055**, not an iframe. Downloads, matching, and the VPN stay inside Pompey. All internet from this app uses Proton WireGuard. If the tunnel is down, internet is dropped. **Plex is a separate Home Assistant app** (or another machine). Pompey does not run Plex.
 
-This is the user guide for the product we are building. It describes the journey as it should feel. [What is not ready yet](#what-is-not-ready-yet) is honest about the current cut (**0.2.16**). The [roadmap](#roadmap) is how we close the gap.
+This is the user guide for the product we are building. It describes the journey as it should feel. [What is not ready yet](#what-is-not-ready-yet) is honest about the current cut (**0.2.17**). The [roadmap](#roadmap) is how we close the gap.
 
 ## How a day with it should feel
 
@@ -172,7 +172,7 @@ A private tracker with a stable API key is set-and-forget. Prowlarr copies that 
 
 ## What is not ready yet
 
-The journey above is the target. **0.2.16** is a real Home Assistant OS install of that box, not the finished household app.
+The journey above is the target. **0.2.17** is a real Home Assistant OS install of that box, not the finished household app.
 
 | In the guide | On the machine today |
 | --- | --- |
@@ -189,7 +189,7 @@ The journey above is the target. **0.2.16** is a real Home Assistant OS install 
 | Jellyfin | Plex only. |
 | Use this from outside the house | Out of scope. Search is on the LAN at :5055. Do not port-forward it. |
 
-If search is a blank page on port 5055, or the Plex button on setup does nothing, that is a bug — send the log. Rebuild so the banner says **0.2.16** if you are on an older wait screen that tried to iframe Seerr.
+If search is a blank page on port 5055, or the Plex button on setup does nothing, that is a bug — send the log. Rebuild so the banner says **0.2.17** if you are on an older wait screen that tried to iframe Seerr, or if search warns that `/config/seerr` is not a volume.
 
 ## Roadmap
 
@@ -227,6 +227,7 @@ App config lives in `/addon_configs/<id>_pompey/`. Fetched engines live in the a
 - Sidebar stuck after Proton with no **Open search**: engine download or wiring. Log lines are stamped with a time. Do not send keys.
 - **Open search** / port 5055 does not load: check **Settings → Apps → Pompey → Configuration → Network** that 5055/tcp is mapped. Use this machine’s LAN IP, not Home Assistant Cloud.
 - Sidebar used to be a blank Seerr page, or Plex button did nothing: you need **0.2.16** or newer (Ingress used to rewrite Seerr’s JavaScript). Search is now `:5055`, not the iframe.
+- Search warns that `/config/seerr` is not a volume: you need **0.2.17**. The data was already persisted; Seerr was looking at a leftover `DOCKER` sentinel.
 - Search never finds releases: source URL/key, and give wiring a minute after the Plex wizard (Arr is connected after the first admin exists).
 - Plex wizard cannot see the server: numeric IP of **your Plex app**, port 32400 published, LAN not blocked. Pompey does not contain Plex.
 

@@ -620,17 +620,6 @@ def configure_seerr(secrets: dict, radarr_profile, sonarr_profile, sonarr_lang) 
         log("seerr left uninitialized so the Plex setup wizard can run")
 
 
-def keep_ingress_as_pompey() -> None:
-    """Sidebar stays Pompey's wait/status UI. Seerr is the published host port.
-
-    Putting Seerr under Home Assistant Ingress means rewriting Next.js
-    root-absolute URLs. That has already broken /login/i and /^\\/_next\\/data\\//
-    and will break again on the next minified chunk. Do not proxy Seerr.
-    """
-    port = os.environ.get("SEERR_PORT", "5055")
-    log(f"search is on 0.0.0.0:{port}; Ingress stays Pompey (no Seerr rewrite)")
-
-
 def main() -> int:
     secrets = load_secrets()
     wait_http(f"{qbit_url()}/api/v2/app/version")
@@ -663,7 +652,8 @@ def main() -> int:
     open(os.path.join(ready_dir(), "arr-wired"), "w").close()
 
     configure_seerr(secrets, rp, sp, sl)
-    keep_ingress_as_pompey()
+    port = os.environ.get("SEERR_PORT", "5055")
+    log(f"search is on 0.0.0.0:{port}; Ingress stays Pompey")
     mark_status("ready", "Ready", 100)
     open(os.path.join(ready_dir(), "wired"), "w").close()
     log("done")

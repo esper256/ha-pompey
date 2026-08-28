@@ -96,7 +96,6 @@ def main(argv: list[str]) -> int:
     data["label"] = label
     data["error"] = error
     ready = bool(step == "ready" and not error)
-    data["handoff"] = ready
     data["search"] = ready
     data["search_port"] = int(os.environ.get("SEERR_PORT", "5055"))
     if percent is not None:

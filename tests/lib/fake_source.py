@@ -392,7 +392,7 @@ def seerr_handler(state: FakeState):
         def do_GET(self) -> None:
             path = urlparse(self.path).path
             if path in ("/", "/login", "/setup"):
-                html = b'<!doctype html><script src="/_next/static/x.js"></script>'
+                html = b'<!doctype html><title>seerr stub</title>'
                 return self._send(200, html, "text/html")
             if path.endswith("/settings/radarr"):
                 return self._send(200, state.seerr["radarr"])
