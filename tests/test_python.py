@@ -283,19 +283,47 @@ def handler_for(state: FakeState):
                     state.seerr_sonarr.append(body)
                     return self._send(201, body)
                 if path.startswith("/api/v1/settings/radarr/") and method == "PUT":
+                    if isinstance(body, dict) and "id" in body:
+                        return self._send(
+                            400,
+                            {
+                                "message": "request/body/id is read-only",
+                                "errors": [
+                                    {
+                                        "path": "/body/id",
+                                        "message": "is read-only",
+                                        "errorCode": "readOnly.openapi.validation",
+                                    }
+                                ],
+                            },
+                        )
                     updated = dict(body or {})
                     if state.seerr_radarr:
-                        state.seerr_radarr[0] = updated
+                        state.seerr_radarr[0] = {**state.seerr_radarr[0], **updated}
                     else:
                         state.seerr_radarr.append(updated)
-                    return self._send(body=updated)
+                    return self._send(body=state.seerr_radarr[0] if state.seerr_radarr else updated)
                 if path.startswith("/api/v1/settings/sonarr/") and method == "PUT":
+                    if isinstance(body, dict) and "id" in body:
+                        return self._send(
+                            400,
+                            {
+                                "message": "request/body/id is read-only",
+                                "errors": [
+                                    {
+                                        "path": "/body/id",
+                                        "message": "is read-only",
+                                        "errorCode": "readOnly.openapi.validation",
+                                    }
+                                ],
+                            },
+                        )
                     updated = dict(body or {})
                     if state.seerr_sonarr:
-                        state.seerr_sonarr[0] = updated
+                        state.seerr_sonarr[0] = {**state.seerr_sonarr[0], **updated}
                     else:
                         state.seerr_sonarr.append(updated)
-                    return self._send(body=updated)
+                    return self._send(body=state.seerr_sonarr[0] if state.seerr_sonarr else updated)
                 if path == "/api/v1/settings/network":
                     return self._send(body=body)
                 if path == "/api/v1/settings/initialize":
@@ -695,7 +723,7 @@ class WireStack(unittest.TestCase):
         self.state.initialized = True
         self.state.seerr_radarr = [
             {
-                "id": 1,
+                "id": 0,
                 "name": "Radarr",
                 "hostname": "127.0.0.1",
                 "activeDirectory": "/media/Movies",
@@ -703,7 +731,7 @@ class WireStack(unittest.TestCase):
         ]
         self.state.seerr_sonarr = [
             {
-                "id": 1,
+                "id": 0,
                 "name": "Sonarr",
                 "hostname": "127.0.0.1",
                 "activeDirectory": "/media/TV",
@@ -741,6 +769,20 @@ class WireStack(unittest.TestCase):
             },
         )
         self.assertTrue((self.ready / "seerr-arr").exists())
+        radarr_puts = [
+            call
+            for call in self.state.calls
+            if call[0] == "seerr" and call[1] == "PUT" and "/settings/radarr/" in call[2]
+        ]
+        self.assertEqual(radarr_puts[0][2], "/api/v1/settings/radarr/0")
+        self.assertNotIn("id", radarr_puts[0][3] or {})
+        sonarr_puts = [
+            call
+            for call in self.state.calls
+            if call[0] == "seerr" and call[1] == "PUT" and "/settings/sonarr/" in call[2]
+        ]
+        self.assertEqual(sonarr_puts[0][2], "/api/v1/settings/sonarr/0")
+        self.assertNotIn("id", sonarr_puts[0][3] or {})
 
     def test_marks_ready_before_wizard_without_seerr_api_key(self):
         os.environ["PLEX_URL"] = ""

@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.22
+
+- Fixed the wait screen getting stuck on **Could not finish connecting search** after a media-folder change. Search already had Radarr; updating the library path is allowed again.
+
 ## 0.2.21
 
 - Media folder defaults match this house: `/media/dlna`, with `Movies/Not Kid Friendly`, `Movies/Kid Friendly`, `TV/Not Kid Friendly`, and `TV/Kid Friendly`. Change the Home Assistant options if a share or library folder is named differently. If you already saved the old `/media` defaults, update Configuration once and restart.
