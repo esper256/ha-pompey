@@ -175,6 +175,8 @@ class FakeState:
         }
         self.queue: list[dict] = []
         self.qbit_categories: dict = {}
+        self.qbit_torrents: list[dict] = []
+        self.qbit_removed: list[dict] = []
         self.history: list[dict] = []
         self.plex_auth: object = None
         self.local_auth: object = None
@@ -248,6 +250,24 @@ def handler_for(state: FakeState):
             if role == "qbit":
                 if path == "/api/v2/app/version":
                     return self._send(text="5.0.4")
+                if path == "/api/v2/torrents/" + "info" and method == "GET":
+                    return self._send(body=state.qbit_torrents)
+                if path == "/api/v2/torrents/delete" and method == "POST":
+                    form = body if isinstance(body, dict) else {}
+                    hashes = form.get("hashes") or form.get("hash") or ""
+                    if isinstance(hashes, list):
+                        hashes = hashes[0] if hashes else ""
+                    delete_files = form.get("deleteFiles")
+                    if isinstance(delete_files, list):
+                        delete_files = delete_files[0] if delete_files else ""
+                    state.qbit_removed.append(
+                        {"hashes": str(hashes), "deleteFiles": str(delete_files)}
+                    )
+                    drop = {part for part in str(hashes).split("|") if part}
+                    state.qbit_torrents = [
+                        item for item in state.qbit_torrents if item.get("hash") not in drop
+                    ]
+                    return self._send(text="Ok.")
                 if path == "/api/v2/torrents/createCategory":
                     form = body if isinstance(body, dict) else {}
                     name = (form.get("category") or [""])[0] if isinstance(form.get("category"), list) else form.get("category")
@@ -912,6 +932,13 @@ PersistentKeepalive = 25
         self.assertEqual(iw, ih)
         self.assertGreater(lw, lh)
 
+    def test_wire_keeps_housekeeping_hidden_qbit(self):
+        wire = (ROOT / "pompey/rootfs/etc/services.d/wire/run").read_text()
+        self.assertIn("housekeep", wire)
+        src = (ROOT / "pompey/rootfs/usr/local/bin/wire-stack").read_text()
+        self.assertIn('"deleteFiles": "false"', src)
+        self.assertNotIn('"deleteFiles": "true"', src)
+
     def test_fill_fields(self):
         resource = {"fields": [{"name": "host", "value": ""}, {"name": "port", "value": 0}]}
         ws.fill_fields(resource, {"host": "127.0.0.1", "port": 8080})
@@ -948,6 +975,47 @@ PersistentKeepalive = 25
         self.assertEqual(ws.subtitles_pref(), "none")
         for key in ("PREFERRED_LANGUAGE", "ANIME_AUDIO", "SUBTITLES"):
             os.environ.pop(key, None)
+
+    def test_qbit_forgets_missing_files_not_active_downloads(self):
+        self.assertTrue(
+            ws.qbit_should_forget({"hash": "aa", "state": "missingFiles", "progress": 1})
+        )
+        self.assertFalse(
+            ws.qbit_should_forget(
+                {"hash": "bb", "state": "downloading", "progress": 0.4}, gone=False
+            )
+        )
+        self.assertFalse(
+            ws.qbit_should_forget(
+                {"hash": "cc", "state": "moving", "progress": 1}, gone=True
+            )
+        )
+        self.assertTrue(
+            ws.qbit_should_forget(
+                {"hash": "dd", "state": "uploading", "progress": 1, "amount_left": 0},
+                gone=True,
+            )
+        )
+        self.assertFalse(
+            ws.qbit_should_forget(
+                {"hash": "ee", "state": "uploading", "progress": 1}, gone=False
+            )
+        )
+
+    def test_qbit_payload_gone_treats_empty_dir_as_moved(self):
+        empty = Path(os.environ.get("TEST_TMP") or "/tmp") / f"pompey-gone-{os.getpid()}"
+        empty.mkdir(parents=True, exist_ok=True)
+        try:
+            self.assertTrue(ws.qbit_payload_gone({"content_path": str(empty)}))
+            (empty / "file.mkv").write_text("x")
+            self.assertFalse(ws.qbit_payload_gone({"content_path": str(empty)}))
+            self.assertTrue(
+                ws.qbit_payload_gone({"content_path": str(empty / "missing.mkv")})
+            )
+        finally:
+            for child in empty.iterdir():
+                child.unlink()
+            empty.rmdir()
 
     def test_rebuild_hd_items_disallows_remux_and_4k(self):
         catalog = ws.quality_catalog(any_quality_bundle()["profile"])
@@ -1094,6 +1162,10 @@ class WireStack(unittest.TestCase):
             "RefreshMonitoredDownloads",
             [c.get("name") for c in self.state.arr_commands],
         )
+        cmd_names = [c.get("name") for c in self.state.arr_commands]
+        self.assertIn("DownloadedMoviesScan", cmd_names)
+        self.assertIn("DownloadedEpisodesScan", cmd_names)
+        self.assertEqual(self.state.qbit_removed, [])
         self.assertEqual({a["name"] for a in self.state.apps}, {"Sonarr", "Radarr"})
         for app in self.state.apps:
             fields = {f["name"]: f.get("value") for f in app.get("fields") or []}
@@ -1350,6 +1422,64 @@ class WireStack(unittest.TestCase):
         for client in self.state.download_clients:
             self.assertFalse(client.get("removeCompletedDownloads"))
             self.assertTrue(client.get("removeFailedDownloads"))
+
+    def test_forgets_qbit_torrent_after_files_were_moved(self):
+        os.environ["INDEXER_URL"] = ""
+        os.environ["INDEXER_API_KEY"] = ""
+        still_downloading = {
+            "hash": "11" * 20,
+            "name": "in-progress",
+            "state": "downloading",
+            "progress": 0.4,
+            "amount_left": 900,
+            "content_path": str(self.tmp / "incomplete-file.mkv"),
+        }
+        (self.tmp / "incomplete-file.mkv").write_text("partial")
+        moved = {
+            "hash": "22" * 20,
+            "name": "already-in-library",
+            "state": "missingFiles",
+            "progress": 1,
+            "amount_left": 0,
+            "content_path": str(self.tmp / "complete-gone.mkv"),
+        }
+        seeding_present = {
+            "hash": "33" * 20,
+            "name": "still-on-disk",
+            "state": "uploading",
+            "progress": 1,
+            "amount_left": 0,
+            "content_path": str(self.tmp / "complete-file.mkv"),
+        }
+        (self.tmp / "complete-file.mkv").write_text("ok")
+        self.state.qbit_torrents = [still_downloading, moved, seeding_present]
+        rc = ws.main()
+        self.assertEqual(rc, 0)
+        self.assertEqual(len(self.state.qbit_removed), 1)
+        self.assertEqual(self.state.qbit_removed[0]["deleteFiles"], "false")
+        self.assertEqual(self.state.qbit_removed[0]["hashes"], "22" * 20)
+        remaining = {item["hash"] for item in self.state.qbit_torrents}
+        self.assertEqual(remaining, {"11" * 20, "33" * 20})
+        self.assertTrue((self.tmp / "complete-file.mkv").is_file())
+        self.assertTrue((self.tmp / "incomplete-file.mkv").is_file())
+
+    def test_housekeep_does_not_delete_torrent_data(self):
+        os.environ["INDEXER_URL"] = ""
+        os.environ["INDEXER_API_KEY"] = ""
+        self.state.qbit_torrents = [
+            {
+                "hash": "44" * 20,
+                "name": "hand-moved",
+                "state": "missingFiles",
+                "progress": 1,
+                "content_path": "/no/such/file.mkv",
+            }
+        ]
+        rc = ws.housekeep()
+        self.assertEqual(rc, 0)
+        self.assertEqual(self.state.qbit_removed[0]["deleteFiles"], "false")
+        self.assertNotIn("true", self.state.qbit_removed[0]["deleteFiles"].lower())
+        self.assertFalse(any(item.get("hash") == "44" * 20 for item in self.state.qbit_torrents))
 
     def test_updates_existing_download_client_remove_flag(self):
         os.environ["INDEXER_URL"] = ""

@@ -465,6 +465,11 @@ test -x "${BIN}/pompey-log"
 test -x "${BIN}/pompey-log-emit"
 test -x "${BIN}/prowlarr-arr-proxy"
 grep -q '127.0.0.1:9698/ping' "${svc}/wire/run"
+grep -q 'wire-stack housekeep' "${svc}/wire/run"
+if grep -q 'deleteFiles.: .true' "${BIN}/wire-stack"; then
+  echo "qbit must never delete torrent files (library may be hardlinked)" >&2
+  exit 1
+fi
 if grep -RIn 'pompey-svc' "${ROOT}/pompey/rootfs"; then
   echo "pompey-svc was renamed to pompey-log" >&2
   exit 1
