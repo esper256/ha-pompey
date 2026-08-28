@@ -125,11 +125,9 @@ run wait-for-vpn 5
 python3 - "${ROOT}/tests/options.json" "${BASHIO_OPTIONS}" "${MEDIA_ROOT}" <<'PY'
 import json, sys
 data = json.load(open(sys.argv[1], encoding="utf-8"))
-data["indexer_url"] = ""
-data["indexer_api_key"] = ""
-data["media_root"] = sys.argv[3]
+data["source_url"] = ""
+data["source_key"] = ""
 data["plex_token"] = ""
-data["port_forwarding"] = False
 json.dump(data, open(sys.argv[2], "w"), indent=2)
 PY
 

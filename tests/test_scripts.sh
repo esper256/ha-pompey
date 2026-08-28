@@ -69,19 +69,28 @@ for key in ("qbit_password", "sonarr_api_key", "radarr_api_key", "prowlarr_api_k
 print("secrets stay out of banner logs")
 PY
 
-echo "== banner refuses empty VPN =="
+echo "== banner stays up without Proton (wait screen paste) =="
 empty="${WORK}/empty-options.json"
 python3 - "${ROOT}/tests/fixtures/options.defaults.json" "${empty}" <<'PY'
 import json, sys
 data = json.load(open(sys.argv[1], encoding="utf-8"))
 json.dump(data, open(sys.argv[2], "w"))
 PY
-if BASHIO_OPTIONS="${empty}" run "${INIT}/00-banner.sh" >/tmp/pompey-banner-empty.log 2>&1; then
-  echo "expected banner to fail without WireGuard" >&2
-  cat /tmp/pompey-banner-empty.log >&2
+BASHIO_OPTIONS="${empty}" run "${INIT}/00-banner.sh" >/tmp/pompey-banner-empty.log 2>&1
+grep -qi "paste the .conf you downloaded from Proton" /tmp/pompey-banner-empty.log
+: > "${IPTABLES_LOG}"
+BASHIO_OPTIONS="${empty}" run "${INIT}/10-vpn-config.sh" >/tmp/pompey-vpn-empty.log 2>&1
+grep -q "Waiting for a Proton WireGuard config" /tmp/pompey-vpn-empty.log
+if [[ -s "${POMPEY_WG_CONF}" ]]; then
+  echo "empty Proton must not write a partial wg0.conf" >&2
+  cat "${POMPEY_WG_CONF}" >&2
   exit 1
 fi
-grep -q "Need a Proton WireGuard config" /tmp/pompey-banner-empty.log
+if grep -q -- "-j DROP" "${IPTABLES_LOG}"; then
+  echo "empty Proton must not apply the kill switch" >&2
+  exit 1
+fi
+test "$(jq -r .need_proton "${POMPEY_READY}/status.json")" = true
 
 echo "== banner warns when Plex/source are empty =="
 warn="${WORK}/warn-options.json"
@@ -89,8 +98,8 @@ python3 - "${ROOT}/tests/options.json" "${warn}" <<'PY'
 import json, sys
 data = json.load(open(sys.argv[1], encoding="utf-8"))
 data["plex_token"] = ""
-data["indexer_url"] = ""
-data["indexer_api_key"] = ""
+data["source_url"] = ""
+data["source_key"] = ""
 json.dump(data, open(sys.argv[2], "w"))
 PY
 BASHIO_OPTIONS="${warn}" run "${INIT}/00-banner.sh" >/tmp/pompey-banner-warn.log 2>&1
@@ -129,9 +138,12 @@ assert secrets["qbit_password"] not in (cfg / "qBittorrent/qBittorrent.conf").re
 print("engine configs match secrets; qbit password is hashed")
 PY
 
-echo "== vpn config from options fields + kill switch stub =="
+echo "== vpn config from wg0.conf file + kill switch stub =="
+mkdir -p "${POMPEY_CONFIG}/wireguard"
+cp "${ROOT}/tests/fixtures/wg0.conf" "${POMPEY_CONFIG}/wireguard/wg0.conf"
+: > "${IPTABLES_LOG}"
 run "${INIT}/10-vpn-config.sh"
-grep -q "TESTPRIVATEKEY" "${POMPEY_WG_CONF}"
+grep -q "FILEPRIVATEKEY" "${POMPEY_WG_CONF}"
 grep -q "185.159.157.1:51820" "${POMPEY_WG_CONF}"
 grep -q "PersistentKeepalive = 25" "${POMPEY_WG_CONF}"
 grep -q "nameserver 10.2.0.1" "${POMPEY_RESOLV}"
@@ -140,18 +152,10 @@ grep -q "185.159.157.1" "${IPTABLES_LOG}"
 grep -q "51820" "${IPTABLES_LOG}"
 grep -q -- "-o wg0 -j ACCEPT" "${IPTABLES_LOG}"
 grep -q -- "-j DROP" "${IPTABLES_LOG}"
-# Private key must not be in script logs; it is in the wg conf file by design.
-if grep -q "TESTPRIVATEKEY" /tmp/pompey-banner-empty.log; then
-  echo "unexpected" >&2
+if grep -q "FILEPRIVATEKEY" /tmp/pompey-banner-empty.log; then
+  echo "unexpected private key in banner log" >&2
   exit 1
 fi
-
-echo "== vpn config from wg0.conf file =="
-cp "${ROOT}/tests/fixtures/wg0.conf" "${POMPEY_CONFIG}/wireguard/wg0.conf"
-: > "${IPTABLES_LOG}"
-run "${INIT}/10-vpn-config.sh"
-grep -q "FILEPRIVATEKEY" "${POMPEY_WG_CONF}"
-grep -q "PersistentKeepalive = 25" "${POMPEY_WG_CONF}"
 grep -q "Using WireGuard config file" <<<"$(BASHIO_OPTIONS="${BASHIO_OPTIONS}" run "${INIT}/10-vpn-config.sh" 2>&1)"
 
 echo "== vpn config resolves Endpoint hostname before kill switch =="
@@ -174,6 +178,8 @@ run "${INIT}/20-nginx.sh"
 grep -q "listen 8099" "${NGINX_INGRESS_CONF}"
 grep -qv "%%port%%" "${NGINX_INGRESS_CONF}"
 grep -q "status.json" "${NGINX_INGRESS_CONF}"
+grep -q "setup/proton" "${NGINX_INGRESS_CONF}"
+test -f "${ROOT}/pompey/rootfs/etc/services.d/setup/run"
 test -f "${ROOT}/pompey/rootfs/etc/services.d/ingress-proxy/run"
 grep -q 'pompey-ingress' "${ROOT}/pompey/rootfs/etc/services.d/ingress-proxy/run"
 grep -q 'POMPEY_CONFIG' "${ROOT}/pompey/rootfs/etc/services.d/radarr/run"

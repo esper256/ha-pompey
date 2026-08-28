@@ -4,18 +4,17 @@ set -euo pipefail
 # shellcheck source=/dev/null
 source "$(command -v pompey-env)"
 
-if ! bashio::config.true 'port_forwarding'; then
-  bashio::log.info "Port forwarding disabled"
+if [[ "${POMPEY_FAKE_VPN:-}" == "1" ]]; then
+  bashio::log.info "Fake VPN: skip Proton NAT-PMP"
   exec sleep infinity
 fi
 
 wait-for-vpn 45
-GW="$(bashio::config 'wireguard_dns')"
-bashio::log.info "NAT-PMP renew loop against ${GW}"
+bashio::log.info "NAT-PMP renew loop against ${POMPEY_WG_DNS}"
 mkdir -p "${POMPEY_VPN_TMP}"
 
 while true; do
-  if out="$(natpmpc -a 1 0 udp 60 -g "${GW}" 2>/dev/null)"; then
+  if out="$(natpmpc -a 1 0 udp 60 -g "${POMPEY_WG_DNS}" 2>/dev/null)"; then
     port="$(printf '%s\n' "${out}" | awk '/Mapped public port/ { print $4; exit }')"
     if [[ -n "${port}" ]]; then
       printf '%s\n' "${port}" >"${POMPEY_VPN_TMP}/forwarded_port"
@@ -24,6 +23,6 @@ while true; do
   else
     bashio::log.warning "natpmpc UDP mapping failed (need a Proton config with NAT-PMP enabled)"
   fi
-  natpmpc -a 1 0 tcp 60 -g "${GW}" >/dev/null 2>&1 || true
+  natpmpc -a 1 0 tcp 60 -g "${POMPEY_WG_DNS}" >/dev/null 2>&1 || true
   sleep 45
 done

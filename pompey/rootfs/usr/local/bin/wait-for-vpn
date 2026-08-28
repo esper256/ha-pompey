@@ -52,7 +52,7 @@ until handshake_ok; do
     if [[ "${POMPEY_FAKE_VPN:-}" == "1" ]]; then
       pompey-status vpn "Waiting for fake wg0" 15 "POMPEY_FAKE_VPN is set but ${IFACE} is not up. Run pompey-dev-vpn up." || true
     else
-      pompey-status vpn "Waiting for Proton handshake" 15 "The tunnel is not up yet. Check the Proton WireGuard file and that this app has NET_ADMIN /dev/net/tun." || true
+      pompey-status vpn "Waiting for Proton handshake" 15 "The tunnel is not up yet. Paste the Proton WireGuard .conf on the wait screen." || true
     fi
     exit 1
   fi

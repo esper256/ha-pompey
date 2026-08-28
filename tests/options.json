@@ -1,16 +1,6 @@
 {
-  "wireguard_config": "wg0.conf",
-  "wireguard_private_key": "TESTPRIVATEKEYTESTPRIVATEKEYTESTPRIVATEKE=",
-  "wireguard_address": "10.2.0.2/32",
-  "wireguard_peer_public_key": "TESTPEERPUBKEYTESTPEERPUBKEYTESTPEERPUBKE=",
-  "wireguard_endpoint": "185.159.157.1:51820",
-  "wireguard_dns": "10.2.0.1",
-  "port_forwarding": true,
-  "lan_networks": "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16",
   "plex_url": "http://172.30.32.1:32400",
   "plex_token": "test-plex-token",
-  "indexer_url": "https://example-source.test",
-  "indexer_api_key": "test-source-key",
-  "media_root": "/media",
-  "log_level": "info"
+  "source_url": "https://example-source.test",
+  "source_key": "test-source-key"
 }

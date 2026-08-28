@@ -1,0 +1,80 @@
+#!/command/with-contenv bashio
+# shellcheck shell=bash
+# Copy a Proton .conf into /etc/wireguard, resolve Endpoint, apply kill switch.
+# Exit 2 = no file yet (wait screen). Exit 3 = file present but invalid.
+set -euo pipefail
+# shellcheck source=/dev/null
+source "$(command -v pompey-env)"
+
+SRC="${POMPEY_WG_FILE}"
+DST="${POMPEY_WG_CONF}"
+DNS="${POMPEY_WG_DNS}"
+APPLIED="${POMPEY_READY}/vpn-applied"
+
+mkdir -p "$(dirname "${DST}")" "$(dirname "${POMPEY_LAN_FILE}")" "$(dirname "${POMPEY_RESOLV}")" \
+  "$(dirname "${SRC}")" "${POMPEY_READY}"
+
+if [[ ! -s "${SRC}" ]]; then
+  exit 2
+fi
+
+if ! python3 "$(command -v pompey-setup)" --validate "${SRC}"; then
+  exit 3
+fi
+
+tr -d '\r' < "${SRC}" > "${DST}"
+chmod 600 "${DST}"
+
+if ! grep -qi '^[[:space:]]*PersistentKeepalive' "${DST}"; then
+  printf '\nPersistentKeepalive = 25\n' >>"${DST}"
+fi
+
+resolved="$(python3 - "${DST}" <<'PY'
+import re
+import socket
+import sys
+
+path = sys.argv[1]
+text = open(path, encoding="utf-8").read()
+match = re.search(r"(?im)^(\s*Endpoint\s*=\s*)(\S+)\s*$", text)
+if not match:
+    raise SystemExit(0)
+prefix, value = match.group(1), match.group(2)
+if value.startswith("["):
+    raise SystemExit(0)
+host, sep, port = value.rpartition(":")
+if not sep or not port.isdigit():
+    raise SystemExit(0)
+parts = host.split(".")
+if len(parts) == 4 and all(p.isdigit() and 0 <= int(p) <= 255 for p in parts if p):
+    raise SystemExit(0)
+try:
+    ip = socket.getaddrinfo(host, None, socket.AF_INET)[0][4][0]
+except OSError as exc:
+    print(f"Could not resolve WireGuard Endpoint host {host}: {exc}", file=sys.stderr)
+    raise SystemExit(1)
+open(path, "w", encoding="utf-8").write(
+    text[: match.start()] + prefix + f"{ip}:{port}" + text[match.end() :]
+)
+print(f"{host} -> {ip}")
+PY
+)" || {
+  bashio::log.error "WireGuard Endpoint hostname could not be resolved before the kill switch"
+  exit 3
+}
+if [[ -n "${resolved}" ]]; then
+  bashio::log.info "Resolved WireGuard Endpoint ${resolved} (needed before Proton DNS / kill switch)"
+fi
+
+printf '%s\n' "${POMPEY_LAN_NETWORKS}" >"${POMPEY_LAN_FILE}"
+
+if [[ "${POMPEY_FAKE_VPN:-}" == "1" ]]; then
+  bashio::log.info "Fake VPN: skip Proton DNS rewrite and OUTPUT kill switch"
+else
+  printf 'nameserver %s\n' "${DNS}" >"${POMPEY_RESOLV}"
+  vpn-killswitch "${DST}"
+  bashio::log.info "iptables kill switch applied (internet OUTPUT only via wg0 once it exists)"
+fi
+
+touch "${APPLIED}"
+exit 0
