@@ -2,7 +2,7 @@
 
 ## 0.2.34
 
-- Arr imports the **video** (and `.srt`, including a `Subs` folder) into the movie folder Seerr stored. It does not relocate the whole torrent directory, so `downloads/complete` can keep `.nfo` / `.txt` after the movie is in Plex. **0.2.33** could also re-import a title Radarr had already assigned (the manual-import list often omits `hasFile`), which deleted the library file and the subtitle that came with it. Housekeeping now looks the title up on Arr, skips that second import, and removes leftover `complete/` folders once the library already has the video. Rebuild so the banner says **0.2.34**. Do not drag leftover extras out by hand.
+- Arr imports the **video** (and `.srt`, including a `Subs` folder) into the movie or TV folder Seerr stored. It does not relocate the whole torrent directory, so `downloads/complete` can keep `.nfo` / `.txt` after the title is in Plex. **0.2.33** could also re-import a title Arr had already assigned (the manual-import list often omits `hasFile`), which deleted the library file and the subtitle that came with it. Housekeeping now looks the title up on Radarr or Sonarr, skips that second import, and removes leftover `complete/` folders once the library already has the video. A show with season 1 on disk is still treated as waiting if later seasons are missing. Rebuild so the banner says **0.2.34**. Do not drag leftover extras out by hand.
 
 ## 0.2.33
 

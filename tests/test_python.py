@@ -262,7 +262,11 @@ class FakeState:
             "autoRedownloadFailedFromInteractiveSearch": True,
         }
         self.manual_import: list[dict] = []
+        self.sonarr_manual_import: list[dict] = []
+        self.episodes: list[dict] = []
+        self.wanted_missing: list[dict] = []
         self.queue: list[dict] = []
+        self.sonarr_queue: list[dict] = []
         self.qbit_categories: dict = {}
         self.qbit_torrents: list[dict] = []
         self.qbit_removed: list[dict] = []
@@ -295,6 +299,18 @@ class FakeState:
         ]
         self.series = [
             {"id": 10, "title": "Adult Show", "certification": "TV-MA", "path": "/media/TV/Not Kid Friendly/Adult Show"},
+            {
+                "id": 11,
+                "title": "Kid Show",
+                "certification": "TV-PG",
+                "path": "/media/TV/Not Kid Friendly/Kid Show",
+            },
+            {
+                "id": 12,
+                "title": "Kid Pathless",
+                "certification": "TV-Y",
+                "rootFolderPath": "/media/TV/Not Kid Friendly/Kid Pathless",
+            },
         ]
         self.moved: list[dict] = []
 
@@ -441,7 +457,8 @@ def handler_for(state: FakeState):
                         state.sonarr_media = saved
                     return self._send(body=saved)
                 if path.endswith("/queue") and method == "GET":
-                    return self._send(body={"records": state.queue, "page": 1, "pageSize": 50})
+                    rows = state.queue if role == "radarr" else state.sonarr_queue
+                    return self._send(body={"records": rows, "page": 1, "pageSize": 50})
                 if path.endswith("/config/downloadclient") and method == "GET":
                     cfg = state.radarr_dl_config if role == "radarr" else state.sonarr_dl_config
                     return self._send(body=cfg)
@@ -454,8 +471,13 @@ def handler_for(state: FakeState):
                     return self._send(body=saved)
                 if path.endswith("/manualimport") and method == "GET":
                     folder = (query.get("folder") or [""])[0]
+                    pool = (
+                        state.manual_import
+                        if role == "radarr"
+                        else state.sonarr_manual_import
+                    )
                     items = []
-                    for item in state.manual_import:
+                    for item in pool:
                         item_path = str(item.get("path") or "")
                         if folder and folder not in item_path and not item_path.startswith(folder):
                             continue
@@ -591,6 +613,20 @@ def handler_for(state: FakeState):
                     return self._send(body=body)
                 if path.endswith("/series") and method == "GET":
                     return self._send(body=state.series)
+                if path.endswith("/episode") and method == "GET":
+                    series_id = (query.get("seriesId") or [""])[0]
+                    rows = state.episodes
+                    if series_id:
+                        rows = [
+                            ep
+                            for ep in rows
+                            if str(ep.get("seriesId")) == str(series_id)
+                        ]
+                    return self._send(body=rows)
+                if path.endswith("/wanted/missing") and method == "GET":
+                    return self._send(
+                        body={"records": state.wanted_missing, "page": 1, "pageSize": 20}
+                    )
                 if "/series/" in path and method == "GET":
                     try:
                         idx = int(path.rsplit("/", 1)[-1])
@@ -1146,6 +1182,28 @@ PersistentKeepalive = 25
                 "/media/dlna/downloads/complete/sonarr",
             ],
         )
+        os.environ.pop("MEDIA_ROOT", None)
+
+    def test_existing_download_scan_paths_skip_missing_folders(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as raw:
+            base = Path(raw)
+            complete = base / "downloads" / "complete"
+            complete.mkdir(parents=True)
+            (complete / "radarr").mkdir()
+            os.environ["MEDIA_ROOT"] = str(base)
+            try:
+                self.assertEqual(
+                    ws.existing_download_scan_paths("radarr"),
+                    [str(complete), str(complete / "radarr")],
+                )
+                self.assertEqual(
+                    ws.existing_download_scan_paths("sonarr"),
+                    [str(complete)],
+                )
+            finally:
+                os.environ.pop("MEDIA_ROOT", None)
 
     def test_fill_fields(self):
         resource = {"fields": [{"name": "host", "value": ""}, {"name": "port", "value": 0}]}
@@ -1305,7 +1363,20 @@ PersistentKeepalive = 25
             "episodeIds": [11, 12],
             "quality": quality,
         }
+        self.assertEqual(ws.episode_ids_of(episode), [11, 12])
+        self.assertEqual(
+            ws.episode_ids_of({"episodes": [{"id": 11}, {"id": 12, "hasFile": False}]}),
+            [11, 12],
+        )
         self.assertEqual(ws.manual_import_file(episode, "sonarr")["episodeIds"], [11, 12])
+        nested_only = {
+            "path": "/media/dlna/downloads/complete/ep.mkv",
+            "series": {"id": 3},
+            "episodes": [{"id": 11}, {"id": 12}],
+            "quality": quality,
+        }
+        self.assertEqual(ws.manual_import_file(nested_only, "sonarr")["seriesId"], 3)
+        self.assertEqual(ws.manual_import_file(nested_only, "sonarr")["episodeIds"], [11, 12])
         self.assertTrue(
             ws.arr_already_has_library_file(
                 {"movie": {"hasFile": True, "path": "/media/dlna/Movies/Not Kid Friendly/Ok (2024)"}},
@@ -1342,6 +1413,49 @@ PersistentKeepalive = 25
             "",
         )
         os.environ.pop("MEDIA_ROOT", None)
+        self.assertTrue(
+            ws.title_needs_library_file(
+                {"title": "Waiting", "monitored": True, "hasFile": False},
+                "radarr",
+            )
+        )
+        self.assertFalse(
+            ws.title_needs_library_file(
+                {"title": "Done", "monitored": True, "hasFile": True},
+                "radarr",
+            )
+        )
+        self.assertTrue(
+            ws.title_needs_library_file(
+                {
+                    "title": "Partial",
+                    "monitored": True,
+                    "statistics": {"episodeFileCount": 3, "episodeCount": 8},
+                    "path": "/media/dlna/TV/Not Kid Friendly/Partial",
+                },
+                "sonarr",
+            )
+        )
+        self.assertFalse(
+            ws.title_needs_library_file(
+                {
+                    "title": "Caught up",
+                    "monitored": True,
+                    "statistics": {"episodeFileCount": 8, "episodeCount": 8},
+                },
+                "sonarr",
+            )
+        )
+        self.assertFalse(
+            ws.title_needs_library_file(
+                {
+                    "title": "Unmonitored",
+                    "monitored": False,
+                    "statistics": {"episodeFileCount": 0, "episodeCount": 8},
+                },
+                "sonarr",
+            )
+        )
         self.assertEqual(
             ws.import_rejection_text(
                 {"rejections": [{"reason": "Not a wanted quality"}]}
@@ -1576,16 +1690,13 @@ class WireStack(unittest.TestCase):
         self.assertFalse(self.state.radarr_media.get("copyUsingHardlinks"))
         self.assertFalse(self.state.sonarr_media.get("copyUsingHardlinks"))
         self.assertTrue(self.state.radarr_media.get("importExtraFiles"))
+        self.assertTrue(self.state.sonarr_media.get("importExtraFiles"))
         self.assertEqual(self.state.radarr_media.get("extraFileExtensions"), "srt")
+        self.assertEqual(self.state.sonarr_media.get("extraFileExtensions"), "srt")
         self.assertFalse(self.state.radarr_dl_config.get("autoRedownloadFailed"))
         self.assertTrue(self.state.radarr_dl_config.get("enableCompletedDownloadHandling"))
-        self.assertIn(
-            "RefreshMonitoredDownloads",
-            [c.get("name") for c in self.state.arr_commands],
-        )
         cmd_names = [c.get("name") for c in self.state.arr_commands]
-        self.assertIn("DownloadedMoviesScan", cmd_names)
-        self.assertIn("DownloadedEpisodesScan", cmd_names)
+        self.assertIn("RefreshMonitoredDownloads", cmd_names)
         self.assertEqual(
             self.state.seerr_jobs,
             ["plex-recently-added-scan", "radarr-scan", "sonarr-scan"],
@@ -1617,6 +1728,7 @@ class WireStack(unittest.TestCase):
         self.assertEqual(self.state.seerr_radarr[0]["activeProfileName"], "Default")
         self.assertEqual(self.state.seerr_sonarr[0]["activeProfileName"], "Default")
         self.assertEqual(self.state.seerr_sonarr[0]["activeDirectory"], "/media/TV/Not Kid Friendly")
+        self.assertTrue(self.state.seerr_sonarr[0].get("enableSeasonFolders"))
         self.assertTrue((self.ready / "seerr-arr").exists())
         self.assertTrue(self.state.initialized)
         self.assertFalse(self.nginx.exists(), "Ingress must stay the Pompey UI, not a Seerr proxy")
@@ -2072,13 +2184,17 @@ class WireStack(unittest.TestCase):
         self.assertFalse(leftover.exists())
         self.assertFalse(any(item.get("hash") == digest for item in self.state.qbit_torrents))
 
-    def test_housekeep_scans_legacy_complete_radarr_folder(self):
+    def test_housekeep_scans_legacy_category_folders_per_kind(self):
         os.environ["INDEXER_URL"] = ""
         os.environ["INDEXER_API_KEY"] = ""
         os.environ["MEDIA_ROOT"] = str(self.tmp)
-        stuck = self.tmp / "downloads" / "complete" / "radarr"
-        stuck.mkdir(parents=True)
-        (stuck / "stuck-title.mkv").write_bytes(b"x" * 50)
+        complete = self.tmp / "downloads" / "complete"
+        radarr_dir = complete / "radarr"
+        sonarr_dir = complete / "sonarr"
+        radarr_dir.mkdir(parents=True)
+        sonarr_dir.mkdir(parents=True)
+        (radarr_dir / "stuck-title.mkv").write_bytes(b"x" * 50)
+        (sonarr_dir / "stuck-episode.mkv").write_bytes(b"x" * 50)
         from io import StringIO
         from contextlib import redirect_stdout
 
@@ -2086,15 +2202,21 @@ class WireStack(unittest.TestCase):
         with redirect_stdout(buf):
             rc = ws.housekeep()
         self.assertEqual(rc, 0)
-        movie_scans = [
-            item
+        movie_paths = {
+            item.get("path")
             for item in self.state.arr_commands
             if item.get("name") == "DownloadedMoviesScan"
-        ]
-        scan_paths = {item.get("path") for item in movie_scans}
-        self.assertIn(str(self.tmp / "downloads" / "complete"), scan_paths)
-        self.assertIn(str(stuck), scan_paths)
-        self.assertIn("radarr/stuck-title.mkv (50 bytes)", buf.getvalue())
+        }
+        episode_paths = {
+            item.get("path")
+            for item in self.state.arr_commands
+            if item.get("name") == "DownloadedEpisodesScan"
+        }
+        self.assertEqual(movie_paths, {str(complete), str(radarr_dir)})
+        self.assertEqual(episode_paths, {str(complete), str(sonarr_dir)})
+        out = buf.getvalue()
+        self.assertIn("radarr/stuck-title.mkv (50 bytes)", out)
+        self.assertIn("sonarr/stuck-episode.mkv (50 bytes)", out)
 
     def test_housekeep_skips_manual_import_when_library_already_has_file(self):
         os.environ["INDEXER_URL"] = ""
@@ -2146,6 +2268,132 @@ class WireStack(unittest.TestCase):
         )
         self.assertFalse(release.exists())
         self.assertTrue((dest / "Already (2024).mkv").is_file())
+
+    def test_housekeep_skips_sonarr_import_when_episode_already_has_file(self):
+        os.environ["INDEXER_URL"] = ""
+        os.environ["INDEXER_API_KEY"] = ""
+        root = self.tmp / "skip-sonarr-hasfile"
+        release = root / "downloads" / "complete" / "Show.S01E01"
+        release.mkdir(parents=True)
+        leftover = release / "Show.S01E01.mkv"
+        leftover.write_bytes(b"copy")
+        (release / "English.srt").write_bytes(b"sub")
+        os.environ["MEDIA_ROOT"] = str(root)
+        dest = root / "TV" / "Not Kid Friendly" / "Show (2024)"
+        dest.mkdir(parents=True)
+        (dest / "Show.S01E01.mkv").write_bytes(b"library")
+        quality = {"quality": {"id": 4, "name": "WEBDL-1080p"}, "revision": {"version": 1}}
+        self.state.series = [
+            {
+                "id": 10,
+                "title": "Show",
+                "monitored": True,
+                "path": str(dest),
+                "statistics": {"episodeFileCount": 1, "episodeCount": 1},
+            }
+        ]
+        self.state.episodes = [
+            {"id": 11, "seriesId": 10, "hasFile": True, "title": "Pilot"},
+        ]
+        self.state.sonarr_manual_import = [
+            {
+                "path": str(leftover),
+                "seriesId": 10,
+                "episodeIds": [11],
+                "series": {"id": 10, "title": "Show", "path": str(dest)},
+                "quality": quality,
+                "languages": [{"id": 1, "name": "English"}],
+                "rejections": [],
+            }
+        ]
+        from io import StringIO
+        from contextlib import redirect_stdout
+
+        buf = StringIO()
+        with redirect_stdout(buf):
+            rc = ws.housekeep()
+        self.assertEqual(rc, 0)
+        manuals = [
+            item for item in self.state.arr_commands if item.get("name") == "ManualImport"
+        ]
+        self.assertEqual(manuals, [])
+        self.assertIn(
+            f"already has a library file for Show.S01E01.mkv -> {dest} "
+            "(not re-importing leftover complete/ files)",
+            buf.getvalue(),
+        )
+        self.assertFalse(release.exists())
+        self.assertTrue((dest / "Show.S01E01.mkv").is_file())
+
+    def test_housekeep_renames_matched_sonarr_drop(self):
+        os.environ["INDEXER_URL"] = ""
+        os.environ["INDEXER_API_KEY"] = ""
+        root = self.tmp / "sonarr-import"
+        complete = root / "downloads" / "complete"
+        complete.mkdir(parents=True)
+        wanted = complete / "Show.S01E02.mkv"
+        wanted.write_bytes(b"ok")
+        os.environ["MEDIA_ROOT"] = str(root)
+        dest = str(root / "TV" / "Not Kid Friendly" / "Show (2024)")
+        quality = {"quality": {"id": 4, "name": "WEBDL-1080p"}, "revision": {"version": 1}}
+        self.state.sonarr_manual_import = [
+            {
+                "path": str(wanted),
+                "seriesId": 10,
+                "episodeIds": [12],
+                "series": {"id": 10, "title": "Show", "path": dest, "hasFile": False},
+                "episodes": [{"id": 12, "hasFile": False}],
+                "quality": quality,
+                "languages": [{"id": 1, "name": "English"}],
+                "rejections": [],
+            }
+        ]
+        from io import StringIO
+        from contextlib import redirect_stdout
+
+        buf = StringIO()
+        with redirect_stdout(buf):
+            rc = ws.housekeep()
+        self.assertEqual(rc, 0)
+        manuals = [
+            item for item in self.state.arr_commands if item.get("name") == "ManualImport"
+        ]
+        self.assertEqual(len(manuals), 1)
+        self.assertEqual(manuals[0].get("importMode"), "Move")
+        self.assertEqual(
+            [row.get("path") for row in manuals[0].get("files") or []],
+            [str(wanted)],
+        )
+        self.assertIn(
+            f"importing Show.S01E02.mkv into {dest} (Arr record from Seerr, not the filename)",
+            buf.getvalue(),
+        )
+
+    def test_housekeep_does_not_log_unknown_movie_for_an_episode_file(self):
+        os.environ["INDEXER_URL"] = ""
+        os.environ["INDEXER_API_KEY"] = ""
+        root = self.tmp / "cross-kind-movie"
+        complete = root / "downloads" / "complete"
+        complete.mkdir(parents=True)
+        episode = complete / "Show.S01E01.mkv"
+        episode.write_bytes(b"x")
+        os.environ["MEDIA_ROOT"] = str(root)
+        quality = {"quality": {"id": 4, "name": "WEBDL-1080p"}, "revision": {"version": 1}}
+        self.state.manual_import = [
+            {
+                "path": str(episode),
+                "quality": quality,
+                "rejections": [{"reason": "Unknown Movie"}],
+            }
+        ]
+        from io import StringIO
+        from contextlib import redirect_stdout
+
+        buf = StringIO()
+        with redirect_stdout(buf):
+            rc = ws.housekeep()
+        self.assertEqual(rc, 0)
+        self.assertNotIn("Unknown Movie", buf.getvalue())
 
     def test_housekeep_logs_extras_not_videos_in_complete(self):
         os.environ["INDEXER_URL"] = ""
@@ -2219,13 +2467,31 @@ class WireStack(unittest.TestCase):
                 "removeFailedDownloads": False,
             }
         ]
+        self.state.sonarr_clients = [
+            {
+                "id": 8,
+                "name": "qBittorrent",
+                "implementation": "QBittorrent",
+                "removeCompletedDownloads": False,
+                "removeFailedDownloads": False,
+            }
+        ]
         rc = ws.main()
         self.assertEqual(rc, 0)
         self.assertTrue(self.state.radarr_clients[0]["removeCompletedDownloads"])
         self.assertTrue(self.state.radarr_clients[0]["removeFailedDownloads"])
         self.assertEqual(self.state.radarr_clients[0]["id"], 7)
-        fields = {f["name"]: f.get("value") for f in self.state.radarr_clients[0].get("fields") or []}
-        self.assertEqual(fields.get("movieCategory"), "radarr")
+        radarr_fields = {
+            f["name"]: f.get("value") for f in self.state.radarr_clients[0].get("fields") or []
+        }
+        self.assertEqual(radarr_fields.get("movieCategory"), "radarr")
+        self.assertTrue(self.state.sonarr_clients[0]["removeCompletedDownloads"])
+        self.assertTrue(self.state.sonarr_clients[0]["removeFailedDownloads"])
+        self.assertEqual(self.state.sonarr_clients[0]["id"], 8)
+        sonarr_fields = {
+            f["name"]: f.get("value") for f in self.state.sonarr_clients[0].get("fields") or []
+        }
+        self.assertEqual(sonarr_fields.get("tvCategory"), "sonarr")
 
     def test_media_management_skips_nas_free_space_check(self):
         os.environ["INDEXER_URL"] = ""
@@ -2313,6 +2579,55 @@ class WireStack(unittest.TestCase):
             out,
         )
 
+    def test_housekeep_logs_waiting_series_when_a_season_is_still_missing(self):
+        os.environ["INDEXER_URL"] = ""
+        os.environ["INDEXER_API_KEY"] = ""
+        os.environ["MEDIA_ROOT"] = "/media/dlna"
+        self.state.series = [
+            {
+                "id": 10,
+                "title": "Partial",
+                "monitored": True,
+                "path": "/media/dlna/TV/Not Kid Friendly/Partial",
+                "statistics": {"episodeFileCount": 3, "episodeCount": 8},
+            },
+            {
+                "id": 11,
+                "title": "Caught up",
+                "monitored": True,
+                "path": "/media/dlna/TV/Not Kid Friendly/Caught up",
+                "statistics": {"episodeFileCount": 8, "episodeCount": 8},
+            },
+        ]
+        self.state.sonarr_queue = [
+            {
+                "title": "Partial",
+                "status": "downloading",
+                "trackedDownloadStatus": "ok",
+                "trackedDownloadState": "downloading",
+                "outputPath": "/media/dlna/downloads/complete/Partial.S02",
+            }
+        ]
+        from io import StringIO
+        from contextlib import redirect_stdout
+
+        buf = StringIO()
+        with redirect_stdout(buf):
+            rc = ws.housekeep()
+        self.assertEqual(rc, 0)
+        out = buf.getvalue()
+        self.assertIn(
+            "sonarr download not in the library yet: Partial (downloading) "
+            "qbit=/media/dlna/downloads/complete/Partial.S02",
+            out,
+        )
+        self.assertIn(
+            "sonarr titles with no library file yet: Partial -> "
+            "/media/dlna/TV/Not Kid Friendly/Partial",
+            out,
+        )
+        self.assertNotIn("Caught up", out)
+
     def test_retries_monitored_titles_still_missing_a_file(self):
         os.environ["INDEXER_URL"] = ""
         os.environ["INDEXER_API_KEY"] = ""
@@ -2320,12 +2635,15 @@ class WireStack(unittest.TestCase):
             {"id": 99, "title": "Waiting", "monitored": True, "hasFile": False},
             {"id": 100, "title": "Done", "monitored": True, "hasFile": True},
         ]
+        self.state.wanted_missing = [{"id": 44, "title": "S01E01"}]
         rc = ws.main()
         self.assertEqual(rc, 0)
         names = [c.get("name") for c in self.state.arr_commands]
         self.assertTrue(any(n.startswith("Movies") and n.endswith("Search") for n in names))
         movie_retry = next(c for c in self.state.arr_commands if str(c.get("name", "")).startswith("Movies"))
         self.assertEqual(movie_retry.get("movieIds"), [99])
+        ep_retry = next(c for c in self.state.arr_commands if c.get("name") == "EpisodeSearch")
+        self.assertEqual(ep_retry.get("episodeIds"), [44])
 
     def test_points_existing_prowlarr_apps_at_title_search_proxy(self):
         os.environ["INDEXER_URL"] = ""
@@ -2576,6 +2894,8 @@ class RouteRating(unittest.TestCase):
         dests = {m.get("title"): m.get("rootFolderPath") for m in self.state.moved}
         self.assertEqual(dests["Kid Flick"], "/media/Movies/Kid Friendly")
         self.assertEqual(dests["Nested Kid"], "/media/Movies/Kid Friendly")
+        self.assertEqual(dests["Kid Show"], "/media/TV/Kid Friendly")
+        self.assertEqual(dests["Kid Pathless"], "/media/TV/Kid Friendly")
         self.assertNotIn("Unknown", dests)
         self.assertNotIn("Already Kid", dests)
         self.assertNotIn("Adult Show", dests)

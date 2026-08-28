@@ -114,58 +114,61 @@ def in_root(path: str, root: str) -> bool:
     return path == root or path.startswith(root + "/")
 
 
-def route_movies(key: str) -> None:
-    movies = as_list(http_json("GET", f"{radarr_url()}/api/v3/movie", headers=headers(key)))
-    kid_root = movies_kid_dir()
-    gen_root = movies_dir()
-    for movie in movies:
-        cert = title_cert(movie)
-        path = movie.get("path") or movie.get("rootFolderPath") or ""
+def route_library(
+    key: str,
+    list_url: str,
+    kid_root: str,
+    gen_root: str,
+    kid_set: set[str],
+    label: str,
+) -> None:
+    rows = as_list(http_json("GET", list_url, headers=headers(key)))
+    for item in rows:
+        cert = title_cert(item)
+        path = item.get("path") or item.get("rootFolderPath") or ""
         if not path:
             continue
-        want = kid_root if kid_cert(cert, KID_MOVIE) else gen_root
+        want = kid_root if kid_cert(cert, kid_set) else gen_root
         if in_root(path, want):
             continue
-        payload = dict(movie)
+        ident = item.get("id")
+        if ident is None:
+            continue
+        payload = dict(item)
         payload["rootFolderPath"] = want
         payload["moveFiles"] = True
         try:
             http_json(
                 "PUT",
-                f"{radarr_url()}/api/v3/movie/{movie['id']}?moveFiles=true",
+                f"{list_url}/{ident}?moveFiles=true",
                 payload,
                 headers=headers(key),
             )
-            log(f"movie {movie.get('title')} -> {want} ({cert or 'unknown'})")
+            log(f"{label} {item.get('title')} -> {want} ({cert or 'unknown'})")
         except Exception as exc:  # noqa: BLE001
-            log(f"movie skip {movie.get('title')}: {exc}")
+            log(f"{label} skip {item.get('title')}: {exc}")
+
+
+def route_movies(key: str) -> None:
+    route_library(
+        key,
+        f"{radarr_url()}/api/v3/movie",
+        movies_kid_dir(),
+        movies_dir(),
+        KID_MOVIE,
+        "movie",
+    )
 
 
 def route_series(key: str) -> None:
-    series = as_list(http_json("GET", f"{sonarr_url()}/api/v3/series", headers=headers(key)))
-    kid_root = tv_kid_dir()
-    gen_root = tv_dir()
-    for show in series:
-        cert = title_cert(show)
-        path = show.get("path") or ""
-        if not path:
-            continue
-        want = kid_root if kid_cert(cert, KID_TV) else gen_root
-        if in_root(path, want):
-            continue
-        payload = dict(show)
-        payload["rootFolderPath"] = want
-        payload["moveFiles"] = True
-        try:
-            http_json(
-                "PUT",
-                f"{sonarr_url()}/api/v3/series/{show['id']}?moveFiles=true",
-                payload,
-                headers=headers(key),
-            )
-            log(f"series {show.get('title')} -> {want} ({cert or 'unknown'})")
-        except Exception as exc:  # noqa: BLE001
-            log(f"series skip {show.get('title')}: {exc}")
+    route_library(
+        key,
+        f"{sonarr_url()}/api/v3/series",
+        tv_kid_dir(),
+        tv_dir(),
+        KID_TV,
+        "series",
+    )
 
 
 def main() -> None:
