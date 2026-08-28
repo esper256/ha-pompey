@@ -288,7 +288,7 @@ def ensure_indexer(prowlarr: str, pkey: str) -> None:
         http(
             "POST",
             f"{prowlarr}/api/v1/command",
-            {"name": "ApplicationIndexersSync"},
+            {"name": "ApplicationIndexerSync"},
             headers=arr_headers(pkey),
         )
         log("prowlarr sync")

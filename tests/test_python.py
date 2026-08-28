@@ -68,6 +68,7 @@ class FakeState:
         self.download_clients: list[dict] = []
         self.apps: list[dict] = []
         self.indexers: list[dict] = []
+        self.commands: list[dict] = []
         self.plex_auth: object = None
         self.local_auth: object = None
         self.seerr_object_lists = False
@@ -209,7 +210,8 @@ def handler_for(state: FakeState):
                     state.indexers.append(body)
                     return self._send(201, body)
                 if path == "/api/v1/command" and method == "POST":
-                    return self._send(201, body or {"name": "ApplicationIndexersSync"})
+                    state.commands.append(body or {})
+                    return self._send(201, body or {"name": "ApplicationIndexerSync"})
                 return self._send(404, {"error": path})
             if role == "seerr":
                 if path == "/api/v1/settings/public":
@@ -469,6 +471,10 @@ class WireStack(unittest.TestCase):
         self.assertEqual(len(self.state.download_clients), 2)
         self.assertEqual({a["name"] for a in self.state.apps}, {"Sonarr", "Radarr"})
         self.assertEqual(len(self.state.indexers), 1)
+        self.assertEqual(
+            [c.get("name") for c in self.state.commands],
+            ["ApplicationIndexerSync"],
+        )
         source_fields = {f["name"]: f.get("value") for f in self.state.indexers[0]["fields"]}
         self.assertEqual(source_fields["apiKey"], "test-source-key")
         self.assertEqual(self.state.plex_auth, {"authToken": "test-plex-token"})
@@ -714,6 +720,7 @@ class ProtonSetup(unittest.TestCase):
 class TestsNeverUseBitTorrent(unittest.TestCase):
     def test_torznab_fixture_is_gone(self):
         self.assertFalse((ROOT / "tests/dev/torznab.py").exists())
+        self.assertTrue((ROOT / "tests/lib/fake_source.py").is_file())
 
 
 if __name__ == "__main__":

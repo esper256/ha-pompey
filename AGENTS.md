@@ -46,10 +46,10 @@ Realistic stack (still no Proton, still no HAOS). Needs passwordless sudo + `ipr
 
 ```bash
 sudo apt-get install -y iproute2 iptables libicu74
-bash tests/integration.sh      # The Wild Robot via Radarr TMDB lookup on fake wg0
+bash tests/integration.sh      # The Wild Robot via Radarr TMDB lookup, Prowlarr sync of a fake Torznab source into Radarr/Sonarr, then Prowlarr search until the fake qBittorrent WebUI records the magnet add
 ```
 
-That downloads official Radarr/Sonarr/Prowlarr into `~/.cache/pompey/engines` on first run. It looks the movie up on TMDB and adds it to Radarr **without searching or downloading**. Do not start the torrent client, do not wait on a grab, and do not add that wait to CI (`tests/run.sh` only). Seerr unpack is skipped unless `POMPEY_SKIP_SEERR=0` and `crane` is on PATH (then use host `node`, not Alpine’s).
+That downloads official Radarr/Sonarr/Prowlarr into `~/.cache/pompey/engines` on first run. It looks the movie up on TMDB and adds it to Radarr **without searching or downloading from the internet**. A fake Torznab source (`tests/lib/fake_source.py`) answers Prowlarr (movie hit for The Wild Robot; a dummy TV item so Sonarr's indexer test passes). The test fails if Prowlarr does not sync that source into Radarr/Sonarr, then ends when the fake qBittorrent WebUI records `torrents/add` for the movie magnet. Do not start the torrent client, do not wait on peers, and do not add that wait to CI (`tests/run.sh` only). Seerr unpack is skipped unless `POMPEY_SKIP_SEERR=0` and `crane` is on PATH (then use host `node`, not Alpine’s).
 
 Opening `index.html` as a file is only the wait screen.
 
