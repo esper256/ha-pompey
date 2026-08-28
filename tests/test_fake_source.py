@@ -69,19 +69,31 @@ class FakeSourceHTTP(unittest.TestCase):
         self.assertIn(str(fs.TMDB_ID), text)
         self.assertIn("magnet:?xt=urn:btih:", text)
 
-    def test_tv_category_search_is_empty(self):
+    def test_tv_category_search_returns_tv_not_movie(self):
         _, body = self._get(self.tz + "/api?t=search&cat=5000,5040")
         text = body.decode()
-        self.assertNotIn("<item>", text)
+        self.assertIn(fs.TV_TITLE, text)
+        self.assertIn('name="category" value="5040"', text)
+        self.assertNotIn(fs.RELEASE_TITLE, text)
+        self.assertNotIn(fs.INFOHASH, text)
+
+    def test_tvsearch_empty_returns_tv_item(self):
+        _, body = self._get(self.tz + "/api?t=tvsearch")
+        text = body.decode()
+        self.assertIn(fs.TV_TITLE, text)
+        self.assertNotIn(fs.RELEASE_TITLE, text)
 
     def test_movie_category_search_returns_item(self):
         _, body = self._get(self.tz + "/api?t=search&cat=2000,2040")
-        self.assertIn(fs.RELEASE_TITLE, body.decode())
+        text = body.decode()
+        self.assertIn(fs.RELEASE_TITLE, text)
+        self.assertNotIn(fs.TV_TITLE, text)
 
     def test_unrelated_query_is_empty(self):
         _, body = self._get(self.tz + "/api?t=search&q=no-such-title-zzzz")
         text = body.decode()
         self.assertNotIn(fs.RELEASE_TITLE, text)
+        self.assertNotIn(fs.TV_TITLE, text)
         self.assertNotIn("<item>", text)
 
     def test_qbit_records_magnet_add(self):

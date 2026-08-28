@@ -220,6 +220,40 @@ if ! echo "${indexers}" | jq -e 'length >= 1' >/dev/null; then
 fi
 log "Prowlarr source indexer: $(echo "${indexers}" | jq -r '.[0].name')"
 
+SONARR_KEY="$(jq -r .sonarr_api_key "${POMPEY_SECRETS}")"
+SONARR=http://127.0.0.1:8989
+RADARR_KEY="$(jq -r .radarr_api_key "${POMPEY_SECRETS}")"
+RADARR=http://127.0.0.1:7878
+
+log "wait for Prowlarr to sync the source into Radarr/Sonarr"
+radarr_indexers="[]"
+sonarr_indexers="[]"
+synced=""
+for _ in $(seq 1 20); do
+  radarr_indexers="$(arr "${RADARR}" "${RADARR_KEY}" GET "/api/v3/indexer" || echo '[]')"
+  sonarr_indexers="$(arr "${SONARR}" "${SONARR_KEY}" GET "/api/v3/indexer" || echo '[]')"
+  if echo "${radarr_indexers}" | jq -e 'length >= 1' >/dev/null \
+     && echo "${sonarr_indexers}" | jq -e 'length >= 1' >/dev/null; then
+    synced=1
+    break
+  fi
+  sleep 2
+done
+if [[ -z "${synced}" ]]; then
+  echo "Prowlarr did not sync the source into Radarr/Sonarr" >&2
+  echo "radarr indexers: ${radarr_indexers}" >&2
+  echo "sonarr indexers: ${sonarr_indexers}" >&2
+  echo "---- prowlarr.log (tail) ----" >&2
+  tail -n 120 "${WORK}/prowlarr.log" >&2 || true
+  echo "---- sonarr.log (tail) ----" >&2
+  tail -n 80 "${WORK}/sonarr.log" >&2 || true
+  echo "---- http-stub.log ----" >&2
+  cat "${WORK}/http-stub.log" >&2 || true
+  exit 1
+fi
+log "Radarr indexer: $(echo "${radarr_indexers}" | jq -r '.[0].name')"
+log "Sonarr indexer: $(echo "${sonarr_indexers}" | jq -r '.[0].name')"
+
 log "ingress rewriter against Seerr stub (no Seerr binary)"
 ns env \
   SEERR_URL=http://127.0.0.1:5055 \
@@ -235,9 +269,6 @@ cookie_hdr="$(ns curl -sS -D - -o /dev/null -X POST \
   -d '{"email":"a@b.c","password":"x"}' \
   http://127.0.0.1:8098/api/v1/auth/local)"
 echo "${cookie_hdr}" | grep -qi 'Path=/api/hassio_ingress/tok'
-
-RADARR_KEY="$(jq -r .radarr_api_key "${POMPEY_SECRETS}")"
-RADARR=http://127.0.0.1:7878
 
 log "lookup ${MOVIE}"
 lookup="$(arr "${RADARR}" "${RADARR_KEY}" GET "/api/v3/movie/lookup?term=$(python3 -c 'import urllib.parse,os; print(urllib.parse.quote(os.environ["MOVIE"]))')" )"
@@ -350,4 +381,4 @@ else
   log "lookup already went through the fake wg0 netns"
 fi
 
-log "integration ok: ${title} is in Radarr; Prowlarr searched the fake source; qBittorrent WebUI got the magnet add (no torrent client)"
+log "integration ok: ${title} is in Radarr; Prowlarr synced the fake source into Radarr/Sonarr; Prowlarr search grabbed the magnet into the fake qBittorrent WebUI (no torrent client)"

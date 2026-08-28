@@ -35,6 +35,18 @@ MAGNET = (
     + "&dn=The.Wild.Robot.2024.1080p.WEB-DL.POMPEY"
     + "&tr=udp://127.0.0.1:9"
 )
+# Sonarr's indexer test is an empty TV-category search. A movie-only RSS
+# feed makes it reject the source ("no results in configured categories")
+# and Prowlarr ApplicationIndexersSync then 500s.
+TV_TITLE = "Pompey Test Show S01E01 1080p WEB-DL"
+TV_INFOHASH = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+TV_MAGNET = (
+    "magnet:?xt=urn:btih:"
+    + TV_INFOHASH
+    + "&dn=Pompey.Test.Show.S01E01.1080p.WEB-DL"
+    + "&tr=udp://127.0.0.1:9"
+)
+TV_SIZE_BYTES = 1_073_741_824
 API_KEY = "pompey-dev-source"
 SIZE_BYTES = 4_294_967_296
 
@@ -80,11 +92,21 @@ def _cats(params: dict[str, list[str]]) -> set[int]:
     return out
 
 
-def _query_hits_movie(params: dict[str, list[str]]) -> bool:
+def _t(params: dict[str, list[str]]) -> str:
+    return (params.get("t") or ["search"])[0].lower().replace("-", "")
+
+
+def _query_text(params: dict[str, list[str]]) -> str:
+    return " ".join(v[0] for v in (params.get("q"), params.get("query")) if v).lower()
+
+
+def _include_movie(params: dict[str, list[str]]) -> bool:
     cats = _cats(params)
+    if _t(params) == "tvsearch":
+        return False
     if cats and all(5000 <= c < 6000 for c in cats):
         return False
-    q = " ".join(v[0] for v in (params.get("q"), params.get("query")) if v).lower()
+    q = _query_text(params)
     tmdb = " ".join((params.get("tmdbid") or params.get("tmdb") or [""]))
     imdb = " ".join((params.get("imdbid") or params.get("imdb") or [""])).replace("tt", "")
     if tmdb and str(TMDB_ID) in tmdb:
@@ -93,40 +115,85 @@ def _query_hits_movie(params: dict[str, list[str]]) -> bool:
         return True
     if not q:
         return True
-    tokens = ("wild", "robot", "pompey")
-    return any(tok in q for tok in tokens)
+    return any(tok in q for tok in ("wild", "robot"))
+
+
+def _include_tv(params: dict[str, list[str]]) -> bool:
+    cats = _cats(params)
+    if _t(params) in {"movie", "moviesearch"}:
+        return False
+    if cats and all(2000 <= c < 3000 for c in cats):
+        return False
+    q = _query_text(params)
+    if not q:
+        return True
+    return any(tok in q for tok in ("test show", "s01e01"))
+
+
+def _item_xml(
+    *,
+    title: str,
+    infohash: str,
+    magnet: str,
+    size: int,
+    category: str,
+    extra_attrs: str = "",
+) -> str:
+    magnet_x = _xml_escape(magnet)
+    title_x = _xml_escape(title)
+    return f"""    <item>
+      <title>{title_x}</title>
+      <guid isPermaLink="false">pompey-fake-{infohash}</guid>
+      <pubDate>Fri, 28 Aug 2026 00:00:00 +0000</pubDate>
+      <size>{size}</size>
+      <link>{magnet_x}</link>
+      <enclosure url="{magnet_x}" length="{size}" type="application/x-bittorrent"/>
+      <torznab:attr name="category" value="{category}"/>
+      <torznab:attr name="seeders" value="12"/>
+      <torznab:attr name="peers" value="14"/>
+      <torznab:attr name="magneturl" value="{magnet_x}"/>
+      <torznab:attr name="downloadvolumefactor" value="0"/>
+      <torznab:attr name="uploadvolumefactor" value="1"/>
+{extra_attrs}    </item>
+"""
 
 
 def search_xml(params: dict[str, list[str]]) -> str:
-    if not _query_hits_movie(params):
-        return """<?xml version="1.0" encoding="UTF-8"?>
-<rss version="2.0" xmlns:torznab="http://torznab.com/schemas/2015/feed">
-  <channel><title>Pompey Fake Source</title></channel>
-</rss>
-"""
-    magnet = _xml_escape(MAGNET)
-    title = _xml_escape(RELEASE_TITLE)
+    items: list[str] = []
+    if _include_movie(params):
+        items.append(
+            _item_xml(
+                title=RELEASE_TITLE,
+                infohash=INFOHASH,
+                magnet=MAGNET,
+                size=SIZE_BYTES,
+                category="2040",
+                extra_attrs=(
+                    f'      <torznab:attr name="tmdbid" value="{TMDB_ID}"/>\n'
+                    f'      <torznab:attr name="imdb" value="{IMDB_ID}"/>\n'
+                ),
+            )
+        )
+    if _include_tv(params):
+        items.append(
+            _item_xml(
+                title=TV_TITLE,
+                infohash=TV_INFOHASH,
+                magnet=TV_MAGNET,
+                size=TV_SIZE_BYTES,
+                category="5040",
+                extra_attrs=(
+                    '      <torznab:attr name="season" value="1"/>\n'
+                    '      <torznab:attr name="episode" value="1"/>\n'
+                ),
+            )
+        )
+    inner = "".join(items) if items else ""
     return f"""<?xml version="1.0" encoding="UTF-8"?>
 <rss version="2.0" xmlns:torznab="http://torznab.com/schemas/2015/feed">
   <channel>
     <title>Pompey Fake Source</title>
-    <item>
-      <title>{title}</title>
-      <guid isPermaLink="false">pompey-fake-{INFOHASH}</guid>
-      <pubDate>Fri, 28 Aug 2026 00:00:00 +0000</pubDate>
-      <size>{SIZE_BYTES}</size>
-      <link>{magnet}</link>
-      <enclosure url="{magnet}" length="{SIZE_BYTES}" type="application/x-bittorrent"/>
-      <torznab:attr name="category" value="2040"/>
-      <torznab:attr name="seeders" value="12"/>
-      <torznab:attr name="peers" value="14"/>
-      <torznab:attr name="magneturl" value="{magnet}"/>
-      <torznab:attr name="downloadvolumefactor" value="0"/>
-      <torznab:attr name="uploadvolumefactor" value="1"/>
-      <torznab:attr name="tmdbid" value="{TMDB_ID}"/>
-      <torznab:attr name="imdb" value="{IMDB_ID}"/>
-    </item>
-  </channel>
+{inner}  </channel>
 </rss>
 """
 

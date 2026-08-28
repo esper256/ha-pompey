@@ -4,7 +4,7 @@
 
 - Engine fetch no longer dies on `tar: Prowlarr/*.dll: Cannot change mode ... Operation not permitted`. That was GNU tar restoring archive modes under `/tmp`, which HAOS AppArmor allows only `rwk` (no chmod). Linux Servarr builds are .NET — lots of `.dll` files plus an **ELF** launcher — not a Windows zip. Unpack under `/data/engines` with `--no-same-owner --no-same-permissions`, refuse zip/Windows/PE launchers, and log the artifact name (`linux-musl-core-x64`). Same path for Sonarr, Radarr, and Seerr. Rebuild so the banner says **0.2.11**.
 - `tests/run.sh` now unpacks a Prowlarr-shaped fixture **and** the real linux-musl Prowlarr `.tar.gz` (cached). Range-GET alone could not catch this.
-- Dev `tests/integration.sh` wires a fake Torznab source into Prowlarr, searches **The Wild Robot**, and stops when the fake qBittorrent WebUI records the magnet add. Still no torrent client and no wait on peers.
+- Dev `tests/integration.sh` wires a fake Torznab source into Prowlarr, waits until Radarr/Sonarr have the synced indexer, searches **The Wild Robot**, and stops when the fake qBittorrent WebUI records the magnet add. The fake source answers TV-category probes with a dummy show so Sonarr does not reject the indexer (`ApplicationIndexersSync` 500). Still no torrent client and no wait on peers.
 
 ## 0.2.10
 
