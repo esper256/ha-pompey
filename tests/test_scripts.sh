@@ -104,6 +104,7 @@ grep -q "127.0.0.1" "${POMPEY_CONFIG}/sonarr/config.xml"
 grep -q "BindAddress>127.0.0.1" "${POMPEY_CONFIG}/radarr/config.xml"
 grep -Fq "WebUI\\Address=127.0.0.1" "${POMPEY_CONFIG}/qBittorrent/qBittorrent.conf"
 grep -Fq "Session\\Interface=wg0" "${POMPEY_CONFIG}/qBittorrent/qBittorrent.conf"
+grep -Fq "Session\\Interface=wg0" "${POMPEY_CONFIG}/qBittorrent/config/qBittorrent.conf"
 python3 - "${POMPEY_SECRETS}" "${POMPEY_CONFIG}" <<'PY'
 import json, pathlib, sys
 secrets = json.load(open(sys.argv[1], encoding="utf-8"))

@@ -39,7 +39,7 @@ cleanup() {
     kill_pid "${pid}"
   done
   bash "${ROOT}/pompey/rootfs/usr/local/bin/pompey-dev-vpn" down >/dev/null 2>&1 || true
-  rm -rf "${WORK}"
+  sudo -n rm -rf "${WORK}" 2>/dev/null || rm -rf "${WORK}"
 }
 trap cleanup EXIT
 
@@ -81,7 +81,7 @@ export PATH="${WORK}/bin:${BIN}:${PATH}"
 
 run() { "${ROOT}/tests/with-bashio" "$@"; }
 ns() {
-  sudo -n ip netns exec pompey-dev env \
+  sudo -n ip netns exec pompey-dev runuser -u ubuntu -- env \
     PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
     HOME="${HOME}" \
     LANG="${LANG:-C.UTF-8}" \
