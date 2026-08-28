@@ -2,18 +2,20 @@
 
 Search for a movie or TV show in Home Assistant. Confirm if we need you. It lands in the right library, and Plex notices.
 
-Pompey is one Home Assistant OS app. The sidebar is search. Downloads, matching, and the VPN stay behind that screen. All internet from this app uses Proton WireGuard. If the tunnel is down, internet is dropped.
+Pompey is one Home Assistant OS app. The sidebar is the box: Proton, status, a button to search. Search itself is [Seerr](https://seerr.dev/) on this machine’s port **5055**, not an iframe. Downloads, matching, and the VPN stay inside Pompey. All internet from this app uses Proton WireGuard. If the tunnel is down, internet is dropped. **Plex is a separate Home Assistant app** (or another machine). Pompey does not run Plex.
 
-This is the user guide for the product we are building. It describes the journey as it should feel. [What is not ready yet](#what-is-not-ready-yet) is honest about the current cut (**0.2.15**). The [roadmap](#roadmap) is how we close the gap.
+This is the user guide for the product we are building. It describes the journey as it should feel. [What is not ready yet](#what-is-not-ready-yet) is honest about the current cut (**0.2.16**). The [roadmap](#roadmap) is how we close the gap.
 
 ## How a day with it should feel
 
-1. Open **Pompey** in the Home Assistant sidebar.
-2. Search for a title — posters, “already on Plex?”, the right movie or show.
+1. Open **Pompey** in the Home Assistant sidebar (setup and status).
+2. Open **search** on this Home Assistant machine’s port **5055**. Search for a title — posters, “already on Plex?”, the right movie or show.
 3. Request it. For people in the house, that should just go through.
-4. Watch it in **Plex**. Kid titles land in the kid libraries. Everything else, including unknown ratings, lands in general.
+4. Watch it in **Plex** (your Plex app, not Pompey). Kid titles land in the kid libraries. Everything else, including unknown ratings, lands in general.
 
-You should not bookmark Radarr, Sonarr, Prowlarr, or qBittorrent. You should not SSH in to add a source. You should not keep a spreadsheet of quality profiles. Those programs run inside Pompey. The household face is [Seerr](https://seerr.dev/). Pompey is the box around it: Proton, kill switch, wiring, one sidebar.
+You should not bookmark Radarr, Sonarr, Prowlarr, or qBittorrent. You should not SSH in to add a source. You should not keep a spreadsheet of quality profiles. Those programs run inside Pompey. The household face is [Seerr](https://seerr.dev/) on port 5055. Pompey is the box around it: Proton, kill switch, wiring, one sidebar for the box.
+
+Movies and TV use the same search.
 
 Movies and TV use the same search.
 
@@ -21,7 +23,7 @@ Movies and TV use the same search.
 
 - **Home Assistant OS** on a 64-bit machine (Intel/AMD or aarch64). Not Home Assistant Container, not Supervised on random Linux, not a 32-bit Pi. This app wants a few GB of RAM on top of Home Assistant.
 - A **Proton** account. You will create a WireGuard certificate and download a `.conf` file. Turn on **NAT-PMP (Port Forwarding)** on that certificate if you want incoming connections for downloads.
-- **Plex** on your LAN, with port **32400** published on a numeric IP. Another Docker app on the same machine is fine.
+- **Plex** on your LAN as a **separate** Home Assistant app (or another machine), with port **32400** published on a numeric IP. Pompey never installs or runs Plex.
 - **One source** — a tracker or indexer you already have — as a base URL plus API key. Pompey does not ship a catalog of sources.
 - Disk on **`/media`** (or the media share Home Assistant already maps there) for libraries and in-progress downloads. Same filesystem for both; this stack does not copy finished files across disks.
 
@@ -57,10 +59,10 @@ Open the app’s configuration. That is the only form Home Assistant keeps:
 | --- | --- | --- |
 | **Source URL** | Yes, if you want search to find releases | Base URL of your indexer/source (this goes to the hidden indexer engine, not to Plex) |
 | **Source key** | With the URL | API key for that source |
-| **Plex address** | No | Numeric IP, e.g. `http://192.168.1.10:32400`. Skip this if you would rather finish Plex on Pompey’s first screen. |
+| **Plex address** | No | Numeric IP of **your Plex app**, e.g. `http://192.168.1.10:32400`. Skip this if you would rather finish Plex on Seerr’s first screen. Pompey does not run Plex. |
 | **Plex token** | No | Only with the address, to skip the first-run Plex wizard. [How to find a Plex token](https://support.plex.tv/articles/204059436-finding-an-authentication-token-x-plex-token/) |
 
-Leave Plex empty unless you already know the token. The canonical Plex connection is the setup screen inside search.
+Leave Plex empty unless you already know the token. The canonical Plex connection is Seerr’s setup screen on port 5055. That talks to the Plex you already run.
 
 Hostnames (`plex.local`, `plex`) will not resolve. Proton’s DNS is `10.2.0.1` and does not know your LAN names. Use a numeric IP in Home Assistant **and** on the Plex wizard.
 
@@ -89,43 +91,45 @@ Downloads use `/media/downloads/incomplete` and `/media/downloads/complete` on t
 2. Open **Pompey** in the sidebar. You will get a wait screen, not search, the first time.
 3. **Paste the Proton WireGuard `.conf`** into the box (the whole file, starting with `[Interface]`). That is the file Proton gave you when you created the WireGuard certificate. It is not an app option. There is no country dropdown — the file already chose a server. Generate a new certificate in Proton to change region, then paste again (see [Keeping it up to date](#keeping-it-up-to-date)).
 4. Wait. First start downloads several hundred megabytes and can take several minutes. The bar is: tunnel → download → start → connect search. Home Assistant’s own start timeout is 300 seconds; engine download happens **after** the container is up, on this screen.
-5. The same sidebar entry **reloads into search**.
-6. If you did not fill Plex in the app options, Seerr’s first screen asks which media server. Choose **Plex**, sign in, and enter the **numeric IP**. That wizard creates the first admin. Pompey then points search at the movie and TV engines in the background.
+5. When the bar finishes, the sidebar stays Pompey and shows **Open search**. That is `http://<this-home-assistant>:5055/` (Seerr, no Ingress rewrite). Bookmark that URL. Keep the sidebar for status and later actions.
+6. If you did not fill Plex in the app options, Seerr’s first screen asks which media server. Choose **Plex**, sign in, and enter the **numeric IP of your Plex app**. That wizard creates the first admin. Pompey then points search at the movie and TV engines in the background.
 7. Request a title you do not already have. It should be auto-approved for the household.
 
-**Success** is: wait screen finishes, sidebar is search, you can find a title and request it, and later that title is on disk in the right folder and Plex notices.
+**Success** is: wait screen finishes, **Open search** works, you can find a title and request it, and later that title is on disk in the right folder and Plex notices.
 
-If the wait screen never leaves, or search is a blank page, send the app log (**Settings → Apps → Pompey → Log**) and which step it stuck on. Do not send the Proton private key or a Plex token.
+If the wait screen never gets to Open search, or port 5055 does not load, send the app log (**Settings → Apps → Pompey → Log**) and which step it stuck on. Do not send the Proton private key or a Plex token.
 
 ## What you open (and what you never open)
 
-Daily use is two places: **Home Assistant** (search) and **Plex** (watching). Everything else is inside the add-on, on localhost, wired for you.
+Daily use is two places: **search** (`http://<home-assistant>:5055`) and **Plex** (watching). The Home Assistant sidebar is the box (Proton, status, Open search). Engine UIs stay inside the add-on.
 
 | What | Who it is for | Address |
 | --- | --- | --- |
-| Search, posters, requests | Everyone in the house | Home Assistant sidebar → **Pompey**. That is Seerr, under Home Assistant’s login. There is no extra port to remember and nothing to expose on the internet. |
-| Watching | Everyone | Your Plex apps. On the LAN, Plex itself is typically `http://<plex-ip>:32400`. |
+| Search, posters, requests | Everyone in the house | `http://<this-home-assistant-ip>:5055` — Seerr, on the LAN. Do not put this on the public internet. |
+| Pompey (Proton, status, Open search) | Whoever installed the app | Home Assistant sidebar → **Pompey**. Always this UI, never rewritten into Seerr. |
+| Watching | Everyone | Your Plex apps. On the LAN, Plex itself is typically `http://<plex-ip>:32400`. Pompey does not run Plex. |
 | App options (source, optional Plex shortcut) | Whoever installs the app | **Settings → Apps → Pompey → Configuration** |
 | Proton account / new WireGuard file | Whoever owns the VPN | Proton’s site, then paste into Pompey if you rotate the file |
 | App log | When something is stuck | **Settings → Apps → Pompey → Log** |
 
-These run **inside** Pompey. You are not expected to interact with them in a browser. They are not published on your LAN, and they are not extra Home Assistant sidebar entries. That is deliberate: one container, one VPN, one face.
+These run **inside** Pompey. You are not expected to interact with them in a browser. They are not extra Home Assistant sidebar entries. That is deliberate: one container, one VPN.
 
 | Program | Job | Inside the add-on |
 | --- | --- | --- |
-| [Seerr](https://seerr.dev/) | Search and requests | `127.0.0.1:5055` (this is what the sidebar proxies) |
+| [Seerr](https://seerr.dev/) | Search and requests | Published as host **5055** (and `127.0.0.1:5055` in the container) |
 | Radarr | Movies: pick a release, land it in `/media/Movies` or Kid Friendly Movies | `127.0.0.1:7878` |
 | Sonarr | TV, same idea for `/media/TV` | `127.0.0.1:8989` |
 | Prowlarr | Your source(s), synced into Radarr and Sonarr | `127.0.0.1:9696` |
 | qBittorrent-nox | The download client. Bound to the Proton interface. No Web UI in the sidebar. | `127.0.0.1:8080` |
+| Plex | Watching. **Not in this add-on.** | Your other app / machine, usually `:32400` |
 
-Do not publish 7878 / 8989 / 9696 / 8080 / 5055 on the Home Assistant host. Do not port-forward download peer ports on that host either — Proton NAT-PMP is how incoming download ports should appear, on the tunnel, not on your house IP.
+Do not publish 7878 / 8989 / 9696 / 8080 on the Home Assistant host. **Do** leave 5055 published (Supervisor maps it by default; you can change the host port in the app’s network settings). Do not port-forward download peer ports on that host — Proton NAT-PMP is how incoming download ports should appear, on the tunnel, not on your house IP. Do not port-forward 5055 to the internet either; Seerr’s login is not a substitute for keeping search on the LAN.
 
 If a download is stuck or a source needs a second key, the **intended** product is: handle that in Pompey (status, “add another source”, a confirm screen when quality is ambiguous). Until those exist, the log is the supported way in. Opening the engine UIs over SSH is a workaround, not the journey.
 
 ## Using it after setup
 
-- **Search and request** in the sidebar. Household members should not see a ticket queue. Seerr can have more than one user; the first admin is whoever completed the Plex wizard.
+- **Search and request** at `http://<home-assistant>:5055`. The sidebar is the box, not an iframe of search. Household members should not see a ticket queue. Seerr can have more than one user; the first admin is whoever completed the Plex wizard.
 - **Kid vs general** is a rule after the request, from TMDB certification. G / PG / PG-13 and TV-Y / TV-G / TV-PG go to the kid folders. Anything else, **including unknown**, goes to general. Pompey does not guess kid, and it does not stop the request to ask.
 - **Already on Plex** is Seerr’s job. If it is already there, you should see that before you request it.
 - **Confirm if we need you** is for the cases the stack cannot decide — not for every request. Picking a specific torrent by hand is not the default path.
@@ -168,7 +172,7 @@ A private tracker with a stable API key is set-and-forget. Prowlarr copies that 
 
 ## What is not ready yet
 
-The journey above is the target. **0.2.15** is a real Home Assistant OS install of that box, not the finished household app.
+The journey above is the target. **0.2.16** is a real Home Assistant OS install of that box, not the finished household app.
 
 | In the guide | On the machine today |
 | --- | --- |
@@ -183,9 +187,9 @@ The journey above is the target. **0.2.15** is a real Home Assistant OS install 
 | Engine Web UIs for operators | Listening on localhost only. Not in the sidebar. Not on the LAN. |
 | Cloudflare-protected sources | No challenge solvers. |
 | Jellyfin | Plex only. |
-| Use this from outside Home Assistant’s login | Out of scope. The sidebar is the access control. |
+| Use this from outside the house | Out of scope. Search is on the LAN at :5055. Do not port-forward it. |
 
-If search is a blank page after the wait screen, or the Plex button on setup does nothing, that is a bug — send the log. Rebuild so the banner says **0.2.15** if you are on an older wait screen.
+If search is a blank page on port 5055, or the Plex button on setup does nothing, that is a bug — send the log. Rebuild so the banner says **0.2.16** if you are on an older wait screen that tried to iframe Seerr.
 
 ## Roadmap
 
@@ -199,8 +203,8 @@ Work that turns the current box into the guide above, in the order it unblocks t
 6. **Sources without the options form.** First source can stay in Home Assistant options (plain language). Adding a second, rotating a key, and “source is down” should be possible from Pompey. Still no indexer catalog shipped in the repo.
 7. **Proton file lifecycle.** Replace a working `.conf` (new region, rotated certificate) from the running app. Keep the kill switch. Do not put private keys in the options list.
 8. **Household users.** After the Plex wizard, inviting someone who already uses that Plex server should be enough. Auto-approve for the house; no ticket queue.
-9. **Optional advanced consoles, still behind Home Assistant login** — path prefixes on the same Ingress (`/radarr`, `/sonarr`, …) with Arr `urlBase` set, for the few people who want the upstream UI. Default off. Never host ports on the LAN. Never a second sidebar app.
-10. **Not this product:** Jellyfin, split tunnel, publishing a Docker image, challenge-solver sidecars, exposing search on the public internet.
+9. **Not this product:** Jellyfin, split tunnel, publishing a Docker image, challenge-solver sidecars, exposing search on the public internet, stuffing Seerr under Ingress (Next.js has no basePath; rewriting `/_next` will keep breaking).
+10. **Optional engine consoles** for the few people who want them — still not a second sidebar app, still not on the LAN by default.
 
 ## Storage
 
@@ -220,10 +224,11 @@ App config lives in `/addon_configs/<id>_pompey/`. Fetched engines live in the a
 ## If it fails
 
 - Wait screen stuck on Proton: the `.conf` is incomplete, or this host cannot create `wg0`. Paste the full file. Check the log for WireGuard, not for Seerr.
-- Wait screen stuck after Proton: engine download or wiring. Log lines are stamped with a time. Do not send keys.
-- Sidebar is search but Plex button does nothing: you need **0.2.15** or newer (Ingress used to break Next.js `/_next` regexes in minified chunks).
+- Sidebar stuck after Proton with no **Open search**: engine download or wiring. Log lines are stamped with a time. Do not send keys.
+- **Open search** / port 5055 does not load: check **Settings → Apps → Pompey → Configuration → Network** that 5055/tcp is mapped. Use this machine’s LAN IP, not Home Assistant Cloud.
+- Sidebar used to be a blank Seerr page, or Plex button did nothing: you need **0.2.16** or newer (Ingress used to rewrite Seerr’s JavaScript). Search is now `:5055`, not the iframe.
 - Search never finds releases: source URL/key, and give wiring a minute after the Plex wizard (Arr is connected after the first admin exists).
-- Plex wizard cannot see the server: numeric IP, port 32400 published, LAN not blocked.
+- Plex wizard cannot see the server: numeric IP of **your Plex app**, port 32400 published, LAN not blocked. Pompey does not contain Plex.
 
 More Home Assistant-specific notes (Supervisor skip reasons, copy-to-`/addons`): [pompey/DOCS.md](pompey/DOCS.md).
 

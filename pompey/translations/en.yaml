@@ -3,10 +3,11 @@ configuration:
     name: Plex address
     description: >-
       Optional. Skip Seerr's Plex wizard by filling this and the token.
-      Numeric IP where Plex listens, for example http://192.168.1.10:32400
-      or http://172.30.32.1:32400 if Plex is on this same Home Assistant machine.
-      Hostnames will not resolve through Proton DNS. Leave empty to finish
-      Plex on Seerr's first screen (use a numeric IP there too).
+      Numeric IP of the Plex app you already run, for example
+      http://192.168.1.10:32400 or http://172.30.32.1:32400 if Plex is
+      another add-on on this Home Assistant machine. Pompey does not run
+      Plex. Hostnames will not resolve through Proton DNS. Leave empty to
+      finish Plex on Seerr's first screen (use a numeric IP there too).
   plex_token:
     name: Plex token
     description: >-

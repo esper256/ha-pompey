@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Proxy Seerr and rewrite root-absolute URLs for Home Assistant Ingress.
 
-Seerr is a Next.js app with no runtime basePath. Supervisor strips
-/api/hassio_ingress/<token> before the request hits us, then the browser
-resolves /_next/... against the Home Assistant origin. We prefix those
-paths with X-Ingress-Path so assets and API calls stay inside Ingress.
+Unused on the household path as of 0.2.16: Seerr is published on host
+port 5055 so Next.js can keep its own URLs. Ingress nginx serves only
+Pompey's wait/status UI. This module stays so we can prove the old
+rewrite bugs in tests, not because the sidebar still iframes Seerr.
 """
 from __future__ import annotations
 

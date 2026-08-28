@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""Run wire-stack and the Ingress rewriter against a real Seerr image.
+"""Run wire-stack against a real Seerr image.
 
 HTTP fakes of Seerr hid POST /auth/local 403 (login-only) and would hide the
 next contract change too. qBittorrent and Torznab stay fake: tests must not
 speak BitTorrent. Arr/Prowlarr stay fake here so this is Seerr's API, not a
-full stack boot.
+full stack boot. Ingress no longer iframes Seerr; rewrite tests stay so we
+do not reintroduce that path by accident.
 """
 from __future__ import annotations
 

@@ -2,11 +2,12 @@
 """Wire localhost engines and Seerr. Idempotent. Secrets never logged.
 
 Required (must succeed or this process exits non-zero so s6 retries, and
-the wait screen does not flip to search): qBittorrent categories, Arr root
+the wait screen does not claim search is ready): qBittorrent categories, Arr root
 folders and download clients, Prowlarr↔Radarr/Sonarr apps, the operator
 source indexer when a URL is configured, Seerr process up (GET /settings/public).
 Seerr→Radarr/Sonarr is required after Seerr is initialized. Before that, the
-Plex wizard has not created user id 1, so the API key 403s; we still hand off.
+Plex wizard has not created user id 1, so the API key 403s; we still mark
+search ready (Seerr is on the published port, Ingress stays Pompey).
 
 Optional (log and continue): Plex token/login/libraries, Seerr local login
 (403 is normal until the wizard creates a user), Seerr chrome settings
@@ -131,9 +132,6 @@ def seerr_api_key_from_disk() -> str:
     key = main.get("apiKey") if isinstance(main, dict) else None
     return key.strip() if isinstance(key, str) else ""
 
-
-def ingress_proxy_url() -> str:
-    return env("POMPEY_INGRESS_PROXY", "http://127.0.0.1:8098").rstrip("/")
 
 # Seerr: REQUEST + AUTO_APPROVE + AUTO_APPROVE_MOVIE + AUTO_APPROVE_TV
 SEERR_HOUSEHOLD_PERMS = 32 + 128 + 256 + 512
@@ -607,7 +605,7 @@ def configure_seerr(secrets: dict, radarr_profile, sonarr_profile, sonarr_lang) 
         log(f"seerr main settings: {exc}", "WARNING")
 
     try:
-        s.call("POST", "/api/v1/settings/network", {"trustProxy": True})
+        s.call("POST", "/api/v1/settings/network", {"trustProxy": False})
     except RuntimeError as exc:
         log(f"seerr network: {exc}", "WARNING")
 
@@ -622,60 +620,15 @@ def configure_seerr(secrets: dict, radarr_profile, sonarr_profile, sonarr_lang) 
         log("seerr left uninitialized so the Plex setup wizard can run")
 
 
-def reload_nginx() -> None:
-    port = os.environ.get("INGRESS_PORT", "8099")
-    status = os.path.join(ready_dir(), "status.json")
-    conf = f"""server {{
-    listen {port} default_server;
-    allow 172.30.32.2;
-    deny all;
-    client_max_body_size 0;
+def keep_ingress_as_pompey() -> None:
+    """Sidebar stays Pompey's wait/status UI. Seerr is the published host port.
 
-    location = /status.json {{
-        alias {status};
-        default_type application/json;
-        add_header Cache-Control "no-store";
-        access_log off;
-    }}
-
-    location / {{
-        proxy_pass {ingress_proxy_url()};
-        proxy_http_version 1.1;
-        proxy_set_header Host $http_host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_set_header X-Forwarded-Host $http_host;
-        proxy_set_header X-Ingress-Path $http_x_ingress_path;
-        proxy_set_header X-Forwarded-Prefix $http_x_ingress_path;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection $connection_upgrade;
-        proxy_set_header Accept-Encoding "";
-        proxy_read_timeout 86400;
-        proxy_buffering off;
-        proxy_redirect off;
-    }}
-}}
-"""
-    path = os.environ.get("NGINX_INGRESS_CONF", "/etc/nginx/http.d/ingress.conf")
-    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-    with open(path, "w", encoding="utf-8") as fh:
-        fh.write(conf)
-    nginx = shutil.which("nginx")
-    if not nginx:
-        log("nginx not on PATH; wrote ingress conf only", "WARNING")
-        log("ingress now proxies Seerr")
-        return
-    done = subprocess.run([nginx, "-s", "reload"], check=False, capture_output=True, text=True)
-    if done.returncode != 0:
-        err = (done.stderr or done.stdout or "").strip()
-        # Binary present but no master process (CI / this VM). On HAOS the
-        # nginx service is already up, so a pid miss is not the usual case.
-        if "nginx.pid" in err.lower() and "no such file" in err.lower():
-            log("nginx is not running; wrote ingress conf only", "WARNING")
-        else:
-            raise RuntimeError(f"nginx reload failed: {err}")
-    log("ingress now proxies Seerr")
+    Putting Seerr under Home Assistant Ingress means rewriting Next.js
+    root-absolute URLs. That has already broken /login/i and /^\\/_next\\/data\\//
+    and will break again on the next minified chunk. Do not proxy Seerr.
+    """
+    port = os.environ.get("SEERR_PORT", "5055")
+    log(f"search is on 0.0.0.0:{port}; Ingress stays Pompey (no Seerr rewrite)")
 
 
 def main() -> int:
@@ -710,8 +663,7 @@ def main() -> int:
     open(os.path.join(ready_dir(), "arr-wired"), "w").close()
 
     configure_seerr(secrets, rp, sp, sl)
-    reload_nginx()
-    # Wait page reloads when status.search is true; nginx must already proxy Seerr.
+    keep_ingress_as_pompey()
     mark_status("ready", "Ready", 100)
     open(os.path.join(ready_dir(), "wired"), "w").close()
     log("done")

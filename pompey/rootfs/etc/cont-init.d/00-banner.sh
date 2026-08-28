@@ -4,7 +4,7 @@ set -euo pipefail
 # shellcheck source=/dev/null
 source "$(command -v pompey-env)"
 
-bashio::log.info "Pompey ${BUILD_VERSION:-0.2.15} starting"
+bashio::log.info "Pompey ${BUILD_VERSION:-0.2.16} starting"
 pompey-status vpn "Starting" 5 || true
 
 mkdir -p "${POMPEY_CONFIG}/wireguard" "${POMPEY_WG_ETC}" "${POMPEY_VPN_TMP}" "${POMPEY_NGINX_RUN}"
@@ -40,7 +40,7 @@ fi
 
 plex_token="$(bashio::config 'plex_token')"
 if [[ -z "${plex_token}" ]]; then
-  bashio::log.warning "Plex token is empty. Search can still start; you will finish Plex from that screen."
+  bashio::log.warning "Plex token is empty. Search can still start; finish Plex from Seerr (Plex is a separate app, not inside Pompey)."
 fi
 
 source_url="$(bashio::config 'source_url')"

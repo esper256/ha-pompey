@@ -1,5 +1,6 @@
 #!/command/with-contenv bashio
 # shellcheck shell=bash
-set -euo pipefail
-
-exec python3 /usr/local/bin/pompey-ingress
+# Unused on this cut: Seerr is published on host port 5055. Ingress nginx
+# serves only Pompey's wait/status UI. A `down` file keeps this from starting.
+# The path rewriter (pompey-ingress) stays in the tree but is not the face.
+exit 0

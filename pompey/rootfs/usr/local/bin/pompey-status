@@ -98,6 +98,7 @@ def main(argv: list[str]) -> int:
     ready = bool(step == "ready" and not error)
     data["handoff"] = ready
     data["search"] = ready
+    data["search_port"] = int(os.environ.get("SEERR_PORT", "5055"))
     if percent is not None:
         data["percent"] = max(0, min(100, percent))
     elif step in order:

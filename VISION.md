@@ -2,7 +2,7 @@
 
 **Pompey** is the name of the whole stack and of the Home Assistant app. One sidebar entry. The household searches for a movie or TV show, picks the right title, and it shows up in the right library. Nobody using it should need operator jargon.
 
-The name is a wink at Pompey — English for Gnaeus Pompeius Magnus — who cleared the Mediterranean of pirates in about forty days, then settled them as farmers. Same trick: the rough tools keep working behind the wall. The household never visits their ports.
+The name is a wink at Pompey — English for Gnaeus Pompeius Magnus — who cleared the Mediterranean of pirates in about forty days, then settled them as farmers. Same trick: the rough tools keep working behind the wall. The household never visits the engine ports.
 
 ## Do not vibe-code the face
 
@@ -14,17 +14,17 @@ So the honest split:
 
 | Step | Who |
 | --- | --- |
-| Search, posters, pick the title, see if it is already there | **Seerr** (Ingress) |
+| Search, posters, pick the title, see if it is already there | **Seerr** on host port 5055 (not Ingress — Next.js has no basePath) |
 | Find a release, download, match episodes, land on the NAS | Hidden engines, including **qBittorrent-nox** in this same container |
 | All of that on Proton, one box, no extra sidebars | **Pompey** (this app) |
 | “This file is popular but the wrong quality” | Not Seerr. Only if we add a small confirm later. |
 | Kid-friendly vs general by rating | Not Seerr. A tiny rule after the request, or we ask. |
 
-The family experience of a glued stack **is** Seerr. That is a better first screen than anything we would sketch. Pompey's job is to make that screen the *only* screen, already wired, on a kill-switched tunnel, without a weekend of operator setup.
+The family experience of a glued stack **is** Seerr on port 5055. That is a better first screen than anything we would sketch. Pompey's job is to make that screen already wired, on a kill-switched tunnel, without a weekend of operator setup. The Home Assistant sidebar is the box (Proton, status, Open search), not an iframe of Seerr.
 
 ## What you see
 
-1. **Search** — Seerr. Type a title or browse.
+1. **Search** — Seerr at `http://<home-assistant>:5055`. Type a title or browse.
 2. **Pick** — the right movie or show.
 3. **Request** — it becomes a job. Auto-approve for the household so there is no ticket queue.
 4. **Done** — it shows up in Plex. Kid-friendly vs general is our rule on the way to disk, not a Seerr settings page.
@@ -55,18 +55,18 @@ Challenge-solver sidecars are not in this starting point.
 
 These are decided so we can build:
 
-- **Face:** Seerr on Ingress. Auto-approve for the household. We do not vibe-code discovery.
+- **Face:** Seerr on a published host port (5055). No Ingress path rewrite. Auto-approve for the household. We do not vibe-code discovery. The sidebar is Pompey (setup, status, debug).
 - **Box:** one Home Assistant app, one container, Proton `wg0`, kill switch, no split tunnel.
 - **Torrent engine:** **qBittorrent-nox**, in this same process namespace so it cannot leak off the tunnel. Bind traffic to `wg0`. Apply Proton’s NAT-PMP mapped port. No Web UI in the sidebar — the TV/movie engines talk to it on localhost. We fetch a static Linux binary at runtime (not compiled here). Transmission is simpler and worse for this stack; Deluge and rtorrent are more operator UI. Newer clients are not what the matching engines expect yet.
 - **Other engines:** official Linux musl tarballs for the TV/movie/indexer apps. Recyclarr/TRaSH quality so auto-grab is usually right.
 - **Seerr itself:** they ship Docker, not a tarball. We download *their* published image at runtime and unpack the app directory. We still do not publish an image of our own, and we do not compile them from source.
-- **Plex only.** Library folders on `/media` (same filesystem as downloads).
+- **Not v1:** picking a specific file when quality and seeds disagree; Cloudflare challenge solvers; Jellyfin; exposing search on the public internet; stuffing Seerr under Ingress.
+- **Plex:** a separate Home Assistant app or another machine. Pompey never runs Plex. Library folders on `/media` (same filesystem as downloads).
 - **Kid vs general:** after a request, TMDB certification routes the root folder. G/PG/PG-13 and TV-Y/TV-G/TV-PG → kid libraries. Everything else, including unknown, → general. We do not guess kid. We do not block the request to ask.
-- **Not v1:** picking a specific file when quality and seeds disagree; Cloudflare challenge solvers; Jellyfin; exposing this outside Home Assistant login.
 - **Sources:** we do not ship a catalog of indexers. First-run Pompey asks for at least one source as a URL plus key (plain language). No engine UI.
 
 Hardware: this stack wants a few GB of RAM on top of Home Assistant. A 2 GB Pi is not a target.
 
 ## This repo
 
-`pompey/` is the Home Assistant app for the whole stack. The household guide (install, first run, which URLs you open, updates, what is not ready, roadmap) is the [root README](README.md). `0.2.15` is the current cut on real Home Assistant OS. Recyclarr/TRaSH quality profiles are not in this cut — engines use their defaults.
+`pompey/` is the Home Assistant app for the whole stack. The household guide (install, first run, which URLs you open, updates, what is not ready, roadmap) is the [root README](README.md). `0.2.16` is the current cut on real Home Assistant OS. Recyclarr/TRaSH quality profiles are not in this cut — engines use their defaults.
