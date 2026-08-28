@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.32
+
+- Finished files on a NAS share were staying in `downloads/complete` instead of the Plex library folder. qBittorrent never receives that library path — Seerr tells Radarr/Sonarr the Movies/TV folder (Kid vs Not Kid) when you request; that path lives on the Arr title. Housekeeping does **not** guess the folder from the filename. It asks Arr to import only files that already match a title, into that stored path, and logs unmatched names as `not guessing Kid vs Not Kid`. If Arr never starts the import there is no “failed move” line (a 100% torrent still seeding looks like a normal download). Finished torrents in `complete/` are **stopped** so Arr will treat them as ready; import is a same-share rename (hardlinks off). Rebuild so the banner says **0.2.32**.
+
 ## 0.2.31
 
 - The wait screen could stay on **Could not finish connecting search** with Sonarr `MinimumFreeSpaceWhenImporting` must be ≥ 100. **0.2.27** set that field to 0 so a NAS that reports no free space would still import; Sonarr rejects 0, and that PUT runs *before* quality profiles, so Max / Default / Anything never applied. The skip-free-space flag stays on (that is what ignores a 0-byte NAS). The number is 100. A media-management 400 no longer fails wiring. Rebuild so the banner says **0.2.31**.
