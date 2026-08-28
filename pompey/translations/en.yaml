@@ -2,14 +2,17 @@ configuration:
   plex_url:
     name: Plex address
     description: >-
+      Optional. Skip Seerr's Plex wizard by filling this and the token.
       Numeric IP where Plex listens, for example http://192.168.1.10:32400
       or http://172.30.32.1:32400 if Plex is on this same Home Assistant machine.
-      Hostnames will not resolve through Proton DNS.
+      Hostnames will not resolve through Proton DNS. Leave empty to finish
+      Plex on Seerr's first screen (use a numeric IP there too).
   plex_token:
     name: Plex token
     description: >-
-      Token from the Plex account that owns the server. Open any item on that
-      server in a browser, View Source, search for X-Plex-Token.
+      Optional. Token from the Plex account that owns the server. Open any
+      item on that server in a browser, View Source, search for X-Plex-Token.
+      Leave empty to sign into Plex from Seerr's setup wizard instead.
   source_url:
     name: Source URL
     description: Base URL of one source. Pompey does not ship a catalog; you provide this.
