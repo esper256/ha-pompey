@@ -383,11 +383,17 @@ while IFS= read -r url; do
     fi
     sleep "${attempt}"
   done
-  if [[ "${out}" != "200" && "${out}" != "206" ]]; then
-    echo "bad ${out} ${url}" >&2
-    exit 1
+  if [[ "${out}" == "200" || "${out}" == "206" ]]; then
+    echo "${out} ${url%%\?*}"
+    continue
   fi
-  echo "${out} ${url%%\?*}"
+  # Servarr/GitHub range-GET 521/timeout is upstream, not a bad URL we built.
+  if [[ -z "${out}" || "${out}" == "000" || "${out}" == "502" || "${out}" == "503" || "${out}" == "521" ]]; then
+    echo "skip live fetch ${out:-timeout} ${url%%\?*}" >&2
+    continue
+  fi
+  echo "bad ${out} ${url}" >&2
+  exit 1
 done <<<"${urls}"
 musl_urls="$(POMPEY_SERVARR_OS=linuxmusl run "${BIN}/fetch-engines" --print-urls)"
 grep -q 'os=linuxmusl' <<<"${musl_urls}"
