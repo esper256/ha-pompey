@@ -128,7 +128,7 @@ test -f "${POMPEY_CONFIG}/prowlarr/config.xml"
 test -f "${POMPEY_CONFIG}/qBittorrent/qBittorrent.conf"
 grep -q "BindAddress>127.0.0.1" "${POMPEY_CONFIG}/sonarr/config.xml"
 grep -q "BindAddress>127.0.0.1" "${POMPEY_CONFIG}/radarr/config.xml"
-grep -q "BindAddress>*</BindAddress>" "${POMPEY_CONFIG}/prowlarr/config.xml"
+grep -Fq 'BindAddress>*</BindAddress>' "${POMPEY_CONFIG}/prowlarr/config.xml"
 if grep -q "BindAddress>127.0.0.1" "${POMPEY_CONFIG}/prowlarr/config.xml"; then
   echo "Prowlarr must not bind only localhost" >&2
   exit 1
@@ -166,7 +166,7 @@ Path(sys.argv[1]).write_text(
 )
 PY
 run "${BIN}/write-engine-configs"
-grep -q "BindAddress>*</BindAddress>" "${POMPEY_CONFIG}/prowlarr/config.xml"
+grep -Fq 'BindAddress>*</BindAddress>' "${POMPEY_CONFIG}/prowlarr/config.xml"
 grep -q "keep-me" "${POMPEY_CONFIG}/prowlarr/config.xml"
 if grep -qi "AuthenticationMethod>None" "${POMPEY_CONFIG}/prowlarr/config.xml"; then
   echo "upgrade must drop AuthenticationMethod None" >&2
