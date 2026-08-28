@@ -8,6 +8,29 @@ need_proton() {
   POMPEY_STATUS_NEED_PROTON=1 pompey-status vpn "Paste the Proton WireGuard file you downloaded" 8 || true
 }
 
+# wg-quick runs resolvconf when the conf has DNS=. On HAOS that fails with
+# "signature mismatch" and rolls back wg0. Prefer a no-op resolvconf; we set
+# Proton DNS after the interface is up.
+wg_quick_up() {
+  local bindir="${POMPEY_READY}/wg-bin"
+  mkdir -p "${bindir}"
+  printf '%s\n' '#!/bin/sh' 'exit 0' >"${bindir}/resolvconf"
+  chmod 755 "${bindir}/resolvconf"
+  PATH="${bindir}:${PATH}" wg-quick up wg0
+}
+
+bring_up_wg0() {
+  wg-quick down wg0 >/dev/null 2>&1 || true
+  bashio::log.info "Bringing up wg0"
+  POMPEY_STATUS_NEED_PROTON=0 pompey-status vpn "Bringing up the Proton tunnel" 10 || true
+  if wg_quick_up; then
+    return 0
+  fi
+  bashio::log.warning "Kernel WireGuard failed; trying wireguard-go"
+  export WG_QUICK_USERSPACE_IMPLEMENTATION=wireguard-go
+  wg_quick_up
+}
+
 if [[ "${POMPEY_FAKE_VPN:-}" == "1" ]]; then
   bashio::log.info "Fake wg0 (agent/dev): not Proton"
   pompey-status vpn "Bringing up fake wg0" 10 || true
@@ -21,19 +44,18 @@ if [[ "${POMPEY_FAKE_VPN:-}" == "1" ]]; then
   exit 1
 fi
 
-# Stay running while we wait. Exiting would halt the container (wireguard/finish).
+# Stay running while we wait. Ingress is Supervisor INPUT (not the kill
+# switch). Exiting used to halt the whole container and take nginx with it.
 until apply-vpn-config; do
   need_proton
   sleep 2
 done
 
-bashio::log.info "Bringing up wg0"
-POMPEY_STATUS_NEED_PROTON=0 pompey-status vpn "Bringing up the Proton tunnel" 10 || true
-if ! wg-quick up wg0; then
-  bashio::log.warning "Kernel WireGuard failed; trying wireguard-go"
-  export WG_QUICK_USERSPACE_IMPLEMENTATION=wireguard-go
-  wg-quick up wg0
-fi
+until bring_up_wg0; do
+  bashio::log.error "wg-quick could not bring up wg0; Ingress stays up. Retrying. Open the app log (do not send the Proton key)."
+  POMPEY_STATUS_NEED_PROTON=0 pompey-status vpn "Proton tunnel could not start" 10 "WireGuard could not bring up wg0. Open the app log (do not send the Proton key)." || true
+  sleep 5
+done
 
 printf 'nameserver %s\n' "${POMPEY_WG_DNS}" >/etc/resolv.conf
 # Filter tables sometimes appear only after the interface exists. Retry once.

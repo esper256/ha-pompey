@@ -2,7 +2,7 @@
 
 **Pompey** is a Home Assistant OS app: one sidebar entry, one search. The household face is [Seerr](https://seerr.dev/). Pompey is the box around it — Proton WireGuard, kill switch, hidden engines, no extra consoles.
 
-Version **0.2.7**. We do not publish a container image. Supervisor builds this app on the machine. After the tunnel is up, the app fetches the official programs it needs.
+Version **0.2.8**. We do not publish a container image. Supervisor builds this app on the machine. After the tunnel is up, the app fetches the official programs it needs.
 
 The plan is [VISION.md](VISION.md). Operator steps (including Plex in another Docker) are [pompey/DOCS.md](pompey/DOCS.md).
 
@@ -21,14 +21,14 @@ Copy `pompey/` into `/addons`, or add `https://github.com/esper256/ha-pompey` as
 
 **Not yet a household app.** A request becoming a file on disk that Plex notices has not been proven. Quality profiles are engine defaults (no Recyclarr). If search is a blank page after the wait screen, that is the bug to send back.
 
-## What is done (0.2.7)
+## What is done (0.2.8)
 
 | Piece | What “done” means |
 | --- | --- |
 | Addon skeleton | Supervisor app: Ingress, `NET_ADMIN`, `/dev/net/tun`. HA options are Plex address/token and one source |
 | Store + wait branding | Square `icon.png` for the app list; rectangular `logo.png` for the store page and the loading/wait screen |
 | Wait screen | Logo + progress (tunnel → download → start → connect), then reload into search. If Proton is missing, a paste box for the `.conf` you downloaded |
-| Proton + kill switch | WireGuard from that pasted Proton file; `PersistentKeepalive`; internet OUTPUT only on `wg0` (nft/iptables-nft, then legacy); RFC1918 LAN (Plex, NAS) allowed. If this host has no filter table, the tunnel still starts |
+| Proton + kill switch | WireGuard from that pasted Proton file; `PersistentKeepalive`; internet **OUTPUT** only on `wg0` (nft/iptables-nft, then legacy). Ingress from Supervisor is INPUT and stays up if the tunnel fails. RFC1918 LAN (Plex, NAS) allowed |
 | Runtime fetch | After the tunnel is up: Seerr, TV/movie/indexer engines, download engine. Retries on failure. Supervisor docker start/stop timeout is 300s (schema max); the wait screen covers the longer fetch |
 | Ingress + Seerr | Wait page, then nginx → a rewriter that prefixes `/_next` and `/api/v1` with `X-Ingress-Path` so Next.js works under Ingress. Cookies are scoped to that prefix. |
 | Local wiring | Engines on localhost; Prowlarr syncs the source to TV/movie engines; Seerr pointed at them and auto-approves. If Plex is missing, a local Seerr account is created so TV/movie engines still get wired. |

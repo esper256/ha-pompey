@@ -28,8 +28,10 @@ tr -d '\r' < "${SRC}" > "${DST}"
 chmod 600 "${DST}"
 
 # Proton/router PostUp iptables snippets break wg-quick on hosts with no
-# legacy filter table. We apply our own kill switch.
-grep -viE '^[[:space:]]*(PostUp|PostDown|PreUp|PreDown)[[:space:]]*=' "${DST}" >"${DST}.clean" || true
+# legacy filter table. DNS= makes wg-quick call resolvconf, which aborts on
+# Docker/HAOS /etc/resolv.conf ("signature mismatch") and deletes wg0.
+# We write Proton DNS ourselves and apply our own kill switch.
+grep -viE '^[[:space:]]*(PostUp|PostDown|PreUp|PreDown|DNS)[[:space:]]*=' "${DST}" >"${DST}.clean" || true
 mv "${DST}.clean" "${DST}"
 chmod 600 "${DST}"
 

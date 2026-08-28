@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.8
+
+- `wg-quick` no longer dies on `resolvconf: signature mismatch` for `/etc/resolv.conf` (Proton `DNS=` plus our rewrite of that file). Kernel WireGuard was actually working; resolvconf rolled `wg0` back and the WireGuard service **halted the whole container**, which took Ingress nginx with it (Home Assistant then showed an nginx error). Runtime conf strips `DNS=` (we still set Proton `10.2.0.1` ourselves); `wg-quick` gets a no-op resolvconf; a failed tunnel **leaves the wait screen up**. Kill switch is OUTPUT only — Supervisor Ingress to 8099 is INPUT and was never blocked.
+
 ## 0.2.7
 
 - App log is quieter and every Pompey line has a time. The wait screen polled `/status.json` once a second and nginx wrote the full User-Agent on each hit; those polls (and logo/static assets) are no longer logged. Python services (`pompey-setup`, ingress rewriter, wire-stack) use the same `[HH:MM:SS] LEVEL:` prefix as bashio. NAT-PMP and wiring retries no longer repeat the same warning on every loop.

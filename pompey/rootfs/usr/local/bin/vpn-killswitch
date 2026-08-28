@@ -2,6 +2,7 @@
 # shellcheck shell=bash
 # Apply an OUTPUT kill switch that does not depend on the default route.
 # Allowed: loopback, wg0, established, HA/LAN CIDRs, UDP handshake to Proton.
+# OUTPUT only: Supervisor Ingress to :8099 is INPUT and is not blocked.
 #
 # Home Assistant OS is nftables. iptables-legacy needs iptable_filter, which
 # this container does not have (/lib/modules is missing). Prefer a backend
