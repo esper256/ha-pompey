@@ -2,7 +2,7 @@
 
 ## 0.2.23
 
-- The app log is the mux for every hidden service (s6 already joins their stdout). Each line is tagged with the service name. You see when a service **starts** and **stops**. qBittorrent’s file log — previously invisible from Home Assistant — is copied in. Radarr, Sonarr, Prowlarr, Seerr, and nginx were already in this log and now carry the same tag so an error is not anonymous. After wiring, the log lists each Prowlarr source and whether search is on.
+- The app log is the mux for every hidden service (s6 already joins their stdout). Each line is tagged with the service name. You see when a service **starts** and **stops**. qBittorrent’s file log — previously invisible from Home Assistant — is copied in. Radarr, Sonarr, Prowlarr, Seerr, and nginx were already in this log and now carry the same tag so an error is not anonymous. After wiring, the log lists each Prowlarr source and whether search is on. Enabled sources with search switched off are turned back on. Titles that are still missing a file are searched again, so a request that hit too few indexers does not wait for the next Arr cycle.
 
 ## 0.2.22
 
