@@ -701,6 +701,24 @@ class IngressRewrite(unittest.TestCase):
         regex_escaped = r"re=/\/login/i"
         self.assertEqual(ing.rewrite_seerr_body(regex_escaped, prefix), regex_escaped)
 
+    def test_escaped_next_data_regex_stays_valid(self):
+        """Next.js getNextPathnameInfo ships /^\\/_next\\/data\\//. Naive /_next
+        replace turns that into /^\\/api/hassio_ingress/tok/_next\\/data\\//
+        (invalid flags) and the Plex button is a no-op."""
+        prefix = "/api/hassio_ingress/tok"
+        chunk = (
+            'l.pathname.replace(/^\\/_next\\/data\\//,"").replace(/\\.json$/,"")'
+            ';window.open("/login/plex/loading",e,"scrollbars=yes")'
+        )
+        out = ing.rewrite_seerr_body(chunk, prefix)
+        self.assertIn(r"/^\/api\/hassio_ingress\/tok\/_next\/data\//", out)
+        self.assertNotIn(r"/^\/api/hassio_ingress", out)
+        self.assertNotIn(r"/^\/_next\/data\//", out)
+        self.assertIn(f'window.open("{prefix}/login/plex/loading"', out)
+        again = ing.rewrite_seerr_body(out, prefix)
+        self.assertEqual(out, again)
+        self.assertEqual(out.count(prefix), again.count(prefix))
+
     def test_empty_prefix_leaves_html(self):
         html = '<script src="/_next/static/x.js"></script>'
         self.assertEqual(ing.rewrite_seerr_body(html, ""), html)

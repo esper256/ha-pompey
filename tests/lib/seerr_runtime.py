@@ -193,3 +193,25 @@ class SeerrProcess:
     def settings(self) -> dict:
         path = self.config / "settings.json"
         return json.loads(path.read_text(encoding="utf-8"))
+
+
+def node_check(root: Path, text: str, name: str = "pompey-rewrite-check.js") -> subprocess.CompletedProcess:
+    """Parse JS with the image's musl node (host glibc node is the wrong ABI)."""
+    check = root / name
+    check.write_text(text, encoding="utf-8")
+    try:
+        return subprocess.run(
+            [
+                "sudo",
+                "-n",
+                "chroot",
+                str(root),
+                "/usr/local/bin/node",
+                "--check",
+                f"/{name}",
+            ],
+            capture_output=True,
+            text=True,
+        )
+    finally:
+        check.unlink(missing_ok=True)

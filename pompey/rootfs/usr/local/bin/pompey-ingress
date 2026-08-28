@@ -69,9 +69,36 @@ def ingress_prefix(headers) -> str:
 
 
 def _replace_unprefixed(text: str, old: str, new: str) -> str:
+    """Replace old with new, skipping already-prefixed hits and escaped slashes.
+
+    Next.js ships regexes like /^\\/_next\\/data\\//. A naive /_next replace
+    turns that into /^\\/api/hassio_ingress/tok/_next\\/data\\// which is
+    invalid (the regex ends at /api). Skip a match whose '/' is escaped so
+    the later \\/_next pass can prefix it as a regex-safe path.
+    """
     if not old or old == new:
         return text
-    return new.join(part.replace(old, new) for part in text.split(new))
+
+    def replace_part(part: str) -> str:
+        if not old.startswith("/"):
+            return part.replace(old, new)
+        out: list[str] = []
+        i = 0
+        n = len(old)
+        while True:
+            j = part.find(old, i)
+            if j < 0:
+                out.append(part[i:])
+                return "".join(out)
+            if j > 0 and part[j - 1] == "\\":
+                out.append(part[i : j + n])
+                i = j + n
+                continue
+            out.append(part[i:j])
+            out.append(new)
+            i = j + n
+
+    return new.join(replace_part(part) for part in text.split(new))
 
 
 def rewrite_seerr_body(text: str, prefix: str) -> str:

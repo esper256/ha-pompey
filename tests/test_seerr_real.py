@@ -10,12 +10,14 @@ from __future__ import annotations
 
 import json
 import os
-import subprocess
+import re
 import sys
 import tempfile
+import threading
 import unittest
 import urllib.error
 import urllib.request
+from http.server import ThreadingHTTPServer
 from pathlib import Path
 
 os.environ["POMPEY_WAIT_TRIES"] = "40"
@@ -39,45 +41,112 @@ class RealSeerrAssets(unittest.TestCase):
         cls.root = seerr.ensure_unpacked()
 
     def test_rewritten_client_js_is_still_valid(self):
-        """Global /login replace turned /login/i into invalid JS. Check real chunks."""
+        """Ingress rewrite must not produce invalid JS. /login/i was one case;
+        /^\\/_next\\/data\\// is the one that still no-op'd Configure Plex."""
         static = self.root / "app/.next/static"
         self.assertTrue(static.is_dir(), f"missing {static}")
         checked = 0
-        with_login = 0
+        escaped_next = 0
         for path in static.rglob("*.js"):
             text = path.read_text(encoding="utf-8", errors="replace")
-            if "/login" not in text and "/setup" not in text:
+            interesting = (
+                "/login" in text
+                or "/setup" in text
+                or r"\/_next" in text
+                or "/_next" in text
+            )
+            if not interesting:
                 continue
-            if "/login/i" in text or "/setup/" in text and "/setup" in text:
-                with_login += 1
             out = ing.rewrite_seerr_body(text, PREFIX)
             self.assertNotIn(PREFIX + "/login/i", out, path.name)
             self.assertNotIn(PREFIX + "/setup/g", out, path.name)
-            check = self.root / "pompey-rewrite-check.js"
-            check.write_text(out, encoding="utf-8")
-            try:
-                done = subprocess.run(
-                    [
-                        "sudo",
-                        "-n",
-                        "chroot",
-                        str(self.root),
-                        "/usr/local/bin/node",
-                        "--check",
-                        "/pompey-rewrite-check.js",
-                    ],
-                    capture_output=True,
-                    text=True,
+            self.assertNotIn(r"/^\/api/hassio_ingress", out, path.name)
+            if r"\/_next" in text:
+                escaped_next += 1
+                self.assertIn(
+                    r"\/api\/hassio_ingress\/tok\/_next",
+                    out,
+                    path.name,
                 )
-            finally:
-                check.unlink(missing_ok=True)
+            parse = "/login" in text or "/setup" in text or r"\/_next" in text
+            if not parse:
+                continue
+            done = seerr.node_check(self.root, out)
             self.assertEqual(
                 done.returncode,
                 0,
                 f"{path.name} became invalid JS under Ingress rewrite:\n{done.stderr}",
             )
             checked += 1
-        self.assertGreater(checked, 0, "Seerr client JS had no /login or /setup strings")
+        self.assertGreater(checked, 0, "Seerr client JS had no /login, /setup, or \\/_next")
+        self.assertGreater(
+            escaped_next,
+            0,
+            "this Seerr image has no escaped /_next regex; the Plex bug may have moved",
+        )
+
+
+class RealSeerrIngress(unittest.TestCase):
+    """Serve /setup the way HA Ingress does and parse every script the page loads."""
+
+    @classmethod
+    def setUpClass(cls):
+        import preview_seerr_ingress as preview
+
+        cls.seerr = seerr.SeerrProcess().start()
+        os.environ["SEERR_URL"] = cls.seerr.url
+        os.environ["INGRESS_PATH"] = PREFIX
+        handler = preview.wrap(ing, PREFIX)
+        cls.httpd = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+        cls.thread = threading.Thread(target=cls.httpd.serve_forever, daemon=True)
+        cls.thread.start()
+        host, port = cls.httpd.server_address
+        cls.base = f"http://{host}:{port}{PREFIX}"
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.httpd.shutdown()
+        cls.httpd.server_close()
+        cls.seerr.stop()
+
+    def test_setup_page_scripts_parse(self):
+        html = urllib.request.urlopen(self.base + "/setup", timeout=15).read().decode()
+        self.assertIn("Configure Plex", html)
+        self.assertIn(PREFIX + "/_next/", html)
+        srcs = re.findall(r'(?:src|href)="([^"]+\.js[^"]*)"', html)
+        self.assertTrue(srcs, "setup HTML had no script src")
+        static = self.seerr.root / "app/.next/static"
+        paths = []
+        for src in srcs:
+            if src.startswith(PREFIX):
+                paths.append(src[len(PREFIX) :])
+            elif src.startswith("/"):
+                paths.append(src)
+        for path in static.rglob("*.js"):
+            text = path.read_text(encoding="utf-8", errors="replace")
+            if r"\/_next" in text or "/login/plex/loading" in text:
+                paths.append("/_next/static/" + path.relative_to(static).as_posix())
+        seen = []
+        checked_escaped = False
+        for rel in list(dict.fromkeys(paths)):
+            body = urllib.request.urlopen(self.base + rel, timeout=15).read().decode(
+                "utf-8", "replace"
+            )
+            self.assertNotIn(r"/^\/api/hassio_ingress", body, rel)
+            done = seerr.node_check(self.seerr.root, body)
+            self.assertEqual(
+                done.returncode,
+                0,
+                f"{rel} served through Ingress is invalid JS:\n{done.stderr}",
+            )
+            if r"\/api\/hassio_ingress\/tok\/_next\/data" in body:
+                checked_escaped = True
+            seen.append(rel)
+        self.assertTrue(seen, "no JS fetched through Ingress")
+        self.assertTrue(
+            checked_escaped,
+            "escaped /_next data regex chunk was not served through Ingress",
+        )
 
 
 class RealSeerrWire(unittest.TestCase):

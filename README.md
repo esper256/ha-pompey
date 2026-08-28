@@ -4,7 +4,7 @@ Search for a movie or TV show in Home Assistant. Confirm if we need you. It land
 
 Pompey is one Home Assistant OS app. The sidebar is search. Downloads, matching, and the VPN stay behind that screen. All internet from this app uses Proton WireGuard. If the tunnel is down, internet is dropped.
 
-This is the user guide for the product we are building. It describes the journey as it should feel. [What is not ready yet](#what-is-not-ready-yet) is honest about the current cut (**0.2.14**). The [roadmap](#roadmap) is how we close the gap.
+This is the user guide for the product we are building. It describes the journey as it should feel. [What is not ready yet](#what-is-not-ready-yet) is honest about the current cut (**0.2.15**). The [roadmap](#roadmap) is how we close the gap.
 
 ## How a day with it should feel
 
@@ -164,11 +164,11 @@ Proton DNS stays `10.2.0.1`. LAN to Plex and NAS (RFC1918 plus Supervisor’s `1
 
 ### Your source
 
-If the indexer rotates keys or URLs, change **Source URL** / **Source key** in the app options and restart Pompey. Multiple sources from the UI, without editing options, is roadmap.
+A private tracker with a stable API key is set-and-forget. Prowlarr copies that one source to Radarr and Sonarr; nothing in the Arr stack (and not Recyclarr, which is quality profiles) rotates indexers for you. Public indexers die, change URLs, and hide behind Cloudflare — those are always in flux, and Pompey does not pick replacements. If your key or URL does rotate, change **Source URL** / **Source key** in the app options and restart. Multiple sources from the UI, without editing options, is roadmap.
 
 ## What is not ready yet
 
-The journey above is the target. **0.2.14** is a real Home Assistant OS install of that box, not the finished household app.
+The journey above is the target. **0.2.15** is a real Home Assistant OS install of that box, not the finished household app.
 
 | In the guide | On the machine today |
 | --- | --- |
@@ -185,7 +185,7 @@ The journey above is the target. **0.2.14** is a real Home Assistant OS install 
 | Jellyfin | Plex only. |
 | Use this from outside Home Assistant’s login | Out of scope. The sidebar is the access control. |
 
-If search is a blank page after the wait screen, or the Plex button on setup does nothing, that is a bug — send the log. Rebuild so the banner says **0.2.14** if you are on an older wait screen.
+If search is a blank page after the wait screen, or the Plex button on setup does nothing, that is a bug — send the log. Rebuild so the banner says **0.2.15** if you are on an older wait screen.
 
 ## Roadmap
 
@@ -221,7 +221,7 @@ App config lives in `/addon_configs/<id>_pompey/`. Fetched engines live in the a
 
 - Wait screen stuck on Proton: the `.conf` is incomplete, or this host cannot create `wg0`. Paste the full file. Check the log for WireGuard, not for Seerr.
 - Wait screen stuck after Proton: engine download or wiring. Log lines are stamped with a time. Do not send keys.
-- Sidebar is search but Plex button does nothing: you need **0.2.14** or newer (Ingress used to break Seerr’s `/login` regex).
+- Sidebar is search but Plex button does nothing: you need **0.2.15** or newer (Ingress used to break Next.js `/_next` regexes in minified chunks).
 - Search never finds releases: source URL/key, and give wiring a minute after the Plex wizard (Arr is connected after the first admin exists).
 - Plex wizard cannot see the server: numeric IP, port 32400 published, LAN not blocked.
 
