@@ -25,6 +25,28 @@ if bashio::config.has_value 'wireguard_private_key' \
   HAS_FIELDS=true
 fi
 
+if [[ "${POMPEY_FAKE_VPN:-}" == "1" ]]; then
+  bashio::log.info "Fake VPN (agent/dev): no Proton required"
+  pompey-status vpn "Fake wg0" 10 || true
+  if [[ "${HAS_FILE}" != "true" && "${HAS_FIELDS}" != "true" ]]; then
+    mkdir -p "${POMPEY_CONFIG}/wireguard"
+    umask 077
+    cat > "${WG_FILE}" <<'EOF'
+[Interface]
+PrivateKey = AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+Address = 10.2.0.2/32
+DNS = 10.2.0.1
+
+[Peer]
+PublicKey = BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB=
+AllowedIPs = 0.0.0.0/0
+Endpoint = 127.0.0.1:1
+EOF
+    HAS_FILE=true
+    bashio::log.info "Fake VPN: wrote a stub WireGuard file (not Proton)"
+  fi
+fi
+
 if [[ "${HAS_FILE}" != "true" && "${HAS_FIELDS}" != "true" ]]; then
   pompey-status vpn "Need a Proton WireGuard config" 5 "Put a Proton WireGuard file in the app config share, or fill private key, address, peer public key, and endpoint." || true
   bashio::exit.nok "Need a Proton WireGuard config: put it at ${WG_FILE} or fill private key, address, peer public key, and endpoint."

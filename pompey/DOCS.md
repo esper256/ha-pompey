@@ -2,6 +2,8 @@
 
 Search for a movie or TV show from the Home Assistant sidebar. Confirm if we need you. It lands in the right library and Plex notices.
 
+**This is 0.2.0 experimental.** The [root README](../README.md) lists what is done vs not. Do not install this for the household yet. A first Home Assistant OS try is only useful if you have Proton + Plex + a source and want to report what breaks.
+
 All internet from this app uses Proton WireGuard. If the tunnel is down, internet is dropped.
 
 This app is **not** published as a container image. Copy `pompey/` into `/addons` and let Supervisor build it on the machine. After the tunnel is up, Pompey downloads the household search UI (Seerr) and the hidden engines onto the config share. First start can take several minutes and a few hundred megabytes.
@@ -39,7 +41,7 @@ Do not publish download peer ports on the Home Assistant host.
 
 ## What you see
 
-Open **Pompey** in the sidebar. The first boot shows a wait screen with a progress bar: Proton tunnel, download, start engines, connect search. After that, the sidebar is the search UI.
+Open **Pompey** in the sidebar. The first boot shows a wait screen with a progress bar: Proton tunnel, download, start engines, connect search. When that finishes, the same sidebar entry reloads into the search UI (Seerr). You should not need a second bookmark.
 
 If the bar stays on the tunnel step, the Proton handshake is not up yet (missing/invalid WireGuard file is the usual cause). Opening `index.html` as a file in the editor is only that wait screen and will never become search.
 
@@ -73,3 +75,5 @@ Home Assistant OS is not required. Supervisor would write `/data/options.json` f
 ```bash
 bash tests/run.sh
 ```
+
+Tests never start the torrent client or wait on a download. CI is `tests/run.sh` only.

@@ -8,13 +8,27 @@ until [[ -f "${POMPEY_READY}/engines-ready" ]]; do
   sleep 2
 done
 
-NODE="${POMPEY_ENGINES}/seerr/usr/local/bin/node"
+NODE="${POMPEY_NODE:-}"
 APP="${POMPEY_ENGINES}/seerr/app"
-if [[ ! -x "${NODE}" ]]; then
-  NODE="$(find "${POMPEY_ENGINES}/seerr" -type f -name node -perm -111 | head -n1)"
+
+node_works() {
+  local n="$1"
+  [[ -n "${n}" && -x "${n}" ]] || return 1
+  "${n}" -e 'process.exit(0)' >/dev/null 2>&1
+}
+
+if ! node_works "${NODE}"; then
+  NODE="${POMPEY_ENGINES}/seerr/usr/local/bin/node"
 fi
-if [[ -z "${NODE}" || ! -d "${APP}" ]]; then
-  bashio::exit.nok "Seerr unpack missing node or /app"
+if ! node_works "${NODE}"; then
+  NODE="$(find "${POMPEY_ENGINES}/seerr" -type f -name node -perm -111 2>/dev/null | head -n1 || true)"
+fi
+# Alpine image node is musl; this Ubuntu VM needs a glibc node (host /usr/bin/node).
+if ! node_works "${NODE}"; then
+  NODE="$(command -v node || true)"
+fi
+if ! node_works "${NODE}" || [[ ! -d "${APP}" ]]; then
+  bashio::exit.nok "Seerr unpack missing a working node or /app"
 fi
 
 mkdir -p "${POMPEY_CONFIG}/seerr"

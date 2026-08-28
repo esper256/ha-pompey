@@ -1,0 +1,183 @@
+#!/usr/bin/env bash
+# shellcheck shell=bash
+# Agent/dev stand-in for Proton WireGuard.
+#
+# wg0 lives in a netns so it is a real hop. The peer on the host NATs out the
+# default adapter. Same interface name qBittorrent binds. Not Proton.
+set -euo pipefail
+
+export PATH="/usr/sbin:/sbin:${PATH}"
+
+WG_IFACE="${WG_IFACE:-wg0}"
+PEER_IFACE="${POMPEY_FAKE_VPN_PEER:-pompey-wan}"
+WG_ADDR="${POMPEY_FAKE_VPN_ADDR:-10.2.0.2/24}"
+PEER_ADDR="${POMPEY_FAKE_VPN_PEER_ADDR:-10.2.0.1/24}"
+WG_NET="${POMPEY_FAKE_VPN_NET:-10.2.0.0/24}"
+NS="${POMPEY_FAKE_VPN_NETNS:-pompey-dev}"
+STATE="${POMPEY_FAKE_VPN_STATE:-/tmp/pompey-fake-vpn.state}"
+
+log() {
+  if declare -F bashio::log.info >/dev/null 2>&1; then
+    bashio::log.info "$*"
+  else
+    printf 'INFO: %s\n' "$*"
+  fi
+}
+
+die() {
+  if declare -F bashio::exit.nok >/dev/null 2>&1; then
+    bashio::exit.nok "$*"
+  fi
+  printf 'ERROR: %s\n' "$*" >&2
+  exit 1
+}
+
+run() {
+  if [[ "$(id -u)" -eq 0 ]]; then
+    "$@"
+  else
+    sudo -n "$@"
+  fi
+}
+
+ns() {
+  run ip netns exec "${NS}" "$@"
+}
+
+ipt_one() {
+  local bin="$1"
+  shift
+  command -v "${bin}" >/dev/null 2>&1 || return 1
+  run "${bin}" "$@"
+}
+
+ipt_both() {
+  local nft_ok=1 legacy_ok=1
+  ipt_one iptables "$@" || nft_ok=0
+  ipt_one iptables-legacy "$@" || legacy_ok=0
+  [[ "${nft_ok}" -eq 1 || "${legacy_ok}" -eq 1 ]]
+}
+
+ensure_nat() {
+  local def="$1"
+  ipt_both -t nat -C POSTROUTING -s "${WG_NET}" -o "${def}" -j MASQUERADE 2>/dev/null \
+    || ipt_both -t nat -A POSTROUTING -s "${WG_NET}" -o "${def}" -j MASQUERADE
+  ipt_both -C FORWARD -i "${PEER_IFACE}" -o "${def}" -j ACCEPT 2>/dev/null \
+    || ipt_both -A FORWARD -i "${PEER_IFACE}" -o "${def}" -j ACCEPT
+  ipt_both -C FORWARD -i "${def}" -o "${PEER_IFACE}" -j ACCEPT 2>/dev/null \
+    || ipt_both -A FORWARD -i "${def}" -o "${PEER_IFACE}" -j ACCEPT
+}
+
+drop_nat() {
+  local def="$1"
+  ipt_both -t nat -D POSTROUTING -s "${WG_NET}" -o "${def}" -j MASQUERADE 2>/dev/null || true
+  ipt_both -D FORWARD -i "${PEER_IFACE}" -o "${def}" -j ACCEPT 2>/dev/null || true
+  ipt_both -D FORWARD -i "${def}" -o "${PEER_IFACE}" -j ACCEPT 2>/dev/null || true
+}
+
+default_iface() {
+  ip route show default 2>/dev/null | awk '{ for (i = 1; i <= NF; i++) if ($i == "dev") { print $(i + 1); exit } }'
+}
+
+write_state() {
+  umask 077
+  cat >"${STATE}" <<EOF
+WG_IFACE=${WG_IFACE}
+PEER_IFACE=${PEER_IFACE}
+NS=${NS}
+DEFAULT_IFACE=${1}
+WG_HOST=${2}
+EOF
+}
+
+ns_exists() {
+  ip netns list 2>/dev/null | awk '{ print $1 }' | grep -qx "${NS}"
+}
+
+up() {
+  local def host
+  def="$(default_iface)"
+  [[ -n "${def}" ]] || die "pompey-dev-vpn: no default route to NAT through"
+  host="${WG_ADDR%%/*}"
+
+  if ns_exists && ns ip link show "${WG_IFACE}" >/dev/null 2>&1; then
+    log "Fake ${WG_IFACE} already up in netns ${NS}"
+    return 0
+  fi
+  if ip link show "${WG_IFACE}" >/dev/null 2>&1; then
+    die "pompey-dev-vpn: ${WG_IFACE} exists on the host (refusing to clobber)"
+  fi
+
+  run sysctl -w net.ipv4.ip_forward=1 >/dev/null
+  run sysctl -w net.ipv4.conf.all.rp_filter=2 >/dev/null 2>/dev/null || true
+  run sysctl -w net.ipv4.conf.default.rp_filter=2 >/dev/null 2>/dev/null || true
+
+  run ip netns add "${NS}"
+  # systemd-resolved's 127.0.0.53 is on the host loopback, not this netns.
+  run mkdir -p "/etc/netns/${NS}"
+  printf 'nameserver 1.1.1.1\nnameserver 8.8.8.8\n' | run tee "/etc/netns/${NS}/resolv.conf" >/dev/null
+  run ip link add "${WG_IFACE}" type veth peer name "${PEER_IFACE}"
+  run ip link set "${WG_IFACE}" netns "${NS}"
+  ns ip addr add "${WG_ADDR}" dev "${WG_IFACE}"
+  ns ip link set "${WG_IFACE}" up
+  ns ip link set lo up
+  ns ip route add default via "${PEER_ADDR%%/*}"
+  ns sysctl -w net.ipv4.conf.all.rp_filter=2 >/dev/null 2>/dev/null || true
+
+  run ip addr add "${PEER_ADDR}" dev "${PEER_IFACE}"
+  run ip link set "${PEER_IFACE}" up
+  run sysctl -w "net.ipv4.conf.${PEER_IFACE}.rp_filter=2" >/dev/null 2>/dev/null || true
+  run sysctl -w "net.ipv4.conf.${PEER_IFACE}.forwarding=1" >/dev/null 2>/dev/null || true
+
+  ensure_nat "${def}"
+  write_state "${def}" "${host}"
+  log "Fake ${WG_IFACE} up in netns ${NS} (${WG_ADDR}, NAT out ${def}). Not Proton."
+}
+
+down() {
+  local def
+  if [[ -f "${STATE}" ]]; then
+    # shellcheck disable=SC1090
+    source "${STATE}"
+    def="${DEFAULT_IFACE:-}"
+  else
+    def="$(default_iface)"
+  fi
+  if [[ -n "${def:-}" ]]; then
+    drop_nat "${def}"
+  fi
+  if ip link show "${PEER_IFACE}" >/dev/null 2>&1; then
+    run ip link del "${PEER_IFACE}" || true
+  fi
+  if ns_exists; then
+    run ip netns del "${NS}" || true
+  fi
+  run rm -rf "/etc/netns/${NS}" 2>/dev/null || true
+  rm -f "${STATE}"
+  log "Fake ${WG_IFACE} down"
+}
+
+status() {
+  ns_exists || return 1
+  ns ip -o addr show "${WG_IFACE}"
+  ns ip route
+}
+
+exec_ns() {
+  ns_exists || die "pompey-dev-vpn: netns ${NS} is not up"
+  ns "$@"
+}
+
+cmd="${1:-up}"
+case "${cmd}" in
+  up) up ;;
+  down) down ;;
+  status) status ;;
+  exec)
+    shift
+    exec_ns "$@"
+    ;;
+  *)
+    die "usage: pompey-dev-vpn up|down|status|exec CMD..."
+    ;;
+esac

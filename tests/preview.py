@@ -4,8 +4,8 @@
   python3 tests/preview.py
 
 Then open http://127.0.0.1:8099/ — the bar moves through the same steps the
-addon reports. This is the wait screen, not Seerr; Seerr only runs inside the
-Home Assistant Alpine container after Proton is up.
+addon reports. This is the wait screen, not Seerr. The real addon reloads
+this page into Seerr once engines are wired (`status.json` has `"search": true`).
 """
 from __future__ import annotations
 

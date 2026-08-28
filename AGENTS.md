@@ -18,9 +18,10 @@ In this Cursor VM there is no Supervisor. Starting Docker here is only so an age
 | Who starts the container | Supervisor (one container, `NET_ADMIN`, `/dev/net/tun`) | Nobody, unless an agent is checking the Dockerfile. The operator never starts it. |
 | `dockerd` | Already the HAOS host. Not something Pompey starts. | Optional, this VM only. Packages persist; the daemon process does not. |
 | Config | Supervisor writes `/data/options.json` from the app options UI | We supply [`tests/options.json`](tests/options.json) ourselves |
-| VPN / internet | All traffic on Proton `wg0`, else dropped | No Proton, no `/dev/net/tun` — the real stack will not boot |
-| What the household sees | Wait screen, then Seerr on Ingress | [`tests/preview.py`](tests/preview.py) is the wait screen only. Seerr is Alpine/musl and does not run on this Ubuntu VM. |
-| Engines | Fetched at runtime onto `/data` after the tunnel is up | Fake HTTP stubs in [`tests/run.sh`](tests/run.sh) |
+| VPN / internet | All traffic on Proton `wg0`, else dropped | **Fake `wg0`**: a veth in netns `pompey-dev` that NATs out `eth0`. Same interface name the download engine binds. Not Proton. Set `POMPEY_FAKE_VPN=1`. Do **not** apply the OUTPUT DROP kill switch here (it would kill the agent). Keep host DNS. |
+| What the household sees | Wait screen, then Seerr on Ingress | [`tests/preview.py`](tests/preview.py) is the wait screen. Seerr’s image is Alpine/musl; if you unpack it, run it with the host glibc `node`. |
+| Engines | musl tarballs after the tunnel is up | glibc (`os=linux`) tarballs on Ubuntu, cached under `~/.cache/pompey/engines`. Tests skip unpacking the torrent client (`POMPEY_SKIP_QBIT=1`). |
+| Sources / Plex | Operator URL+key and a real Plex | Empty source + empty Plex token. Tests never speak BitTorrent. |
 
 Shipping path: copy `pompey/` into `/addons`. Supervisor builds locally. That is the only delivery path.
 
@@ -34,14 +35,23 @@ s6-overlay: `rootfs/etc/cont-init.d/*` once, then `rootfs/etc/services.d/*`.
 
 ## What agents should run here (no HAOS)
 
-Preferred — no Docker, no Supervisor:
+Fast, no Docker, no engines download:
 
 ```bash
-bash tests/run.sh              # options.json + bashio stub + fake engines
+bash tests/run.sh              # options.json + bashio stub + fake engines + fake-wg0 smoke
 python3 tests/preview.py       # wait-screen progress UI at http://127.0.0.1:8099/
 ```
 
-That is enough to test wiring, status, and the wait screen. It is **not** Seerr and **not** a Proton tunnel. Opening `index.html` as a file is also only the wait screen.
+Realistic stack (still no Proton, still no HAOS). Needs passwordless sudo + `iproute2` for a veth named `wg0`:
+
+```bash
+sudo apt-get install -y iproute2 iptables libicu74
+bash tests/integration.sh      # The Wild Robot via Radarr TMDB lookup on fake wg0
+```
+
+That downloads official Radarr/Sonarr/Prowlarr into `~/.cache/pompey/engines` on first run. It looks the movie up on TMDB and adds it to Radarr **without searching or downloading**. Do not start the torrent client, do not wait on a grab, and do not add that wait to CI (`tests/run.sh` only). Seerr unpack is skipped unless `POMPEY_SKIP_SEERR=0` and `crane` is on PATH (then use host `node`, not Alpine’s).
+
+Opening `index.html` as a file is only the wait screen.
 
 ### Optional: compile the Dockerfile (not a product boot)
 
@@ -57,7 +67,7 @@ This VM may need `/etc/docker/daemon.json` with `storage-driver: fuse-overlayfs`
 docker build --build-arg BUILD_ARCH=amd64 -t local/pompey:dev pompey/
 ```
 
-A full `docker run` of that image still dies without bashio + Proton (see `00-banner.sh`). Do not spend the session trying to fake Supervisor.
+A full `docker run` of that image still dies without bashio + Proton (see `00-banner.sh`) unless you pass `POMPEY_FAKE_VPN=1` and still stub bashio. Do not spend the session trying to fake Supervisor.
 
 To peek at the wait HTML from inside the image, run only nginx and relax Ingress `allow 172.30.32.2`. That is a screenshot helper, not the household search UI.
 
@@ -70,4 +80,4 @@ shellcheck pompey/rootfs/etc/cont-init.d/*.sh \
   pompey/rootfs/usr/local/bin/*
 ```
 
-Scripts use `#!/command/with-contenv bashio` plus `# shellcheck shell=bash`.
+Scripts use `#!/command/with-contenv bashio` plus `# shellcheck shell=bash` (`pompey-dev-vpn` is plain bash).

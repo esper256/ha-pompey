@@ -6,6 +6,7 @@ import importlib.machinery
 import importlib.util
 import json
 import os
+import struct
 import threading
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -30,6 +31,13 @@ def load(name: str, path: Path):
 
 ws = load("wire_stack", BIN / "wire-stack")
 rr = load("route_rating", BIN / "route-rating")
+
+
+def png_wh(path: Path) -> tuple[int, int]:
+    data = path.read_bytes()
+    if data[:8] != b"\x89PNG\r\n\x1a\n" or data[12:16] != b"IHDR":
+        raise AssertionError(f"{path} is not a PNG")
+    return struct.unpack(">II", data[16:24])
 
 
 def yaml_indent2_keys(text: str, header: str) -> list[str]:
@@ -306,6 +314,25 @@ class Helpers(unittest.TestCase):
         chosen = ws.pick_plex_server(servers, "172.30.32.1")
         self.assertEqual(chosen["name"], "Home")
 
+    def test_wait_page_reloads_only_when_search_is_live(self):
+        html = (ROOT / "pompey/rootfs/usr/share/pompey/index.html").read_text()
+        self.assertIn("data.search", html)
+        self.assertIn("location.replace", html)
+        self.assertIn("Opening search", html)
+        self.assertIn('src="logo.png"', html)
+
+    def test_ha_store_icon_is_square_logo_is_wide(self):
+        icon = ROOT / "pompey/icon.png"
+        logo = ROOT / "pompey/logo.png"
+        wait = ROOT / "pompey/rootfs/usr/share/pompey/logo.png"
+        self.assertTrue(icon.is_file())
+        self.assertTrue(logo.is_file())
+        self.assertEqual(logo.read_bytes(), wait.read_bytes())
+        iw, ih = png_wh(icon)
+        lw, lh = png_wh(logo)
+        self.assertEqual(iw, ih)
+        self.assertGreater(lw, lh)
+
     def test_fill_fields(self):
         resource = {"fields": [{"name": "host", "value": ""}, {"name": "port", "value": 0}]}
         ws.fill_fields(resource, {"host": "127.0.0.1", "port": 8080})
@@ -386,7 +413,11 @@ class WireStack(unittest.TestCase):
         text = self.nginx.read_text()
         self.assertIn("proxy_pass " + os.environ["SEERR_URL"], text)
         self.assertIn("X-Forwarded-Prefix", text)
+        self.assertIn("status.json", text)
         self.assertNotIn("test-plex-token", text)
+        live = json.loads((self.ready / "status.json").read_text())
+        self.assertTrue(live["search"])
+        self.assertTrue(live["handoff"])
 
 
 class RouteRating(unittest.TestCase):
@@ -412,6 +443,11 @@ class RouteRating(unittest.TestCase):
         self.assertNotIn("Unknown", dests)
         self.assertNotIn("Already Kid", dests)
         self.assertNotIn("Adult Show", dests)
+
+
+class TestsNeverUseBitTorrent(unittest.TestCase):
+    def test_torznab_fixture_is_gone(self):
+        self.assertFalse((ROOT / "tests/dev/torznab.py").exists())
 
 
 if __name__ == "__main__":

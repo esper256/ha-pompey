@@ -32,9 +32,14 @@ fi
 
 chmod 600 "${DST}"
 
-# Proton DNS lives on the tunnel. Fail closed if wg0 is down.
-printf 'nameserver %s\n' "${DNS}" >"${POMPEY_RESOLV}"
-
 printf '%s\n' "$(bashio::config 'lan_networks')" >"${POMPEY_LAN_FILE}"
-vpn-killswitch "${DST}"
-bashio::log.info "iptables kill switch applied (internet OUTPUT only via wg0 once it exists)"
+
+if [[ "${POMPEY_FAKE_VPN:-}" == "1" ]]; then
+  # Keep host DNS. Do not DROP OUTPUT on this VM (that would kill the agent).
+  bashio::log.info "Fake VPN: skip Proton DNS rewrite and OUTPUT kill switch"
+else
+  # Proton DNS lives on the tunnel. Fail closed if wg0 is down.
+  printf 'nameserver %s\n' "${DNS}" >"${POMPEY_RESOLV}"
+  vpn-killswitch "${DST}"
+  bashio::log.info "iptables kill switch applied (internet OUTPUT only via wg0 once it exists)"
+fi

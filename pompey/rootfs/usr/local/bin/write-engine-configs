@@ -41,14 +41,11 @@ write_xml(f"{config}/sonarr/config.xml", 8989, secrets["sonarr_api_key"], "Sonar
 write_xml(f"{config}/radarr/config.xml", 7878, secrets["radarr_api_key"], "Radarr")
 write_xml(f"{config}/prowlarr/config.xml", 9696, secrets["prowlarr_api_key"], "Prowlarr")
 
-qconf = f"{config}/qBittorrent/qBittorrent.conf"
-os.makedirs(f"{config}/qBittorrent", exist_ok=True)
-if not os.path.isfile(qconf):
-    pbk = secrets["qbit_pbkdf2"]
-    user = secrets["qbit_user"]
-    incomplete = f"{media}/downloads/incomplete"
-    complete = f"{media}/downloads/complete"
-    text = f"""[Application]
+pbk = secrets["qbit_pbkdf2"]
+user = secrets["qbit_user"]
+incomplete = f"{media}/downloads/incomplete"
+complete = f"{media}/downloads/complete"
+qbit_text = f"""[Application]
 FileLogger\\Enabled=true
 
 [AutoRun]
@@ -83,13 +80,23 @@ General\\Locale=en
 WebUI\\Address=127.0.0.1
 WebUI\\Port=8080
 WebUI\\LocalHostAuth=false
+WebUI\\AuthSubnetWhitelistEnabled=true
+WebUI\\AuthSubnetWhitelist=127.0.0.1, ::1
 WebUI\\Username={user}
 WebUI\\Password_PBKDF2="{pbk}"
 WebUI\\CSRFProtection=false
 WebUI\\HostHeaderValidation=false
 WebUI\\ClickjackingProtection=false
 """
-    with open(qconf, "w", encoding="utf-8") as fh:
-        fh.write(text)
-    os.chmod(qconf, 0o600)
+# v4: profile/qBittorrent/qBittorrent.conf
+# v5: profile/qBittorrent/config/qBittorrent.conf
+for qconf in (
+    f"{config}/qBittorrent/qBittorrent.conf",
+    f"{config}/qBittorrent/config/qBittorrent.conf",
+):
+    os.makedirs(os.path.dirname(qconf), exist_ok=True)
+    if not os.path.isfile(qconf):
+        with open(qconf, "w", encoding="utf-8") as fh:
+            fh.write(qbit_text)
+        os.chmod(qconf, 0o600)
 PY

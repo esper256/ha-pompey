@@ -1,41 +1,78 @@
 # Pompey
 
-**Pompey** is the Home Assistant app for the whole stack: one sidebar entry, one search, titles land in the right library and Plex updates.
+**Pompey** is a Home Assistant OS app: one sidebar entry, one search. The household face is [Seerr](https://seerr.dev/). Pompey is the box around it — Proton WireGuard, kill switch, hidden engines, no extra consoles.
 
-The face of that search is [Seerr](https://seerr.dev/). We do not reinvent it. Pompey’s job is the box around it — Proton, kill switch, hidden engines, no extra consoles. [VISION.md](VISION.md) is the plan.
+Version **0.2.0**, marked experimental. We do not publish a container image. Supervisor builds this app on the machine. After the tunnel is up, the app fetches the official programs it needs.
 
-We do not publish a container image. Supervisor builds this app on your machine. After the tunnel is up, the app fetches the official programs it needs.
+The plan is [VISION.md](VISION.md). Operator steps are [pompey/DOCS.md](pompey/DOCS.md).
 
-## App
+## Should I test this on Home Assistant now?
 
-| Folder | Status |
+**No — not as a household app.** Nothing here has been proven on a real Home Assistant OS box with Proton. This cloud/dev VM is not HAOS, so we cannot promise that search → request → file on disk → Plex actually works.
+
+**Only if you want to be the first install and report what breaks.** You will need:
+
+- Home Assistant OS (not Container, not this Cursor VM)
+- A Proton **WireGuard** config (NAT-PMP on if you want incoming download ports)
+- A Plex URL + token
+- One source as a URL plus API key (we do not ship a catalog)
+- A few GB of RAM on top of Home Assistant, and disk on `/media`
+
+Expect first start to take several minutes and a few hundred megabytes through the tunnel. Likely snags: Proton handshake, Seerr behind Ingress, Plex first-run wizard. A title landing in Plex is **not** a promised path yet.
+
+If you do try it: copy `pompey/` into `/addons`, let Supervisor build, fill Proton + Plex + source, start **Pompey**, open the sidebar. If the wait screen stays on the tunnel step, Proton is not up.
+
+## What is done (in this repo)
+
+These pieces exist, have tests or a smoke path, and are what 0.2.0 is *trying* to be:
+
+| Piece | What “done” means |
 | --- | --- |
-| [`pompey/`](pompey/) | Experimental. Proton WireGuard + kill switch + runtime fetch of Seerr and hidden engines. |
+| Addon skeleton | `pompey/` is a Supervisor app: Ingress, `NET_ADMIN`, `/dev/net/tun`, options for Proton / Plex / one source / media folder |
+| Store + wait branding | Square `icon.png` for the app list; rectangular `logo.png` for the store page and the loading/wait screen |
+| Wait screen | Sidebar shows the logo, a progress bar (tunnel → download → start → connect), then reloads into search |
+| Proton + kill switch | WireGuard from a file or pasted fields; internet OUTPUT only on `wg0`; LAN (Plex, NAS) allowed |
+| Runtime fetch | After the tunnel is up: Seerr, TV/movie/indexer engines, download engine. Nothing extra is baked into the image |
+| Local wiring | Engines talk to each other on localhost; Seerr is pointed at them; no extra sidebars |
+| Kid vs general folders | Creates Kid Friendly vs general movie/TV roots. A poller moves titles by TMDB certification (unknown → general). **Unit-tested only** |
+| NAT-PMP | Proton mapped port is pushed into the download engine (when port forwarding is on) |
+| Agent tests | `bash tests/run.sh` (CI). No Home Assistant OS. No torrent client. Fake `wg0` smoke. TMDB lookup of *The Wild Robot* via `tests/integration.sh` |
 
-## Try it on a Home Assistant OS machine
+CI compiles the Dockerfile (push disabled) and runs `tests/run.sh`. That is **not** a Home Assistant install.
 
-1. Copy `pompey/` into `/addons`.
-2. Settings → Apps → Check for updates.
-3. Put a Proton WireGuard config in the app’s config share (or paste the fields).
-4. Fill Plex address + token and one source (URL plus key).
-5. Start **Pompey** and open the UI. First start downloads through the tunnel and can take several minutes. The wait screen shows which step is running (tunnel, download, start, connect). If it stays on the tunnel step, Proton is not up yet.
+## What is not done yet
 
-Supervisor builds the Dockerfile locally. That is the only delivery path.
+Do not expect these. They are the reason it is premature for the family:
 
-This Cursor/cloud VM is not Home Assistant OS, so the addon cannot be installed here. To see the wait screen with a live progress bar:
+| Gap | Notes |
+| --- | --- |
+| A real HAOS + Proton trial | Never completed. First person to install it is finding bugs, not verifying a finished app |
+| Request → download → Plex | Wiring is written. Tests deliberately do **not** download. Grab quality, naming, and Plex update are unproven |
+| Recyclarr / TRaSH quality profiles | Engines use their defaults. Auto-grab may pick a poor release |
+| Seerr on Ingress, for real | Wait page → proxy is written. Next.js behind Home Assistant’s Ingress subpath often breaks; that has not been shaken out on HA |
+| Kid routing on live engines | Logic exists; it has not been watched against real Radarr/Sonarr certification fields |
+| Cloudflare challenge solvers | Not v1 |
+| Pick a specific file when quality and seeds disagree | Not v1 |
+| Jellyfin | Plex only |
+| Source catalog | You bring one URL + key |
+| Image publishing | We will not put this on Docker Hub or GHCR |
+
+## This VM (not Home Assistant)
+
+You cannot install the addon here. To see only the wait screen:
 
 ```bash
 python3 tests/preview.py
 ```
 
-Then open http://127.0.0.1:8099/ . That is the wait UI, not Seerr — Seerr only runs inside the Home Assistant Alpine container after Proton is up.
+http://127.0.0.1:8099/ — that is the wait UI, not Seerr.
 
-Tests do not need Home Assistant OS. They supply the same `options.json` Supervisor would write:
+Tests supply the `options.json` Supervisor would write:
 
 ```bash
 bash tests/run.sh
 ```
 
-Agents: [AGENTS.md](AGENTS.md) (what Docker is for in this VM vs what HAOS does).
+A longer agent run (`bash tests/integration.sh`) starts a fake `wg0`, fetches the TV/movie engines, and has Radarr look up *The Wild Robot* on TMDB. It does not start a torrent client and does not wait on a download.
 
-
+Agents: [AGENTS.md](AGENTS.md).
