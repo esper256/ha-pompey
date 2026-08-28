@@ -6,7 +6,6 @@ import importlib.machinery
 import importlib.util
 import json
 import os
-import sys
 import threading
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -425,33 +424,9 @@ class RouteRating(unittest.TestCase):
         self.assertNotIn("Adult Show", dests)
 
 
-class TorznabFixture(unittest.TestCase):
-    def test_wild_robot_release_is_not_a_movie_file(self):
-        sys.path.insert(0, str(ROOT / "tests/dev"))
-        import torznab  # noqa: E402
-
-        httpd = torznab.serve("127.0.0.1", 0, "http://10.2.0.1:9117")
-        host, port = httpd.server_address
-        try:
-            import urllib.request
-
-            caps = urllib.request.urlopen(f"http://{host}:{port}/api?t=caps", timeout=5).read()
-            self.assertIn(b"movie-search", caps)
-            rss = urllib.request.urlopen(
-                f"http://{host}:{port}/api?t=movie&q=The+Wild+Robot&tmdbid=1184918",
-                timeout=5,
-            ).read()
-            self.assertIn(b"The Wild Robot 2024", rss)
-            self.assertIn(b"10.2.0.1", rss)
-            torrent = urllib.request.urlopen(
-                f"http://{host}:{port}/download/wild-robot.torrent", timeout=5
-            ).read()
-            self.assertIn(b"Pompey", torznab.PAYLOAD)
-            self.assertGreater(len(torrent), 40)
-            self.assertNotIn(b"ftyp", torrent)  # not an mp4
-        finally:
-            httpd.shutdown()
-            httpd.server_close()
+class TestsNeverUseBitTorrent(unittest.TestCase):
+    def test_torznab_fixture_is_gone(self):
+        self.assertFalse((ROOT / "tests/dev/torznab.py").exists())
 
 
 if __name__ == "__main__":

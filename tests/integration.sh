@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Realistic agent run: fake wg0, official engines, fake Torznab, one movie.
-# Not HAOS. Not Proton. Dummy torrent payload is not a movie.
+# Realistic agent run: fake wg0, official TV/movie engines, TMDB lookup.
+# Not HAOS. Not Proton. Never starts a torrent client or waits on a grab.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -8,6 +8,7 @@ export PATH="/usr/sbin:/sbin:${PATH}"
 export PYTHONDONTWRITEBYTECODE=1
 export POMPEY_FAKE_VPN=1
 export POMPEY_SKIP_SEERR="${POMPEY_SKIP_SEERR:-1}"
+export POMPEY_SKIP_QBIT=1
 
 MOVIE="${POMPEY_TEST_MOVIE:-The Wild Robot}"
 TMDB="${POMPEY_TEST_TMDB:-1184918}"
@@ -115,22 +116,12 @@ bash "${BIN}/pompey-dev-vpn" up
 ns ip -o addr show wg0 | grep -q '10.2.0.2'
 run wait-for-vpn 5
 
-TORZNAB_PORT="${POMPEY_TORZNAB_PORT:-9117}"
-export TORZNAB_HOST=0.0.0.0
-export TORZNAB_PORT
-export TORZNAB_PUBLIC="http://10.2.0.2:${TORZNAB_PORT}"
-ns env TORZNAB_HOST=0.0.0.0 TORZNAB_PORT="${TORZNAB_PORT}" TORZNAB_PUBLIC="${TORZNAB_PUBLIC}" \
-  python3 "${ROOT}/tests/dev/torznab.py" >"${WORK}/torznab.log" 2>&1 &
-PIDS+=("$!")
-wait_url "http://127.0.0.1:${TORZNAB_PORT}/api?t=caps" 20
-ns curl -fsS "http://127.0.0.1:${TORZNAB_PORT}/api?t=movie&q=The+Wild+Robot" | grep -q "The Wild Robot"
-
-python3 - "${ROOT}/tests/options.json" "${BASHIO_OPTIONS}" "${TORZNAB_PORT}" "${MEDIA_ROOT}" <<'PY'
+python3 - "${ROOT}/tests/options.json" "${BASHIO_OPTIONS}" "${MEDIA_ROOT}" <<'PY'
 import json, sys
 data = json.load(open(sys.argv[1], encoding="utf-8"))
-data["indexer_url"] = f"http://127.0.0.1:{sys.argv[3]}"
-data["indexer_api_key"] = "test-source-key"
-data["media_root"] = sys.argv[4]
+data["indexer_url"] = ""
+data["indexer_api_key"] = ""
+data["media_root"] = sys.argv[3]
 data["plex_token"] = ""
 data["port_forwarding"] = False
 json.dump(data, open(sys.argv[2], "w"), indent=2)
@@ -141,21 +132,18 @@ run "${INIT}/00-banner.sh"
 run "${INIT}/10-vpn-config.sh"
 run wait-for-vpn 5
 
-log "fetch engines into ${CACHE}"
+log "fetch engines into ${CACHE} (no torrent client)"
 run "${BIN}/fetch-engines"
 test -x "${POMPEY_ENGINES}/Radarr/Radarr"
 test -x "${POMPEY_ENGINES}/Prowlarr/Prowlarr"
 test -x "${POMPEY_ENGINES}/Sonarr/Sonarr"
-test -x "${POMPEY_ENGINES}/qbittorrent-nox"
 
-log "write configs + start engines"
+log "write configs + start TV/movie engines"
 run "${BIN}/write-engine-configs"
+grep -Fq 'Session\Interface=wg0' "${POMPEY_CONFIG}/qBittorrent/qBittorrent.conf"
+grep -Fq 'Session\Interface=wg0' "${POMPEY_CONFIG}/qBittorrent/config/qBittorrent.conf"
 touch "${POMPEY_READY}/engines-ready"
 
-ns "${POMPEY_ENGINES}/qbittorrent-nox" \
-  --profile="${POMPEY_CONFIG}" --webui-port=8080 --confirm-legal-notice \
-  >"${WORK}/qbit.log" 2>&1 &
-PIDS+=("$!")
 ns "${POMPEY_ENGINES}/Prowlarr/Prowlarr" -nobrowser -data="${POMPEY_CONFIG}/prowlarr" \
   >"${WORK}/prowlarr.log" 2>&1 &
 PIDS+=("$!")
@@ -166,14 +154,87 @@ ns "${POMPEY_ENGINES}/Radarr/Radarr" -nobrowser -data="${POMPEY_CONFIG}/radarr" 
   >"${WORK}/radarr.log" 2>&1 &
 PIDS+=("$!")
 
-wait_url http://127.0.0.1:8080/api/v2/app/version 60
+# wire-stack waits on the download-engine WebUI. Answer HTTP only — do not run it.
+ns python3 - "${WORK}" <<'PY'
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import json, os, sys, threading
+from urllib.parse import urlparse
+
+work = sys.argv[1]
+
+
+class Qbit(BaseHTTPRequestHandler):
+    def log_message(self, *a, **k):
+        return
+
+    def _send(self, code, body, ctype, cookie=None):
+        if isinstance(body, str):
+            body = body.encode()
+        self.send_response(code)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(body)))
+        if cookie:
+            self.send_header("Set-Cookie", cookie)
+        self.end_headers()
+        self.wfile.write(body)
+
+    def do_GET(self):
+        path = urlparse(self.path).path
+        if path.endswith("/version") or path.endswith("/webapiVersion"):
+            return self._send(200, "5.0.4", "text/plain")
+        if path.endswith("/preferences"):
+            return self._send(
+                200,
+                json.dumps({"current_network_interface": "wg0", "listen_port": 0}),
+                "application/json",
+            )
+        if path.endswith("/categories"):
+            return self._send(200, "{}", "application/json")
+        return self._send(200, "[]", "application/json")
+
+    def do_POST(self):
+        n = int(self.headers.get("Content-Length") or 0)
+        if n:
+            self.rfile.read(n)
+        path = urlparse(self.path).path
+        cookie = "SID=pompey-dev; path=/" if path.endswith("/login") else None
+        return self._send(200, "Ok.", "text/plain", cookie=cookie)
+
+
+class Seerr(BaseHTTPRequestHandler):
+    def log_message(self, *a, **k):
+        return
+
+    def do_GET(self):
+        body = json.dumps({"initialized": False}).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    do_POST = do_GET
+
+
+qbit = ThreadingHTTPServer(("127.0.0.1", 8080), Qbit)
+seerr = ThreadingHTTPServer(("127.0.0.1", 5055), Seerr)
+threading.Thread(target=qbit.serve_forever, daemon=True).start()
+threading.Thread(target=seerr.serve_forever, daemon=True).start()
+open(os.path.join(work, "http-stub.pid"), "w").write(str(os.getpid()))
+threading.Event().wait()
+PY
+> "${WORK}/http-stub.log" 2>&1 &
+PIDS+=("$!")
+
+wait_url http://127.0.0.1:8080/api/v2/app/version 20
+wait_url http://127.0.0.1:5055/api/v1/settings/public 20
 wait_url http://127.0.0.1:9696/ping 60
 wait_url http://127.0.0.1:8989/ping 60
 wait_url http://127.0.0.1:7878/ping 60
 
 export PLEX_URL="" PLEX_TOKEN=""
-export INDEXER_URL="http://127.0.0.1:${TORZNAB_PORT}"
-export INDEXER_API_KEY="test-source-key"
+export INDEXER_URL=""
+export INDEXER_API_KEY=""
 export QBIT_URL=http://127.0.0.1:8080
 export SONARR_URL=http://127.0.0.1:8989
 export RADARR_URL=http://127.0.0.1:7878
@@ -183,31 +244,6 @@ export POMPEY_WAIT_TRIES=30
 export POMPEY_WAIT_SLEEP=2
 
 log "wire localhost engines"
-# Seerr is skipped; wire-stack still waits on it. Point SEERR at a tiny stub.
-ns python3 - "${WORK}" <<'PY'
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-import json, threading, os, sys
-work = sys.argv[1]
-class H(BaseHTTPRequestHandler):
-    def log_message(self, *a, **k):
-        return
-    def do_GET(self):
-        body = json.dumps({"initialized": False}).encode()
-        self.send_response(200)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
-    do_POST = do_GET
-httpd = ThreadingHTTPServer(("127.0.0.1", 5055), H)
-threading.Thread(target=httpd.serve_forever, daemon=True).start()
-open(os.path.join(work, "seerr-stub.pid"), "w").write(str(os.getpid()))
-threading.Event().wait()
-PY
-> "${WORK}/seerr-stub.log" 2>&1 &
-PIDS+=("$!")
-wait_url http://127.0.0.1:5055/api/v1/settings/public 20
-
 ns env \
   POMPEY_SECRETS="${POMPEY_SECRETS}" \
   POMPEY_READY="${POMPEY_READY}" \
@@ -230,41 +266,6 @@ test -f "${POMPEY_READY}/arr-wired"
 
 RADARR_KEY="$(jq -r .radarr_api_key "${POMPEY_SECRETS}")"
 RADARR=http://127.0.0.1:7878
-
-log "qBittorrent must bind wg0"
-prefs="$(ns curl -fsS http://127.0.0.1:8080/api/v2/app/preferences)"
-echo "${prefs}" | jq -r '.current_network_interface, .current_interface_address // empty'
-iface="$(echo "${prefs}" | jq -r '.current_network_interface // .current_interface_name // empty')"
-if [[ "${iface}" != "wg0" ]]; then
-  # Some builds report the bound name under a different key; conf is the source of truth.
-  grep -Fq 'Session\Interface=wg0' "${POMPEY_CONFIG}/qBittorrent/qBittorrent.conf"
-  log "qbit prefs interface='${iface}' (conf still wg0)"
-fi
-
-log "ensure Radarr can see the fixture source"
-if ! arr "${RADARR}" "${RADARR_KEY}" GET "/api/v3/indexer" | jq -e 'length > 0' >/dev/null; then
-  schema="$(arr "${RADARR}" "${RADARR_KEY}" GET "/api/v3/indexer/schema")"
-  printf '%s' "${schema}" >"${WORK}/indexer-schema.json"
-  payload="$(python3 - "${WORK}/indexer-schema.json" "${INDEXER_URL}" "${INDEXER_API_KEY}" <<'PY'
-import json, sys
-schema = json.load(open(sys.argv[1], encoding="utf-8"))
-url, key = sys.argv[2], sys.argv[3]
-item = next(x for x in schema if x.get("implementation") == "Torznab")
-for field in item.get("fields") or []:
-    if field.get("name") == "baseUrl":
-        field["value"] = url
-    elif field.get("name") == "apiPath":
-        field["value"] = "/api"
-    elif field.get("name") == "apiKey":
-        field["value"] = key
-item["name"] = "Source"
-item["enable"] = True
-item["priority"] = 25
-print(json.dumps(item))
-PY
-)"
-  arr "${RADARR}" "${RADARR_KEY}" POST "/api/v3/indexer" "${payload}" >/dev/null
-fi
 
 log "lookup ${MOVIE}"
 lookup="$(arr "${RADARR}" "${RADARR_KEY}" GET "/api/v3/movie/lookup?term=$(python3 -c 'import urllib.parse,os; print(urllib.parse.quote(os.environ["MOVIE"]))')" )"
@@ -300,59 +301,40 @@ movie["qualityProfileId"] = int(sys.argv[2])
 movie["rootFolderPath"] = sys.argv[3]
 movie["monitored"] = True
 movie["minimumAvailability"] = "announced"
-movie["addOptions"] = {"searchForMovie": True, "monitor": "movieOnly"}
+movie["addOptions"] = {"searchForMovie": False, "monitor": "movieOnly"}
 print(json.dumps(movie))
 PY
 )"
 
-log "add + search"
+log "add movie (library only — no search, no download)"
 arr "${RADARR}" "${RADARR_KEY}" POST "/api/v3/movie" "${add}" >/dev/null
 
-ok=0
+found=""
 movies="[]"
-searched=0
-for _ in $(seq 1 45); do
+for _ in $(seq 1 15); do
   movies="$(arr "${RADARR}" "${RADARR_KEY}" GET "/api/v3/movie")"
-  rid="$(echo "${movies}" | jq --argjson t "${TMDB}" '[.[] | select(.tmdbId==$t)][0].id // empty')"
-  if [[ -n "${rid}" && "${searched}" -eq 0 ]]; then
-    arr "${RADARR}" "${RADARR_KEY}" POST "/api/v3/command" \
-      "$(jq -n --argjson id "${rid}" '{name:"MoviesSearch", movieIds:[$id]}')" >/dev/null || true
-    searched=1
-  fi
-  if [[ -n "${rid}" ]]; then
-    hist="$(arr "${RADARR}" "${RADARR_KEY}" GET "/api/v3/history?page=1&pageSize=50")"
-    if echo "${hist}" | jq -e --argjson id "${rid}" '[.records[]? | select(.movieId==$id)] | length > 0' >/dev/null; then
-      ok=1
-      break
-    fi
-  fi
-  qbit="$(ns curl -fsS 'http://127.0.0.1:8080/api/v2/torrents/info' || true)"
-  if echo "${qbit}" | jq -e 'length > 0' >/dev/null 2>&1; then
-    ok=1
+  found="$(echo "${movies}" | jq -r --argjson t "${TMDB}" '[.[] | select(.tmdbId==$t)][0].title // empty')"
+  if [[ -n "${found}" ]]; then
     break
   fi
-  sleep 2
+  sleep 1
 done
 
 echo "${movies:-}" | jq --argjson t "${TMDB}" '[.[] | select(.tmdbId==$t)][0] | {title, tmdbId, hasFile, status, path}' || true
-ns curl -fsS 'http://127.0.0.1:8080/api/v2/torrents/info' | jq '[.[] | {name, state, progress}]' || true
 
-if [[ "${ok}" -ne 1 ]]; then
-  echo "movie was added but no grab/history/torrent yet" >&2
+if [[ -z "${found}" ]]; then
+  echo "movie lookup/add failed" >&2
   echo "---- radarr.log (tail) ----" >&2
   tail -n 40 "${WORK}/radarr.log" >&2 || true
-  echo "---- qbit.log (tail) ----" >&2
-  tail -n 20 "${WORK}/qbit.log" >&2 || true
-  echo "---- torznab.log ----" >&2
-  cat "${WORK}/torznab.log" >&2 || true
+  echo "---- http-stub.log ----" >&2
+  cat "${WORK}/http-stub.log" >&2 || true
   exit 1
 fi
 
-# Confirm at least one qbit socket is on 10.2.0.2 / wg0 when a torrent exists.
 if ns sh -c "ss -tuanp 2>/dev/null | grep -q '10.2.0.2'" || ns sh -c "ss -tuan 2>/dev/null | grep -q '10.2.0.2'"; then
-    log "saw sockets bound to 10.2.0.2 (wg0)"
-  else
-    log "no 10.2.0.2 sockets yet (torrent may still be connecting via webseed)"
-  fi
+  log "saw sockets bound to 10.2.0.2 (wg0)"
+else
+  log "lookup already went through the fake wg0 netns"
+fi
 
-log "integration ok: ${title} reached Radarr and the download engine on fake wg0"
+log "integration ok: ${title} is in Radarr on fake wg0 (no torrent client)"

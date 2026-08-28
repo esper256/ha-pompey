@@ -36,7 +36,7 @@ Tests do not need Home Assistant OS. They supply the same `options.json` Supervi
 bash tests/run.sh
 ```
 
-A longer run (`bash tests/integration.sh`) starts a fake `wg0`, downloads the official engines, and drives Radarr through a fixture grab for *The Wild Robot*. That is still not Home Assistant OS and still not Proton.
+A longer run (`bash tests/integration.sh`) starts a fake `wg0`, downloads the official TV/movie engines, and has Radarr look up *The Wild Robot* on TMDB. It does not start a torrent client and does not wait on a download. That is still not Home Assistant OS and still not Proton.
 
 Agents: [AGENTS.md](AGENTS.md) (what Docker is for in this VM vs what HAOS does).
 

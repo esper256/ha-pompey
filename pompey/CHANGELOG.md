@@ -7,7 +7,7 @@
 - Operator options for Plex and one source (URL plus key). No source catalog is shipped.
 - Kid vs general folders from title certification (unknown → general).
 - NAT-PMP mapped port is applied to the download engine.
-- Agent/dev: `POMPEY_FAKE_VPN=1` brings up a veth named `wg0` that NATs out the default adapter (no Proton). `tests/integration.sh` fetches glibc engines and grabs a fixture release for The Wild Robot.
+- Agent/dev: `POMPEY_FAKE_VPN=1` brings up a veth named `wg0` that NATs out the default adapter (no Proton). `tests/integration.sh` fetches glibc TV/movie engines and looks up The Wild Robot on TMDB (no torrent client, no grab).
 - When engines are wired, Ingress switches to Seerr and the wait screen reloads into search.
 
 ## 0.1.1

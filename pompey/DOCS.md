@@ -73,3 +73,5 @@ Home Assistant OS is not required. Supervisor would write `/data/options.json` f
 ```bash
 bash tests/run.sh
 ```
+
+Tests never start the torrent client or wait on a download. CI is `tests/run.sh` only.

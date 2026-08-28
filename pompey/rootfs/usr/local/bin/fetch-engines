@@ -66,6 +66,10 @@ fetch_tarball() {
 }
 
 fetch_qbit() {
+  if [[ "${POMPEY_SKIP_QBIT:-}" == "1" ]]; then
+    bashio::log.info "Skipping qBittorrent-nox (POMPEY_SKIP_QBIT=1)"
+    return 0
+  fi
   local dest="${POMPEY_ENGINES}/qbittorrent-nox"
   if [[ -x "${dest}" ]]; then
     bashio::log.info "qBittorrent-nox already present"

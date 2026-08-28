@@ -19,5 +19,6 @@ jobs:
       - name: Check out the repository
         uses: actions/checkout@v7.0.1
 
+      # options.json + stubs + fake-wg0 smoke only. Never start a torrent client.
       - name: Run tests
         run: bash tests/run.sh

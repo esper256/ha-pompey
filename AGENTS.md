@@ -18,10 +18,10 @@ In this Cursor VM there is no Supervisor. Starting Docker here is only so an age
 | Who starts the container | Supervisor (one container, `NET_ADMIN`, `/dev/net/tun`) | Nobody, unless an agent is checking the Dockerfile. The operator never starts it. |
 | `dockerd` | Already the HAOS host. Not something Pompey starts. | Optional, this VM only. Packages persist; the daemon process does not. |
 | Config | Supervisor writes `/data/options.json` from the app options UI | We supply [`tests/options.json`](tests/options.json) ourselves |
-| VPN / internet | All traffic on Proton `wg0`, else dropped | **Fake `wg0`**: a veth in netns `pompey-dev` that NATs out `eth0`. Same interface name qBittorrent binds. Not Proton. Set `POMPEY_FAKE_VPN=1`. Do **not** apply the OUTPUT DROP kill switch here (it would kill the agent). Keep host DNS. |
+| VPN / internet | All traffic on Proton `wg0`, else dropped | **Fake `wg0`**: a veth in netns `pompey-dev` that NATs out `eth0`. Same interface name the download engine binds. Not Proton. Set `POMPEY_FAKE_VPN=1`. Do **not** apply the OUTPUT DROP kill switch here (it would kill the agent). Keep host DNS. |
 | What the household sees | Wait screen, then Seerr on Ingress | [`tests/preview.py`](tests/preview.py) is the wait screen. Seerr’s image is Alpine/musl; if you unpack it, run it with the host glibc `node`. |
-| Engines | musl tarballs after the tunnel is up | glibc (`os=linux`) tarballs on Ubuntu, cached under `~/.cache/pompey/engines` |
-| Sources / Plex | Operator URL+key and a real Plex | Fake Torznab ([`tests/dev/torznab.py`](tests/dev/torznab.py)) + empty Plex token. Dummy torrent payload is **not** a movie. |
+| Engines | musl tarballs after the tunnel is up | glibc (`os=linux`) tarballs on Ubuntu, cached under `~/.cache/pompey/engines`. Tests skip unpacking the torrent client (`POMPEY_SKIP_QBIT=1`). |
+| Sources / Plex | Operator URL+key and a real Plex | Empty source + empty Plex token. Tests never speak BitTorrent. |
 
 Shipping path: copy `pompey/` into `/addons`. Supervisor builds locally. That is the only delivery path.
 
@@ -46,10 +46,10 @@ Realistic stack (still no Proton, still no HAOS). Needs passwordless sudo + `ipr
 
 ```bash
 sudo apt-get install -y iproute2 iptables libicu74
-bash tests/integration.sh      # The Wild Robot via Radarr + fake Torznab + qBittorrent on wg0
+bash tests/integration.sh      # The Wild Robot via Radarr TMDB lookup on fake wg0
 ```
 
-That downloads official Radarr/Sonarr/Prowlarr/qBittorrent into `~/.cache/pompey/engines` on first run. The indexer returns a tiny text fixture whose *release name* matches the movie so Radarr will grab it. Seerr unpack is skipped unless `POMPEY_SKIP_SEERR=0` and `crane` is on PATH (then use host `node`, not Alpine’s).
+That downloads official Radarr/Sonarr/Prowlarr into `~/.cache/pompey/engines` on first run. It looks the movie up on TMDB and adds it to Radarr **without searching or downloading**. Do not start the torrent client, do not wait on a grab, and do not add that wait to CI (`tests/run.sh` only). Seerr unpack is skipped unless `POMPEY_SKIP_SEERR=0` and `crane` is on PATH (then use host `node`, not Alpine’s).
 
 Opening `index.html` as a file is only the wait screen.
 
