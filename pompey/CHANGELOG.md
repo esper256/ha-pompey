@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.25
+
+- An empty Query in Prowlarr History is usually an IMDb/TMDB ID search, not a blank request. We leave that alone. After wiring, the app log lists recent source searches as ID, title, or RSS so you can confirm from History (Parameters column) without guessing.
+
 ## 0.2.24
 
 - Enabled Prowlarr sources get RSS, automatic, and interactive search turned on. After wiring, Radarr and Sonarr search titles that still have no file, so a request that hit too few indexers is tried again. You do not wait for the next Arr cycle, and you do not cancel the Seerr request.
