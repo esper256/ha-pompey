@@ -96,7 +96,8 @@ def config_dir() -> Path:
 
 def reset_config() -> Path:
     dest = config_dir()
-    shutil.rmtree(dest, ignore_errors=True)
+    # Seerr in the chroot writes as root, so a leftover config is root-owned.
+    subprocess.run(["sudo", "-n", "rm", "-rf", str(dest)], check=True)
     dest.mkdir(parents=True)
     (dest / "DOCKER").touch()
     return dest
