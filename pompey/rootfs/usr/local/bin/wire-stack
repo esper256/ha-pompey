@@ -6,6 +6,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 import time
 import urllib.error
 import urllib.parse
@@ -103,8 +104,12 @@ def log(msg: str) -> None:
 def mark_status(step: str, label: str, percent: int, error: str = "") -> None:
     script = shutil.which("pompey-status")
     if not script:
+        sibling = os.path.join(os.path.dirname(os.path.abspath(__file__)), "pompey-status")
+        if os.path.isfile(sibling):
+            script = sibling
+    if not script:
         return
-    cmd = [script, step, label, str(percent)]
+    cmd = [sys.executable, script, step, label, str(percent)]
     if error:
         cmd.append(error)
     subprocess.run(cmd, check=False)
@@ -592,32 +597,6 @@ def reload_nginx() -> None:
     log("ingress now proxies Seerr")
 
 
-def mark_search_live() -> None:
-    """Flip Ingress to Seerr first, then tell the wait page it is safe to reload."""
-    mark_status("ready", "Ready", 100)
-    path = os.path.join(ready_dir(), "status.json")
-    data = {}
-    if os.path.isfile(path) and os.path.getsize(path) > 0:
-        try:
-            with open(path, encoding="utf-8") as fh:
-                data = json.load(fh)
-        except json.JSONDecodeError:
-            data = {}
-    data["updated"] = int(time.time())
-    data["step"] = "ready"
-    data["label"] = "Ready"
-    data["percent"] = 100
-    data["error"] = ""
-    data["handoff"] = True
-    data["search"] = True
-    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-    tmp = path + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as fh:
-        json.dump(data, fh, indent=2)
-        fh.write("\n")
-    os.replace(tmp, path)
-
-
 def main() -> int:
     secrets = load_secrets()
     wait_http(f"{qbit_url()}/api/v2/app/version")
@@ -657,7 +636,8 @@ def main() -> int:
 
     configure_seerr(secrets, rp, sp, sl)
     reload_nginx()
-    mark_search_live()
+    # Wait page reloads when status.search is true; nginx must already proxy Seerr.
+    mark_status("ready", "Ready", 100)
     open(os.path.join(ready_dir(), "wired"), "w").close()
     log("done")
     return 0

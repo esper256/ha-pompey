@@ -67,7 +67,9 @@ def main(argv: list[str]) -> int:
     data["step"] = step
     data["label"] = label
     data["error"] = error
-    data["handoff"] = bool(step == "ready" and not error)
+    ready = bool(step == "ready" and not error)
+    data["handoff"] = ready
+    data["search"] = ready
     if percent is not None:
         data["percent"] = max(0, min(100, percent))
     elif step in order:

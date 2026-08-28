@@ -151,7 +151,7 @@ def handler_for(state: FakeState):
                     folders.append((body or {}).get("path"))
                     return self._send(201, body)
                 if path.endswith("/downloadclient") and method == "GET":
-                    return self._send(body=state.download_clients if False else [])
+                    return self._send(body=[])
                 if path.endswith("/downloadclient/schema"):
                     return self._send(
                         body=[

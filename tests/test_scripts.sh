@@ -174,6 +174,7 @@ test "$(jq -r '.steps[] | select(.id=="fetch") | .state' "${POMPEY_READY}/status
 test "$(jq -r .step "${POMPEY_READY}/status.json")" = vpn
 python3 "${BIN}/pompey-status" ready "Ready" 100
 test "$(jq -r .handoff "${POMPEY_READY}/status.json")" = true
+test "$(jq -r .search "${POMPEY_READY}/status.json")" = true
 
 echo "== fetch URL construction (range GET, not a full download) =="
 urls="$(run "${BIN}/fetch-engines" --print-urls)"
