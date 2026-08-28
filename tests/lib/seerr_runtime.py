@@ -19,6 +19,7 @@ from pathlib import Path
 IMAGE = os.environ.get("POMPEY_SEERR_IMAGE", "ghcr.io/seerr-team/seerr:latest")
 CACHE = Path(os.environ.get("POMPEY_SEERR_CACHE", Path.home() / ".cache/pompey/seerr"))
 CRANE_DIR = Path(os.environ.get("POMPEY_CRANE_DIR", Path.home() / ".cache/pompey/bin"))
+CONFIG_NAME = "pompey-test-config"
 
 
 def crane_archive_url() -> str:
@@ -28,7 +29,6 @@ def crane_archive_url() -> str:
         "https://github.com/google/go-containerregistry/releases/download/"
         f"v0.22.0/go-containerregistry_{name}.tar.gz"
     )
-CONFIG_NAME = "pompey-test-config"
 
 
 def crane_platform() -> str:
@@ -39,18 +39,38 @@ def crane_platform() -> str:
 
 
 def ensure_crane() -> Path:
+    found = shutil.which("crane")
+    if found:
+        return Path(found)
     CRANE_DIR.mkdir(parents=True, exist_ok=True)
     crane = CRANE_DIR / "crane"
     if crane.is_file() and os.access(crane, os.X_OK):
         return crane
+    # Same curl|tar as pompey/Dockerfile. tar -xz without -f reads stdin.
     archive = CRANE_DIR / "crane.tgz"
+    archive.unlink(missing_ok=True)
     subprocess.run(
-        ["curl", "-fsSL", "--retry", "3", "--retry-delay", "2", "-o", str(archive), crane_archive_url()],
+        [
+            "curl",
+            "-fsSL",
+            "--retry",
+            "3",
+            "--retry-delay",
+            "2",
+            "-o",
+            str(archive),
+            crane_archive_url(),
+        ],
         check=True,
     )
-    subprocess.run(["tar", "-xz", "-C", str(CRANE_DIR), "crane"], check=True, cwd=str(CRANE_DIR))
+    subprocess.run(
+        ["tar", "-xzf", str(archive), "-C", str(CRANE_DIR), "crane"],
+        check=True,
+    )
     archive.unlink(missing_ok=True)
     crane.chmod(0o755)
+    if not crane.is_file():
+        raise RuntimeError("crane archive did not contain crane")
     return crane
 
 
