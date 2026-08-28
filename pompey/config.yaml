@@ -1,6 +1,6 @@
 # https://developers.home-assistant.io/docs/apps/configuration
 name: Pompey
-version: "0.2.17"
+version: "0.2.18"
 slug: pompey
 description: >-
   Search for a movie or TV show. Confirm if we need you. It lands in the
@@ -22,12 +22,16 @@ panel_admin: false
 ingress: true
 ingress_port: 8099
 ingress_stream: true
-# Search is Seerr on this host port. Ingress stays Pompey's wait/status UI
-# (no path rewriter). Plex is a separate app; Pompey does not run it.
+# Search is Seerr on this host port. Sources (Prowlarr) are published too —
+# Seerr cannot add indexers. Ingress stays Pompey's wait/status UI.
+# Plex is a separate app; Pompey does not run it. Radarr/Sonarr/qbit stay
+# localhost.
 ports:
   5055/tcp: 5055
+  9696/tcp: 9696
 ports_description:
   5055/tcp: Search (Seerr). Not Plex.
+  9696/tcp: Sources (Prowlarr). Not Radarr/Sonarr.
 apparmor: true
 privileged:
   - NET_ADMIN

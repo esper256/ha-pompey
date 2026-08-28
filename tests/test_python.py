@@ -370,7 +370,10 @@ class Helpers(unittest.TestCase):
         self.assertIn("data.search", html)
         self.assertIn("open-search", html)
         self.assertIn("Open search", html)
+        self.assertIn("Open sources", html)
+        self.assertIn("open-sources-btn", html)
         self.assertIn("search_port", html)
+        self.assertIn("sources_port", html)
         self.assertNotIn("location.replace", html)
         self.assertNotIn("pompey-handoff", html)
         self.assertIn('src="logo.png"', html)
@@ -381,6 +384,7 @@ class Helpers(unittest.TestCase):
         self.assertIn("protonSubmitted", html)
         cfg = (ROOT / "pompey/config.yaml").read_text()
         self.assertIn("5055/tcp: 5055", cfg)
+        self.assertIn("9696/tcp: 9696", cfg)
         seerr = (ROOT / "pompey/rootfs/etc/services.d/seerr/run").read_text()
         self.assertIn("HOST=0.0.0.0", seerr)
         self.assertNotIn("HOST=127.0.0.1", seerr)
@@ -537,6 +541,7 @@ class WireStack(unittest.TestCase):
         live = json.loads((self.ready / "status.json").read_text())
         self.assertTrue(live["search"])
         self.assertEqual(live["search_port"], 5055)
+        self.assertEqual(live["sources_port"], 9696)
         self.assertIsNone(self.state.local_auth)
 
     def test_wires_when_seerr_returns_objects(self):

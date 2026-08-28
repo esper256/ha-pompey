@@ -16,7 +16,10 @@ configuration:
       Leave empty to sign into Plex from Seerr's setup wizard instead.
   source_url:
     name: Source URL
-    description: Base URL of one source. Pompey does not ship a catalog; you provide this.
+    description: >-
+      Base URL of one source. Pompey does not ship a catalog. You can add
+      more later in Prowlarr (Open sources, port 9696). Seerr cannot add
+      indexers.
   source_key:
     name: Source key
-    description: API key for that source.
+    description: API key for that first source. Extra keys go in Prowlarr.

@@ -653,7 +653,8 @@ def main() -> int:
 
     configure_seerr(secrets, rp, sp, sl)
     port = os.environ.get("SEERR_PORT", "5055")
-    log(f"search is on 0.0.0.0:{port}; Ingress stays Pompey")
+    sources = os.environ.get("PROWLARR_PORT", "9696")
+    log(f"search is on 0.0.0.0:{port}; sources on 0.0.0.0:{sources}; Ingress stays Pompey")
     mark_status("ready", "Ready", 100)
     open(os.path.join(ready_dir(), "wired"), "w").close()
     log("done")

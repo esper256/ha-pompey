@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.18
+
+- **Sources (Prowlarr) are published on host port 9696.** Seerr has no indexer settings — it only talks to Radarr and Sonarr. Adding a second source, rotating a key, or picking a public indexer has to happen in Prowlarr. The sidebar grows **Open sources** next to **Open search**. Radarr, Sonarr, and qBittorrent stay on localhost. First visit to :9696 asks you to set a Prowlarr login (we drop `AuthenticationMethod None` so the LAN is not an open console). Do not port-forward 9696. Rebuild so the banner says **0.2.18**. A rebuild patches an existing localhost Prowlarr `config.xml` without wiping indexers.
+
 ## 0.2.17
 
 - **Deleted the Ingress rewriter.** `pompey-ingress`, the idle `ingress-proxy` s6 service, and `tests/preview_seerr_ingress.py` were leftover from the 0.2.13–0.2.15 path-rewrite patches. 0.2.16 already published Seerr on host port **5055**. Ingress 8099 is only Pompey's wait/status UI. Tests now fail if those files come back.
