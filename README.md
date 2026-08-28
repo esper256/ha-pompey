@@ -4,7 +4,7 @@ Search for a movie or TV show in Home Assistant. Confirm if we need you. It land
 
 Pompey is one Home Assistant OS app. The sidebar is the box: Proton, status, a button to search. Search itself is [Seerr](https://seerr.dev/) on this machine’s port **5055**, not an iframe. Downloads, matching, and the VPN stay inside Pompey. All internet from this app uses Proton WireGuard. If the tunnel is down, internet is dropped. **Plex is a separate Home Assistant app** (or another machine). Pompey does not run Plex.
 
-This is the user guide for the product we are building. It describes the journey as it should feel. [What is not ready yet](#what-is-not-ready-yet) is honest about the current cut (**0.2.20**). The [roadmap](#roadmap) is how we close the gap.
+This is the user guide for the product we are building. It describes the journey as it should feel. [What is not ready yet](#what-is-not-ready-yet) is honest about the current cut (**0.2.21**). The [roadmap](#roadmap) is how we close the gap.
 
 ## How a day with it should feel
 
@@ -51,9 +51,9 @@ Install **Pompey**. Supervisor compiles a thin image (WireGuard, nginx, our scri
 
 ### 3. Say where media lives
 
-Open **Settings → Apps → Pompey → Configuration**. Media folder is Home Assistant’s `/media`, or `/media/<name>` if you added a network share as Media. The four library fields are relative to that folder (defaults `Movies`, `Kid Friendly Movies`, `TV`, `Kid Friendly TV`). Example for a share named `dlna` with kid/not-kid siblings:
+Open **Settings → Apps → Pompey → Configuration**. The defaults already match this house: a Media network share named `dlna`, with sibling kid / not-kid folders. Change a field only if the share name or a library folder is different.
 
-| Option | Example |
+| Option | Default |
 | --- | --- |
 | Media folder | `/media/dlna` |
 | Movies | `Movies/Not Kid Friendly` |
@@ -63,7 +63,7 @@ Open **Settings → Apps → Pompey → Configuration**. Media folder is Home As
 
 Those four must be **siblings** (neither library folder sits inside another). In-progress downloads go in `downloads/` under the media folder. Do not add `downloads` as a Plex library.
 
-If Pompey is already running, save Configuration and **restart the app** so engines pick up the new folders.
+If you already saved older defaults (`/media` plus `Movies` / `Kid Friendly Movies`), update the five fields and **restart** so engines pick up the folders.
 
 Then in Plex, scan those same library folders. Adults who should also see kid movies can add the kid movies folder as a **second location** on the adult movie library.
 
@@ -164,7 +164,7 @@ A private tracker with a stable API key is set-and-forget. Prowlarr copies that 
 
 ## What is not ready yet
 
-The journey above is the target. **0.2.20** is a real Home Assistant OS install of that box, not the finished household app.
+The journey above is the target. **0.2.21** is a real Home Assistant OS install of that box, not the finished household app.
 
 | In the guide | On the machine today |
 | --- | --- |
@@ -181,7 +181,7 @@ The journey above is the target. **0.2.20** is a real Home Assistant OS install 
 | Jellyfin | Plex only. |
 | Use this from outside the house | Out of scope. Search is on the LAN at :5055. Sources at :9696. Do not port-forward either. |
 
-If search is a blank page on port 5055, or the Plex button on setup does nothing, that is a bug — send the log. Rebuild so the banner says **0.2.20** if you still need media-folder options, **Open sources**, or an older wait screen.
+If search is a blank page on port 5055, or the Plex button on setup does nothing, that is a bug — send the log. Rebuild so the banner says **0.2.21** if you still need the household media-folder defaults, **Open sources**, or an older wait screen.
 
 ## Roadmap
 
@@ -222,7 +222,7 @@ App config lives in `/addon_configs/<id>_pompey/`. Fetched engines live in the a
 - Sidebar used to be a blank Seerr page, or Plex button did nothing: you need **0.2.16** or newer (Ingress used to rewrite Seerr’s JavaScript). Search is now `:5055`, not the iframe.
 - Search warns that `/config/seerr` is not a volume: you need **0.2.17**. The data was already persisted; Seerr was looking at a leftover `DOCKER` sentinel.
 - Search never finds releases: add a source in **Open sources**, and give wiring a minute after the Plex wizard.
-- New titles land on the Home Assistant disk, not the NAS: set **Media folder** to `/media/<network-storage-name>` and the four library fields to folders Plex already scans.
+- New titles land on the Home Assistant disk, not the NAS: Media folder should be `/media/<network-storage-name>` (default `/media/dlna`) and the four library fields should be folders Plex already scans. If you installed 0.2.20 with the old `/media` defaults, change Configuration and restart.
 - Plex wizard cannot see the server: numeric IP of **your Plex app**, port 32400 published, LAN not blocked. Pompey does not contain Plex.
 
 More Home Assistant-specific notes (Supervisor skip reasons, copy-to-`/addons`): [pompey/DOCS.md](pompey/DOCS.md).

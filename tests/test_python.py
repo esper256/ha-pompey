@@ -81,18 +81,18 @@ class FakeState:
         self.fail_indexer = False
         self.qbit_prefs: object = None
         self.movies = [
-            {"id": 1, "title": "Kid Flick", "certification": "PG", "path": "/media/Movies/Kid Flick"},
-            {"id": 2, "title": "Unknown", "certification": "", "path": "/media/Movies/Unknown"},
-            {"id": 3, "title": "Already Kid", "certification": "G", "path": "/media/Kid Friendly Movies/Already Kid"},
+            {"id": 1, "title": "Kid Flick", "certification": "PG", "path": "/media/Movies/Not Kid Friendly/Kid Flick"},
+            {"id": 2, "title": "Unknown", "certification": "", "path": "/media/Movies/Not Kid Friendly/Unknown"},
+            {"id": 3, "title": "Already Kid", "certification": "G", "path": "/media/Movies/Kid Friendly/Already Kid"},
             {
                 "id": 4,
                 "title": "Nested Kid",
                 "ratings": {"tmdb": {"certification": "PG"}},
-                "path": "/media/Movies/Nested Kid",
+                "path": "/media/Movies/Not Kid Friendly/Nested Kid",
             },
         ]
         self.series = [
-            {"id": 10, "title": "Adult Show", "certification": "TV-MA", "path": "/media/TV/Adult Show"},
+            {"id": 10, "title": "Adult Show", "certification": "TV-MA", "path": "/media/TV/Not Kid Friendly/Adult Show"},
         ]
         self.moved: list[dict] = []
 
@@ -385,7 +385,7 @@ class Helpers(unittest.TestCase):
             self.assertEqual(rr.tv_kid_dir(), "/media/dlna/TV/Kid Friendly")
             self.assertEqual(ws.movies_dir(), "/media/dlna/Movies/Not Kid Friendly")
             os.environ["MEDIA_MOVIES"] = "../escape"
-            self.assertEqual(rr.movies_dir(), "/media/dlna/Movies")
+            self.assertEqual(rr.movies_dir(), "/media/dlna/Movies/Not Kid Friendly")
         finally:
             for key, value in old.items():
                 if value is None:
@@ -563,10 +563,10 @@ class WireStack(unittest.TestCase):
                 "POMPEY_SECRETS": str(secrets_path),
                 "POMPEY_READY": str(ready),
                 "MEDIA_ROOT": "/media",
-                "MEDIA_MOVIES": "Movies",
-                "MEDIA_MOVIES_KID": "Kid Friendly Movies",
-                "MEDIA_TV": "TV",
-                "MEDIA_TV_KID": "Kid Friendly TV",
+                "MEDIA_MOVIES": "Movies/Not Kid Friendly",
+                "MEDIA_MOVIES_KID": "Movies/Kid Friendly",
+                "MEDIA_TV": "TV/Not Kid Friendly",
+                "MEDIA_TV_KID": "TV/Kid Friendly",
                 "PLEX_URL": "http://172.30.32.1:32400",
                 "PLEX_TOKEN": "test-plex-token",
                 "INDEXER_URL": "https://example-source.test",
@@ -597,11 +597,11 @@ class WireStack(unittest.TestCase):
         self.assertTrue((self.ready / "wired").exists())
         self.assertEqual(
             set(self.state.sonarr_folders),
-            {"/media/TV", "/media/Kid Friendly TV"},
+            {"/media/TV/Not Kid Friendly", "/media/TV/Kid Friendly"},
         )
         self.assertEqual(
             set(self.state.radarr_folders),
-            {"/media/Movies", "/media/Kid Friendly Movies"},
+            {"/media/Movies/Not Kid Friendly", "/media/Movies/Kid Friendly"},
         )
         self.assertEqual(len(self.state.download_clients), 2)
         self.assertEqual({a["name"] for a in self.state.apps}, {"Sonarr", "Radarr"})
@@ -614,7 +614,7 @@ class WireStack(unittest.TestCase):
         self.assertEqual(source_fields["apiKey"], "test-source-key")
         self.assertEqual(self.state.plex_auth, {"authToken": "test-plex-token"})
         self.assertEqual(self.state.seerr_radarr[0]["hostname"], "127.0.0.1")
-        self.assertEqual(self.state.seerr_sonarr[0]["activeDirectory"], "/media/TV")
+        self.assertEqual(self.state.seerr_sonarr[0]["activeDirectory"], "/media/TV/Not Kid Friendly")
         self.assertTrue((self.ready / "seerr-arr").exists())
         self.assertTrue(self.state.initialized)
         self.assertFalse(self.nginx.exists(), "Ingress must stay the Pompey UI, not a Seerr proxy")
@@ -799,8 +799,8 @@ class RouteRating(unittest.TestCase):
         rr.route_movies("radarr-key")
         rr.route_series("sonarr-key")
         dests = {m.get("title"): m.get("rootFolderPath") for m in self.state.moved}
-        self.assertEqual(dests["Kid Flick"], "/media/Kid Friendly Movies")
-        self.assertEqual(dests["Nested Kid"], "/media/Kid Friendly Movies")
+        self.assertEqual(dests["Kid Flick"], "/media/Movies/Kid Friendly")
+        self.assertEqual(dests["Nested Kid"], "/media/Movies/Kid Friendly")
         self.assertNotIn("Unknown", dests)
         self.assertNotIn("Already Kid", dests)
         self.assertNotIn("Adult Show", dests)

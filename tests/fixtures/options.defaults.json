@@ -1,7 +1,7 @@
 {
-  "media_folder": "/media",
-  "movies_folder": "Movies",
-  "movies_kid_folder": "Kid Friendly Movies",
-  "tv_folder": "TV",
-  "tv_kid_folder": "Kid Friendly TV"
+  "media_folder": "/media/dlna",
+  "movies_folder": "Movies/Not Kid Friendly",
+  "movies_kid_folder": "Movies/Kid Friendly",
+  "tv_folder": "TV/Not Kid Friendly",
+  "tv_kid_folder": "TV/Kid Friendly"
 }

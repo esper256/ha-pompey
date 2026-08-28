@@ -61,7 +61,8 @@ log="$(run "${INIT}/00-banner.sh" 2>&1)"
 printf '%s\n' "${log}"
 grep -q "Pompey" <<<"${log}"
 test -f "${POMPEY_SECRETS}"
-test -d "${MEDIA_ROOT}/Kid Friendly Movies"
+test -d "${MEDIA_ROOT}/Movies/Not Kid Friendly"
+test -d "${MEDIA_ROOT}/Movies/Kid Friendly"
 # Secrets must not appear in banner output
 python3 - "${POMPEY_SECRETS}" "${log}" <<'PY'
 import json, sys
@@ -117,7 +118,8 @@ grep -Fq "Session\\Interface=wg0" "${POMPEY_CONFIG}/qBittorrent/qBittorrent.conf
 grep -Fq "Session\\Interface=wg0" "${POMPEY_CONFIG}/qBittorrent/config/qBittorrent.conf"
 grep -Fq "Session\\DefaultSavePath=${MEDIA_ROOT}/downloads/complete" "${POMPEY_CONFIG}/qBittorrent/qBittorrent.conf"
 test -d "${MEDIA_ROOT}/Movies"
-test -d "${MEDIA_ROOT}/Kid Friendly Movies"
+test -d "${MEDIA_ROOT}/Movies/Not Kid Friendly"
+test -d "${MEDIA_ROOT}/Movies/Kid Friendly"
 python3 - "${POMPEY_SECRETS}" "${POMPEY_CONFIG}" <<'PY'
 import json, pathlib, sys
 secrets = json.load(open(sys.argv[1], encoding="utf-8"))

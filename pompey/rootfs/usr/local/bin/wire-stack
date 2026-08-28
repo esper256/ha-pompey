@@ -71,7 +71,7 @@ def as_list(value):
 
 
 def media_root() -> str:
-    return env("MEDIA_ROOT", "/media").rstrip("/")
+    return env("MEDIA_ROOT", "/media/dlna").rstrip("/")
 
 
 def library_dir(env_name: str, default: str) -> str:
@@ -83,19 +83,19 @@ def library_dir(env_name: str, default: str) -> str:
 
 
 def movies_dir() -> str:
-    return library_dir("MEDIA_MOVIES", "Movies")
+    return library_dir("MEDIA_MOVIES", "Movies/Not Kid Friendly")
 
 
 def movies_kid_dir() -> str:
-    return library_dir("MEDIA_MOVIES_KID", "Kid Friendly Movies")
+    return library_dir("MEDIA_MOVIES_KID", "Movies/Kid Friendly")
 
 
 def tv_dir() -> str:
-    return library_dir("MEDIA_TV", "TV")
+    return library_dir("MEDIA_TV", "TV/Not Kid Friendly")
 
 
 def tv_kid_dir() -> str:
-    return library_dir("MEDIA_TV_KID", "Kid Friendly TV")
+    return library_dir("MEDIA_TV_KID", "TV/Kid Friendly")
 
 
 def plex_url() -> str:
