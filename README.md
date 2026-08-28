@@ -4,7 +4,7 @@ Search for a movie or TV show in Home Assistant. Confirm if we need you. It land
 
 Pompey is one Home Assistant OS app. The sidebar is the box: Proton, status, a button to search. Search itself is [Seerr](https://seerr.dev/) on this machine’s port **5055**, not an iframe. Downloads, matching, and the VPN stay inside Pompey. All internet from this app uses Proton WireGuard. If the tunnel is down, internet is dropped. **Plex is a separate Home Assistant app** (or another machine). Pompey does not run Plex.
 
-This is the user guide for the product we are building. It describes the journey as it should feel. [What is not ready yet](#what-is-not-ready-yet) is honest about the current cut (**0.2.26**). The [roadmap](#roadmap) is how we close the gap.
+This is the user guide for the product we are building. It describes the journey as it should feel. [What is not ready yet](#what-is-not-ready-yet) is honest about the current cut (**0.2.27**). The [roadmap](#roadmap) is how we close the gap.
 
 ## How a day with it should feel
 
@@ -169,11 +169,11 @@ A private tracker with a stable API key is set-and-forget. Prowlarr copies that 
 
 ## What is not ready yet
 
-The journey above is the target. **0.2.26** is a real Home Assistant OS install of that box, not the finished household app.
+The journey above is the target. **0.2.27** is a real Home Assistant OS install of that box, not the finished household app.
 
 | In the guide | On the machine today |
 | --- | --- |
-| Request → file on disk → Plex notices | Wiring is written. Automated tests never start the torrent client or wait on peers. A title actually landing in Plex is what a real install is still proving. |
+| Request → file on disk → Plex notices | **0.2.27** imports a finished torrent from `downloads/complete` into the Movies/TV folder Seerr used. Automated tests never start the torrent client. A title actually landing in Plex is what a real install is still proving. |
 | Auto-grab is usually the right quality | **0.2.26** applies a household HD profile: 1080p WEB-DL/BluRay encodes, no remux or 4K, prefer x265. Live Recyclarr refresh of TRaSH scores is still later. |
 | “Confirm if we need you” when quality and seeds disagree | Not built. Seerr is not a download console; we will not fork it into one. |
 | Engines stay current for years | First fetch only. Already-present binaries are skipped on restart. |
@@ -186,7 +186,7 @@ The journey above is the target. **0.2.26** is a real Home Assistant OS install 
 | Jellyfin | Plex only. |
 | Use this from outside the house | Out of scope. Search is on the LAN at :5055. Sources at :9696. Do not port-forward either. |
 
-If search is a blank page on port 5055, or the Plex button on setup does nothing, that is a bug — send the log. Rebuild so the banner says **0.2.26** if auto-grab picked a huge remux, a Seerr request only title-searched two Prowlarr sources, or you still need tagged app logs, household media-folder defaults, **Open sources**, or an older wait screen.
+If search is a blank page on port 5055, or the Plex button on setup does nothing, that is a bug — send the log. Rebuild so the banner says **0.2.27** if a finished download stayed in `downloads/complete`, auto-grab picked a huge remux, a Seerr request only title-searched two Prowlarr sources, or you still need tagged app logs, household media-folder defaults, **Open sources**, or an older wait screen.
 
 ## Roadmap
 
@@ -228,6 +228,7 @@ App config lives in `/addon_configs/<id>_pompey/`. Fetched engines live in the a
 - Search warns that `/config/seerr` is not a volume: you need **0.2.17**. The data was already persisted; Seerr was looking at a leftover `DOCKER` sentinel.
 - Search never finds releases: add a source in **Open sources**, and give wiring a minute after the Plex wizard.
 - New titles land on the Home Assistant disk, not the NAS: Media folder should be `/media/<network-storage-name>` (default `/media/dlna`) and the four library fields should be folders Plex already scans. If you installed 0.2.20 with the old `/media` defaults, change Configuration and restart.
+- Download finished but the file is still under `downloads/complete`: rebuild to **0.2.27**. The movie/TV engine was skipping the move onto a network share that reports no free space. After rebuild it retries completed torrents; the app log warns if one is still stuck. Plex only sees files that made it into the library folders.
 - Plex wizard cannot see the server: numeric IP of **your Plex app**, port 32400 published, LAN not blocked. Pompey does not contain Plex.
 
 More Home Assistant-specific notes (Supervisor skip reasons, copy-to-`/addons`): [pompey/DOCS.md](pompey/DOCS.md).
