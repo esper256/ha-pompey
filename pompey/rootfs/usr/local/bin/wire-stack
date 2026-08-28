@@ -277,6 +277,47 @@ def fill_fields(resource: dict, values: dict) -> dict:
     return resource
 
 
+def set_app_fields(resource: dict, values: dict) -> dict:
+    """Set Prowlarr application fields, appending any the existing row omitted."""
+    fill_fields(resource, values)
+    fields = resource.get("fields")
+    if not isinstance(fields, list):
+        fields = []
+        resource["fields"] = fields
+    have = {field.get("name") for field in fields}
+    for name, value in values.items():
+        if name not in have:
+            fields.append({"name": name, "value": value})
+    return resource
+
+
+# Newznab movie / TV buckets Prowlarr syncs into Radarr / Sonarr.
+RADARR_SYNC_CATS = [2000, 2010, 2020, 2030, 2040, 2045, 2050, 2060, 2070, 2080, 2090]
+SONARR_SYNC_CATS = [5000, 5010, 5020, 5030, 5040, 5045, 5050, 5060, 5070, 5080, 5090]
+SEARCH_FLAGS = ("enableRss", "enableAutomaticSearch", "enableInteractiveSearch")
+
+
+def app_field(app: dict, name: str):
+    for field in app.get("fields") or []:
+        if field.get("name") == name:
+            return field.get("value")
+    return None
+
+
+def cats_match(value, want: list[int]) -> bool:
+    if not isinstance(value, list):
+        return False
+    try:
+        have = sorted(int(item) for item in value)
+    except (TypeError, ValueError):
+        return False
+    return have == sorted(want)
+
+
+def sync_cats_for(impl: str) -> list[int]:
+    return list(RADARR_SYNC_CATS if impl == "Radarr" else SONARR_SYNC_CATS)
+
+
 def ensure_download_client(base: str, api_key: str, secrets: dict, kind: str) -> None:
     existing = as_list(http("GET", f"{base}/downloadclient", headers=arr_headers(api_key)))
     if any(item.get("implementation") == "QBittorrent" for item in existing):
@@ -309,51 +350,44 @@ def first_profile(base: str, api_key: str):
     return int(profiles[0]["id"]), profiles[0].get("name") or "Default"
 
 
-def language_profile_id(base: str, api_key: str):
-    try:
-        langs = as_list(http("GET", f"{base}/languageprofile", headers=arr_headers(api_key)))
-    except RuntimeError:
-        # Sonarr v4 dropped language profiles (404). That is expected.
-        return None
-    if not langs:
-        return None
-    return int(langs[0]["id"])
+def language_profile_id(_base: str, _api_key: str):
+    # Sonarr v4 dropped language profiles. GET /languageprofile is deprecated and
+    # warned on every wire retry (Python-urllib) while doing no work for our 4.0.x.
+    return None
 
 
 def ensure_prowlarr_app(prowlarr: str, pkey: str, name: str, impl: str, base_url: str, api_key: str) -> None:
     want = prowlarr_arr_url()
+    want_cats = sync_cats_for(impl)
+    values = {
+        "prowlarrUrl": want,
+        "baseUrl": base_url,
+        "apiKey": api_key,
+        "syncCategories": want_cats,
+    }
     apps = as_list(http("GET", f"{prowlarr}/api/v1/applications", headers=arr_headers(pkey)))
     for existing in apps:
         if existing.get("name") != name:
             continue
-        current = ""
-        for field in existing.get("fields") or []:
-            if field.get("name") == "prowlarrUrl":
-                current = str(field.get("value") or "").rstrip("/")
-        if current == want:
+        current = str(app_field(existing, "prowlarrUrl") or "").rstrip("/")
+        current_cats = app_field(existing, "syncCategories")
+        if current == want and cats_match(current_cats, want_cats):
             return
         if existing.get("id") is None:
             return
         updated = json.loads(json.dumps(existing))
-        fill_fields(updated, {"prowlarrUrl": want})
+        set_app_fields(updated, {"prowlarrUrl": want, "syncCategories": want_cats})
         http(
             "PUT",
             f"{prowlarr}/api/v1/applications/{existing['id']}",
             updated,
             headers=arr_headers(pkey),
         )
-        log(f"prowlarr app {name} Arr URL {want}")
+        log(f"prowlarr app {name} Arr URL {want} cats {want_cats[0]}s")
         return
     schema = http("GET", f"{prowlarr}/api/v1/applications/schema", headers=arr_headers(pkey))
     app = schema_impl(schema, impl)
-    fill_fields(
-        app,
-        {
-            "prowlarrUrl": want,
-            "baseUrl": base_url,
-            "apiKey": api_key,
-        },
-    )
+    set_app_fields(app, values)
     app["name"] = name
     app["syncLevel"] = "fullSync"
     app["tags"] = []
@@ -406,19 +440,29 @@ def sync_prowlarr_indexers(prowlarr: str, pkey: str) -> None:
     for item in indexers:
         if not item.get("enable") or item.get("id") is None:
             continue
-        patch = False
-        for key in ("enableRss", "enableAutomaticSearch", "enableInteractiveSearch"):
-            if item.get(key) is False:
-                item[key] = True
-                patch = True
-        if not patch:
+        if all(item.get(key) is True for key in SEARCH_FLAGS):
             continue
-        name = item.get("name") or "unnamed"
+        detail = item
+        try:
+            fetched = http(
+                "GET",
+                f"{prowlarr}/api/v1/indexer/{item['id']}",
+                headers=arr_headers(pkey),
+            )
+            if isinstance(fetched, dict) and fetched.get("id") is not None:
+                detail = fetched
+        except RuntimeError:
+            pass
+        if all(detail.get(key) is True for key in SEARCH_FLAGS):
+            continue
+        for key in SEARCH_FLAGS:
+            detail[key] = True
+        name = detail.get("name") or item.get("name") or "unnamed"
         try:
             http(
                 "PUT",
                 f"{prowlarr}/api/v1/indexer/{item['id']}",
-                item,
+                detail,
                 headers=arr_headers(pkey),
             )
             log(f"Prowlarr source {name} search flags turned on")
@@ -430,9 +474,18 @@ def sync_prowlarr_indexers(prowlarr: str, pkey: str) -> None:
     for item in indexers:
         name = item.get("name") or "unnamed"
         on = "on" if item.get("enable") else "off"
-        rss = item.get("enableRss")
-        auto = item.get("enableAutomaticSearch")
-        interactive = item.get("enableInteractiveSearch")
+        rss, auto, interactive = (item.get(key) for key in SEARCH_FLAGS)
+        if item.get("enable") and any(flag is not True for flag in (rss, auto, interactive)):
+            try:
+                fetched = http(
+                    "GET",
+                    f"{prowlarr}/api/v1/indexer/{item['id']}",
+                    headers=arr_headers(pkey),
+                )
+                if isinstance(fetched, dict):
+                    rss, auto, interactive = (fetched.get(key) for key in SEARCH_FLAGS)
+            except RuntimeError:
+                pass
         log(
             f"Prowlarr source {name} {on} "
             f"rss={rss} auto={auto} interactive={interactive}"
@@ -444,6 +497,42 @@ def sync_prowlarr_indexers(prowlarr: str, pkey: str) -> None:
         headers=arr_headers(pkey),
     )
     log("prowlarr sync")
+
+
+def log_arr_vs_prowlarr_indexers(
+    radarr: str, radarr_key: str, sonarr: str, sonarr_key: str, prowlarr: str, pkey: str
+) -> None:
+    """Warn when Prowlarr sync left Radarr/Sonarr with fewer sources than Prowlarr has."""
+    try:
+        enabled = [
+            item
+            for item in as_list(http("GET", f"{prowlarr}/api/v1/indexer", headers=arr_headers(pkey)))
+            if item.get("enable")
+        ]
+    except RuntimeError as exc:
+        log(f"could not list Prowlarr sources after sync: {exc}", "WARNING")
+        return
+    names = {(item.get("name") or "").strip() for item in enabled if item.get("name")}
+    for kind, base, key in (("Radarr", radarr, radarr_key), ("Sonarr", sonarr, sonarr_key)):
+        try:
+            arr = as_list(http("GET", f"{base}/indexer", headers=arr_headers(key)))
+        except RuntimeError as exc:
+            log(f"could not list {kind} indexers: {exc}", "WARNING")
+            continue
+        active = [item for item in arr if item.get("enable") is not False]
+        log(f"{kind} indexers: {len(active)} (Prowlarr enabled {len(enabled)})")
+        arr_names = {(item.get("name") or "").strip() for item in active if item.get("name")}
+        missing = sorted(name for name in names if name not in arr_names)
+        extra = sorted(name for name in arr_names if name not in names)
+        if missing:
+            log(
+                f"{kind} is missing Prowlarr source(s): {', '.join(missing)}. "
+                "Those sources will not run for Seerr requests (Prowlarr often refuses "
+                "to sync when a category test returns top100 / CloudFlare).",
+                "WARNING",
+            )
+        if extra:
+            log(f"{kind} extra indexer(s) not in Prowlarr: {', '.join(extra)}")
 
 
 def history_data_map(record: dict) -> dict[str, str]:
@@ -699,7 +788,9 @@ def configure_seerr(secrets: dict, radarr_profile, sonarr_profile, sonarr_lang) 
 
     email = secrets.get("seerr_email") or "pompey@local"
     password = secrets.get("seerr_password") or ""
-    if password and not s.cookie:
+    # Disk API key is admin. POST /auth/local with the generated pompey@local
+    # password 403s and Seerr logs "invalid Seerr password" on every wire retry.
+    if password and not s.cookie and not s.api_key:
         try:
             s.call(
                 "POST",
@@ -903,6 +994,7 @@ def main() -> int:
     ensure_prowlarr_app(prowlarr, pk, "Radarr", "Radarr", radarr_url(), rk)
     ensure_indexer(prowlarr, pk)
     sync_prowlarr_indexers(prowlarr, pk)
+    log_arr_vs_prowlarr_indexers(radarr, rk, sonarr, sk, prowlarr, pk)
     retry_unfilled_titles(radarr, rk, sonarr, sk)
     log_recent_prowlarr_searches(prowlarr, pk)
 
