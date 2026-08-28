@@ -433,7 +433,7 @@ done
 if [[ "${missing}" -ne 0 ]]; then
   exit 1
 fi
-for named in radarr sonarr prowlarr seerr nginx; do
+for named in radarr sonarr prowlarr prowlarr-arr seerr nginx; do
   if ! grep -q 'pompey-log prefix' "${svc}/${named}/run"; then
     echo "missing pompey-log prefix in ${svc}/${named}/run" >&2
     exit 1
@@ -443,6 +443,8 @@ grep -q 'pompey-log tail' "${svc}/qbittorrent/run"
 grep -q 'qBittorrent/logs' "${svc}/qbittorrent/run"
 test -x "${BIN}/pompey-log"
 test -x "${BIN}/pompey-log-emit"
+test -x "${BIN}/prowlarr-arr-proxy"
+grep -q '127.0.0.1:9698/ping' "${svc}/wire/run"
 if grep -RIn 'pompey-svc' "${ROOT}/pompey/rootfs"; then
   echo "pompey-svc was renamed to pompey-log" >&2
   exit 1

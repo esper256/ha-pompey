@@ -132,6 +132,11 @@ def prowlarr_url() -> str:
     return env("PROWLARR_URL", "http://127.0.0.1:9696").rstrip("/")
 
 
+def prowlarr_arr_url() -> str:
+    """Radarr/Sonarr talk to Prowlarr through the title-search caps proxy."""
+    return env("PROWLARR_ARR_URL", "http://127.0.0.1:9698").rstrip("/")
+
+
 def seerr_url() -> str:
     return env("SEERR_URL", "http://127.0.0.1:5055").rstrip("/")
 
@@ -316,15 +321,35 @@ def language_profile_id(base: str, api_key: str):
 
 
 def ensure_prowlarr_app(prowlarr: str, pkey: str, name: str, impl: str, base_url: str, api_key: str) -> None:
+    want = prowlarr_arr_url()
     apps = as_list(http("GET", f"{prowlarr}/api/v1/applications", headers=arr_headers(pkey)))
-    if any(a.get("name") == name for a in apps):
+    for existing in apps:
+        if existing.get("name") != name:
+            continue
+        current = ""
+        for field in existing.get("fields") or []:
+            if field.get("name") == "prowlarrUrl":
+                current = str(field.get("value") or "").rstrip("/")
+        if current == want:
+            return
+        if existing.get("id") is None:
+            return
+        updated = json.loads(json.dumps(existing))
+        fill_fields(updated, {"prowlarrUrl": want})
+        http(
+            "PUT",
+            f"{prowlarr}/api/v1/applications/{existing['id']}",
+            updated,
+            headers=arr_headers(pkey),
+        )
+        log(f"prowlarr app {name} Arr URL {want}")
         return
     schema = http("GET", f"{prowlarr}/api/v1/applications/schema", headers=arr_headers(pkey))
     app = schema_impl(schema, impl)
     fill_fields(
         app,
         {
-            "prowlarrUrl": f"{prowlarr_url()}",
+            "prowlarrUrl": want,
             "baseUrl": base_url,
             "apiKey": api_key,
         },
@@ -419,6 +444,98 @@ def sync_prowlarr_indexers(prowlarr: str, pkey: str) -> None:
         headers=arr_headers(pkey),
     )
     log("prowlarr sync")
+
+
+def history_data_map(record: dict) -> dict[str, str]:
+    raw = record.get("data") if isinstance(record, dict) else None
+    if not isinstance(raw, dict):
+        return {}
+    out: dict[str, str] = {}
+    for key, val in raw.items():
+        if val is None or val == "":
+            continue
+        out[str(key).lower()] = str(val)
+    return out
+
+
+def describe_prowlarr_history_row(record: dict, indexer_names: dict | None = None) -> str:
+    """Say whether History Query was empty because of IMDb/TMDB, RSS, or a true blank."""
+    names = indexer_names or {}
+    indexer = record.get("indexer") if isinstance(record, dict) else None
+    if isinstance(indexer, dict) and indexer.get("name"):
+        name = str(indexer.get("name"))
+    else:
+        idx = record.get("indexerId") if isinstance(record, dict) else None
+        try:
+            name = names.get(int(idx)) or f"indexer {idx}"
+        except (TypeError, ValueError):
+            name = str(indexer or "indexer")
+    event = record.get("eventType") if isinstance(record, dict) else None
+    event_s = str(event or "").lower()
+    data = history_data_map(record if isinstance(record, dict) else {})
+    query = (data.get("query") or "").strip()
+    qtype = (data.get("querytype") or "").strip() or "search"
+    source = (data.get("source") or "").strip()
+    ids = []
+    if data.get("imdbid"):
+        ids.append(f"IMDb {data['imdbid']}")
+    if data.get("tmdbid"):
+        ids.append(f"TMDb {data['tmdbid']}")
+    if data.get("tvdbid"):
+        ids.append(f"TVDb {data['tvdbid']}")
+    id_bit = " ".join(ids)
+    via = f" via {source}" if source else ""
+    url = (data.get("url") or "").lower()
+    if "top100" in url or "top-100" in url or "top_100" in url:
+        return f"{name}{via} browse/top100 (not the Seerr title)"
+    if event in (3, "indexerRss", "IndexerRss") or event_s == "indexerrss":
+        return f"{name}{via} RSS (no title term)"
+    if id_bit and not query:
+        return f"{name}{via} {qtype} {id_bit} (Query empty — ID search)"
+    if id_bit and query:
+        return f"{name}{via} {qtype} {id_bit} q={query!r}"
+    if query:
+        return f"{name}{via} {qtype} q={query!r}"
+    return f"{name}{via} {qtype} empty query (no IDs)"
+
+
+def log_recent_prowlarr_searches(prowlarr: str, pkey: str) -> None:
+    """Dump recent History rows so an empty Query is not mistaken for a blank search."""
+    try:
+        indexers = as_list(http("GET", f"{prowlarr}/api/v1/indexer", headers=arr_headers(pkey)))
+        names = {}
+        for item in indexers:
+            try:
+                names[int(item["id"])] = item.get("name") or f"indexer {item['id']}"
+            except (TypeError, ValueError, KeyError):
+                continue
+        payload = http(
+            "GET",
+            f"{prowlarr}/api/v1/history?page=1&pageSize=40&sortKey=date&sortDirection=descending",
+            headers=arr_headers(pkey),
+        )
+        records = as_list(payload)
+        shown = 0
+        for record in records:
+            event = record.get("eventType")
+            event_s = str(event or "").lower()
+            if event not in (2, 3, "indexerQuery", "indexerRss", "IndexerQuery", "IndexerRss") and event_s not in {
+                "indexerquery",
+                "indexerrss",
+            }:
+                continue
+            log(f"Prowlarr history {describe_prowlarr_history_row(record, names)}")
+            shown += 1
+            if shown >= 20:
+                break
+        if shown:
+            log(
+                f"Prowlarr history: {shown} recent search(es). "
+                "Empty Query plus IMDb/TMDb is ID search (keep it). "
+                "Empty Query with no IDs is RSS or a true blank."
+            )
+    except RuntimeError as exc:
+        log(f"could not read Prowlarr history: {exc}", "WARNING")
 
 
 def retry_unfilled_titles(radarr: str, radarr_key: str, sonarr: str, sonarr_key: str) -> None:
@@ -787,6 +904,7 @@ def main() -> int:
     ensure_indexer(prowlarr, pk)
     sync_prowlarr_indexers(prowlarr, pk)
     retry_unfilled_titles(radarr, rk, sonarr, sk)
+    log_recent_prowlarr_searches(prowlarr, pk)
 
     sp = first_profile(sonarr, sk)
     rp = first_profile(radarr, rk)

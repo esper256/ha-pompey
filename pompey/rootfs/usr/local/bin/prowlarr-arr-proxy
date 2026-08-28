@@ -1,0 +1,175 @@
+#!/usr/bin/env python3
+"""Localhost proxy so Radarr/Sonarr title-search instead of empty/top100.
+
+Prowlarr caps often advertise imdbid/tmdbid. Radarr then sends only that ID and
+omits the movie title. Many torrent (Cardigann) sources do not actually search
+by ID; empty keywords become a top100 browse — unrelated to the Seerr request.
+
+The household still opens Prowlarr on 9696. Arr is told to use this proxy
+(9698). Caps keep q (and TV season/ep) and drop ID params.
+"""
+from __future__ import annotations
+
+import os
+import re
+import sys
+import urllib.error
+import urllib.parse
+import urllib.request
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+HOP = {
+    "connection",
+    "keep-alive",
+    "proxy-authenticate",
+    "proxy-authorization",
+    "te",
+    "trailers",
+    "transfer-encoding",
+    "upgrade",
+}
+
+ID_PARAMS = {
+    "imdbid",
+    "tmdbid",
+    "tvdbid",
+    "tvmazeid",
+    "traktid",
+    "doubanid",
+    "rid",
+    "imdbtitle",
+    "imdbyear",
+}
+
+SEARCH_OPEN = re.compile(r"<(movie-search|tv-search)(\s[^>]*)?>", re.I)
+
+
+def upstream() -> str:
+    return os.environ.get("PROWLARR_URL", "http://127.0.0.1:9696").rstrip("/")
+
+
+def bind_host() -> str:
+    return os.environ.get("PROWLARR_ARR_BIND", "127.0.0.1").strip() or "127.0.0.1"
+
+
+def bind_port() -> int:
+    return int(os.environ.get("PROWLARR_ARR_PORT", "9698"))
+
+
+def rewrite_param_list(raw: str) -> str:
+    kept = []
+    seen = set()
+    for part in raw.split(","):
+        name = part.strip()
+        if not name:
+            continue
+        key = name.lower()
+        if key in ID_PARAMS or key in seen:
+            continue
+        seen.add(key)
+        kept.append(name)
+    if "q" not in seen:
+        kept.insert(0, "q")
+    return ",".join(kept)
+
+
+def rewrite_caps_xml(xml: str) -> str:
+    def open_tag(match: re.Match) -> str:
+        tag = match.group(1)
+        rest = match.group(2) or ""
+
+        def params(pm: re.Match) -> str:
+            quote = pm.group(1)
+            return f"supportedParams={quote}{rewrite_param_list(pm.group(2))}{quote}"
+
+        rest = re.sub(
+            r"""supportedParams=(['"])([^'"]*)\1""",
+            params,
+            rest,
+            count=1,
+            flags=re.I,
+        )
+        return f"<{tag}{rest}>"
+
+    return SEARCH_OPEN.sub(open_tag, xml)
+
+
+def is_caps_request(path: str) -> bool:
+    parsed = urllib.parse.urlparse(path)
+    qs = urllib.parse.parse_qs(parsed.query)
+    t = (qs.get("t") or [""])[0].lower()
+    return t == "caps"
+
+
+class Handler(BaseHTTPRequestHandler):
+    def log_message(self, fmt: str, *args) -> None:
+        sys.stderr.write("[prowlarr-arr] " + (fmt % args) + "\n")
+
+    def do_GET(self):
+        self._forward("GET")
+
+    def do_POST(self):
+        self._forward("POST")
+
+    def do_PUT(self):
+        self._forward("PUT")
+
+    def do_DELETE(self):
+        self._forward("DELETE")
+
+    def do_HEAD(self):
+        self._forward("HEAD")
+
+    def _forward(self, method: str) -> None:
+        length = int(self.headers.get("Content-Length") or 0)
+        body = self.rfile.read(length) if length else None
+        url = upstream() + self.path
+        headers = {}
+        for key, val in self.headers.items():
+            if key.lower() in HOP or key.lower() == "host":
+                continue
+            headers[key] = val
+        req = urllib.request.Request(url, data=body, method=method, headers=headers)
+        try:
+            with urllib.request.urlopen(req, timeout=120) as resp:
+                raw = resp.read()
+                status = resp.status
+                out_headers = list(resp.headers.items())
+        except urllib.error.HTTPError as exc:
+            raw = exc.read()
+            status = exc.code
+            out_headers = list(exc.headers.items()) if exc.headers else []
+        except urllib.error.URLError as exc:
+            msg = f"upstream {url}: {exc}".encode()
+            self.send_response(502)
+            self.send_header("Content-Type", "text/plain")
+            self.send_header("Content-Length", str(len(msg)))
+            self.end_headers()
+            if method != "HEAD":
+                self.wfile.write(msg)
+            return
+        if is_caps_request(self.path) and raw:
+            text = raw.decode("utf-8", errors="replace")
+            if "<movie-search" in text.lower() or "<tv-search" in text.lower():
+                raw = rewrite_caps_xml(text).encode("utf-8")
+        self.send_response(status)
+        for key, val in out_headers:
+            if key.lower() in HOP or key.lower() == "content-length":
+                continue
+            self.send_header(key, val)
+        self.send_header("Content-Length", str(len(raw)))
+        self.end_headers()
+        if method != "HEAD" and raw:
+            self.wfile.write(raw)
+
+
+def serve() -> None:
+    host = bind_host()
+    port = bind_port()
+    httpd = ThreadingHTTPServer((host, port), Handler)
+    print(f"[prowlarr-arr] title-search caps on {host}:{port} → {upstream()}", flush=True)
+    httpd.serve_forever()
+
+
+if __name__ == "__main__":
+    serve()

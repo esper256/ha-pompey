@@ -31,6 +31,7 @@ def load(name: str, path: Path):
 
 
 ws = load("wire_stack", BIN / "wire-stack")
+arrp = load("prowlarr_arr_proxy", BIN / "prowlarr-arr-proxy")
 rr = load("route_rating", BIN / "route-rating")
 wqc = load("wg_quick_contract", ROOT / "tests/lib/wg_quick_contract.py")
 
@@ -70,6 +71,7 @@ class FakeState:
         self.indexers: list[dict] = []
         self.commands: list[dict] = []
         self.arr_commands: list[dict] = []
+        self.history: list[dict] = []
         self.plex_auth: object = None
         self.local_auth: object = None
         self.allow_seerr_local = False
@@ -207,8 +209,23 @@ def handler_for(state: FakeState):
                         ]
                     )
                 if path == "/api/v1/applications" and method == "POST":
-                    state.apps.append(body)
-                    return self._send(201, body)
+                    posted = dict(body or {})
+                    if posted.get("id") is None:
+                        posted["id"] = len(state.apps) + 1
+                    state.apps.append(posted)
+                    return self._send(201, posted)
+                if path.startswith("/api/v1/applications/") and method == "PUT":
+                    try:
+                        idx = int(path.rsplit("/", 1)[-1])
+                    except ValueError:
+                        return self._send(404, {"error": path})
+                    for i, item in enumerate(state.apps):
+                        if item.get("id") == idx:
+                            state.apps[i] = body or item
+                            if isinstance(state.apps[i], dict):
+                                state.apps[i]["id"] = idx
+                            return self._send(body=state.apps[i])
+                    return self._send(404, {"error": path})
                 if path == "/api/v1/indexer" and method == "GET":
                     return self._send(body=state.indexers)
                 if path == "/api/v1/indexer/schema":
@@ -232,6 +249,15 @@ def handler_for(state: FakeState):
                 if path == "/api/v1/command" and method == "POST":
                     state.commands.append(body or {})
                     return self._send(201, body or {"name": "ApplicationIndexerSync"})
+                if path == "/api/v1/history" and method == "GET":
+                    return self._send(
+                        body={
+                            "page": 1,
+                            "pageSize": 40,
+                            "totalRecords": len(state.history),
+                            "records": state.history,
+                        }
+                    )
                 return self._send(404, {"error": path})
             if role == "seerr":
                 if path == "/api/v1/settings/public":
@@ -434,6 +460,102 @@ class Helpers(unittest.TestCase):
                     os.environ.pop(key, None)
                 else:
                     os.environ[key] = value
+
+    def test_history_row_empty_query_with_imdb_is_id_search(self):
+        line = ws.describe_prowlarr_history_row(
+            {
+                "indexerId": 1,
+                "eventType": "indexerQuery",
+                "data": {"query": "", "queryType": "movie", "imdbId": "tt0133093", "source": "Radarr"},
+            },
+            {1: "YTS"},
+        )
+        self.assertIn("YTS", line)
+        self.assertIn("IMDb tt0133093", line)
+        self.assertIn("ID search", line)
+        self.assertIn("Radarr", line)
+
+    def test_history_row_accepts_pascal_case_id_keys(self):
+        line = ws.describe_prowlarr_history_row(
+            {
+                "indexerId": 2,
+                "eventType": "indexerQuery",
+                "data": {"Query": "", "QueryType": "movie", "ImdbId": "tt0137523", "TmdbId": "550"},
+            },
+            {2: "RARBG"},
+        )
+        self.assertIn("IMDb tt0137523", line)
+        self.assertIn("TMDb 550", line)
+        self.assertIn("ID search", line)
+
+    def test_history_row_title_query_is_named(self):
+        line = ws.describe_prowlarr_history_row(
+            {
+                "indexerId": 3,
+                "eventType": "indexerQuery",
+                "data": {"query": "The Matrix", "queryType": "search"},
+            },
+            {3: "1337x"},
+        )
+        self.assertIn("q='The Matrix'", line)
+        self.assertNotIn("ID search", line)
+
+    def test_history_row_rss_has_no_title_term(self):
+        line = ws.describe_prowlarr_history_row(
+            {"indexerId": 4, "eventType": "indexerRss", "data": {"query": "", "queryType": "search"}},
+            {4: "Nyaa"},
+        )
+        self.assertIn("RSS", line)
+        self.assertNotIn("ID search", line)
+
+    def test_history_row_empty_query_without_ids(self):
+        line = ws.describe_prowlarr_history_row(
+            {"indexerId": 5, "eventType": "indexerQuery", "data": {"query": "", "queryType": "movie"}},
+            {5: "Blank"},
+        )
+        self.assertIn("empty query (no IDs)", line)
+
+    def test_history_row_top100_is_browse_not_id_search(self):
+        line = ws.describe_prowlarr_history_row(
+            {
+                "indexerId": 6,
+                "eventType": "indexerQuery",
+                "data": {
+                    "query": "",
+                    "queryType": "movie",
+                    "url": "https://tracker.example/top100",
+                    "source": "Radarr",
+                },
+            },
+            {6: "RARBG"},
+        )
+        self.assertIn("browse/top100", line)
+        self.assertIn("not the Seerr title", line)
+        self.assertNotIn("ID search", line)
+
+    def test_caps_xml_drops_id_params_keeps_title_and_tv_season(self):
+        xml = """
+        <caps>
+          <searching>
+            <search available="yes" supportedParams="q"/>
+            <tv-search available="yes" supportedParams="q,season,ep,imdbid,tmdbid,tvdbid"/>
+            <movie-search available="yes" supportedParams="q,imdbid,tmdbid"/>
+          </searching>
+        </caps>
+        """
+        out = arrp.rewrite_caps_xml(xml)
+        self.assertIn('supportedParams="q,season,ep"', out)
+        self.assertIn('<movie-search available="yes" supportedParams="q"/>', out)
+        self.assertNotIn("imdbid", out)
+        self.assertNotIn("tmdbid", out)
+        self.assertNotIn("tvdbid", out)
+
+    def test_caps_xml_inserts_q_if_only_ids_were_advertised(self):
+        xml = '<movie-search available="yes" supportedParams="imdbid,tmdbid"/>'
+        self.assertEqual(
+            arrp.rewrite_caps_xml(xml),
+            '<movie-search available="yes" supportedParams="q"/>',
+        )
 
     def test_parse_plex(self):
         self.assertEqual(ws.parse_plex("http://172.30.32.1:32400"), ("172.30.32.1", 32400, False))
@@ -647,6 +769,9 @@ class WireStack(unittest.TestCase):
         )
         self.assertEqual(len(self.state.download_clients), 2)
         self.assertEqual({a["name"] for a in self.state.apps}, {"Sonarr", "Radarr"})
+        for app in self.state.apps:
+            fields = {f["name"]: f.get("value") for f in app.get("fields") or []}
+            self.assertEqual(fields.get("prowlarrUrl"), "http://127.0.0.1:9698")
         self.assertEqual(len(self.state.indexers), 1)
         self.assertEqual(
             [c.get("name") for c in self.state.commands],
@@ -749,6 +874,79 @@ class WireStack(unittest.TestCase):
         self.assertTrue(any(n.startswith("Movies") and n.endswith("Search") for n in names))
         movie_retry = next(c for c in self.state.arr_commands if str(c.get("name", "")).startswith("Movies"))
         self.assertEqual(movie_retry.get("movieIds"), [99])
+
+    def test_points_existing_prowlarr_apps_at_title_search_proxy(self):
+        os.environ["INDEXER_URL"] = ""
+        os.environ["INDEXER_API_KEY"] = ""
+        self.state.apps = [
+            {
+                "id": 3,
+                "name": "Radarr",
+                "fields": [
+                    {"name": "prowlarrUrl", "value": "http://127.0.0.1:9696"},
+                    {"name": "baseUrl", "value": "http://127.0.0.1:7878"},
+                    {"name": "apiKey", "value": "radarr-key"},
+                ],
+            }
+        ]
+        rc = ws.main()
+        self.assertEqual(rc, 0)
+        radarr = next(item for item in self.state.apps if item["name"] == "Radarr")
+        fields = {f["name"]: f.get("value") for f in radarr.get("fields") or []}
+        self.assertEqual(fields.get("prowlarrUrl"), "http://127.0.0.1:9698")
+
+    def test_logs_prowlarr_history_id_search_vs_title(self):
+        os.environ["INDEXER_URL"] = ""
+        os.environ["INDEXER_API_KEY"] = ""
+        self.state.indexers = [
+            {
+                "id": 1,
+                "name": "YTS",
+                "enable": True,
+                "enableRss": True,
+                "enableAutomaticSearch": True,
+                "enableInteractiveSearch": True,
+            },
+            {
+                "id": 2,
+                "name": "1337x",
+                "enable": True,
+                "enableRss": True,
+                "enableAutomaticSearch": True,
+                "enableInteractiveSearch": True,
+            },
+        ]
+        self.state.history = [
+            {
+                "indexerId": 1,
+                "eventType": "indexerQuery",
+                "data": {
+                    "query": "",
+                    "queryType": "movie",
+                    "imdbId": "tt0133093",
+                    "source": "Radarr",
+                },
+            },
+            {
+                "indexerId": 2,
+                "eventType": "indexerQuery",
+                "data": {"query": "The Matrix", "queryType": "search", "source": "Radarr"},
+            },
+        ]
+        import io
+        from contextlib import redirect_stdout
+
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rc = ws.main()
+        self.assertEqual(rc, 0)
+        out = buf.getvalue()
+        self.assertTrue(
+            any(role == "prowlarr" and path == "/api/v1/history" for role, _method, path, _body in self.state.calls)
+        )
+        self.assertIn("IMDb tt0133093", out)
+        self.assertIn("ID search", out)
+        self.assertIn("q='The Matrix'", out)
 
     def test_wires_when_seerr_local_login_is_403(self):
         """Real Seerr /auth/local is login-only; API key 403s until user id 1 exists."""

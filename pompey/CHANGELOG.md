@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.25
+
+- Empty Query in Prowlarr History during a Seerr request is often a **top100 browse**, not an IMDb search: Radarr sent an ID (or nothing), the source ignored it, and listed popular torrents. Arr now talks to Prowlarr through a localhost proxy that advertises title search only, so the movie name goes to every source. Open sources stays on port 9696. After wiring, the app log labels History rows as ID, title, RSS, or browse/top100.
+
 ## 0.2.24
 
 - Enabled Prowlarr sources get RSS, automatic, and interactive search turned on. After wiring, Radarr and Sonarr search titles that still have no file, so a request that hit too few indexers is tried again. You do not wait for the next Arr cycle, and you do not cancel the Seerr request.
