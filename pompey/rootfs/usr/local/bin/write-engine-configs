@@ -206,6 +206,7 @@ def patch_qbit_paths(text: str) -> str:
 
 
 seed = qbit_seed_settings(after_download_policy())
+seed[r"Session\DisableAutoTMMByDefault"] = "true"
 # Locals: f-string expressions cannot contain backslashes on older Python.
 ratio_on = seed[r"Session\MaxRatioEnabled"]
 ratio = seed[r"Session\MaxRatio"]
@@ -228,7 +229,7 @@ Session\\InterfaceName=wg0
 Session\\InterfaceAddress=
 Session\\Port=6881
 Session\\UPnP=false
-Session\\DisableAutoTMMByDefault=false
+Session\\DisableAutoTMMByDefault=true
 Session\\MaxRatioEnabled={ratio_on}
 Session\\MaxRatio={ratio}
 Session\\MaxSeedingTimeEnabled={time_on}

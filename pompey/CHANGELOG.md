@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.27
+
+- A finished download sitting in `downloads/complete` is not the library. Radarr/Sonarr now import into the Movies/TV folder Seerr used. Network shares (this house: `/media/dlna`) often report no free space, which used to skip that move. Rebuild retries completed torrents still in qBittorrent. The app log warns if one is stuck.
+
 ## 0.2.26
 
 - Auto-grab prefers **1080p WEB-DL / BluRay encodes**, not remux or 4K. A 26 GB remux was Radarr’s default ranking, not a bad source. The household profile also prefers x265 and WEB-DL, rejects CAM/TS, and caps 1080p size (about 10–15 GB for a two-hour movie). Already-queued grabs are not cancelled. Search still uses this profile after a rebuild.

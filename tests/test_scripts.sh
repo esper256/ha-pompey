@@ -119,6 +119,7 @@ grep -Fq "FileLogger\\Path=${POMPEY_CONFIG}/qBittorrent/logs" "${POMPEY_CONFIG}/
 grep -Fq "Session\\Interface=wg0" "${POMPEY_CONFIG}/qBittorrent/qBittorrent.conf"
 grep -Fq "Session\\Interface=wg0" "${POMPEY_CONFIG}/qBittorrent/config/qBittorrent.conf"
 grep -Fq "Session\\DefaultSavePath=${MEDIA_ROOT}/downloads/complete" "${POMPEY_CONFIG}/qBittorrent/qBittorrent.conf"
+grep -Fq "Session\\DisableAutoTMMByDefault=true" "${POMPEY_CONFIG}/qBittorrent/qBittorrent.conf"
 grep -Fq "Session\\MaxRatioAct=1" "${POMPEY_CONFIG}/qBittorrent/qBittorrent.conf"
 grep -Fq "Session\\MaxSeedingTime=2880" "${POMPEY_CONFIG}/qBittorrent/qBittorrent.conf"
 grep -Fq "Session\\MaxRatioEnabled=false" "${POMPEY_CONFIG}/qBittorrent/qBittorrent.conf"
