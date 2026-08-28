@@ -632,10 +632,53 @@ def quality_id_of(value) -> int | None:
         return None
 
 
-def rebuild_profile_items(catalog: dict, groups: tuple, allow_unlisted: bool = False) -> list[dict]:
+def group_id_state(profiles: list[dict]) -> dict:
+    """Arr rejects quality groups with id 0 ('Groups must have an ID'). Reuse ids."""
+    by_name: dict[str, int] = {}
+    used: set[int] = set()
+    for profile in profiles:
+        if not isinstance(profile, dict):
+            continue
+        for item in profile.get("items") or []:
+            if not isinstance(item, dict) or isinstance(item.get("quality"), dict):
+                continue
+            gid = quality_id_of(item)
+            if gid in (None, 0):
+                continue
+            used.add(gid)
+            name = item.get("name")
+            if name:
+                by_name.setdefault(str(name), gid)
+    nxt = 1000
+    while nxt in used:
+        nxt += 1
+    return {"by_name": by_name, "used": used, "next": nxt}
+
+
+def take_group_id(state: dict, name: str) -> int:
+    have = state["by_name"].get(name)
+    if have:
+        return int(have)
+    gid = int(state["next"])
+    used = state["used"]
+    while gid in used:
+        gid += 1
+    used.add(gid)
+    state["by_name"][name] = gid
+    state["next"] = gid + 1
+    return gid
+
+
+def rebuild_profile_items(
+    catalog: dict,
+    groups: tuple,
+    allow_unlisted: bool = False,
+    id_state: dict | None = None,
+) -> list[dict]:
     used: set[str] = set()
     items: list[dict] = []
     grouped = {n for _name, names in groups for n in names}
+    ids = id_state if id_state is not None else group_id_state([])
     for group_name, names in groups:
         present = [catalog[n] for n in names if n in catalog]
         if not present:
@@ -646,6 +689,7 @@ def rebuild_profile_items(catalog: dict, groups: tuple, allow_unlisted: bool = F
             continue
         items.append(
             {
+                "id": take_group_id(ids, group_name),
                 "name": group_name,
                 "allowed": True,
                 "items": [{"quality": q, "items": [], "allowed": True} for q in present],
@@ -718,15 +762,14 @@ def household_format_scores(tier: str) -> dict[str, int]:
     return scores
 
 
-def ensure_custom_formats(base: str, api_key: str) -> dict[str, int]:
-    """Upsert household title CFs. Returns name -> Arr id."""
+def ensure_custom_formats(base: str, api_key: str) -> list[dict]:
+    """Upsert household title CFs. Returns the Arr custom-format list (all of them)."""
     try:
         existing = as_list(http("GET", f"{base}/customformat", headers=arr_headers(api_key)))
     except RuntimeError as exc:
         log(f"custom formats: {exc}", "WARNING")
-        return {}
+        return []
     by_name = {item.get("name"): item for item in existing if item.get("name")}
-    ids: dict[str, int] = {}
     for name, regex in CUSTOM_FORMATS:
         payload = title_custom_format(name, regex)
         have = by_name.get(name)
@@ -750,19 +793,32 @@ def ensure_custom_formats(base: str, api_key: str) -> dict[str, int]:
             if saved_id is None and have:
                 saved_id = have.get("id")
             if saved_id is not None:
-                ids[name] = int(saved_id)
+                stored = dict(payload)
+                stored["id"] = int(saved_id)
+                by_name[name] = stored
         except RuntimeError as exc:
             log(f"custom format {name}: {exc}", "WARNING")
-    return ids
+    try:
+        latest = as_list(http("GET", f"{base}/customformat", headers=arr_headers(api_key)))
+        if latest:
+            return latest
+    except RuntimeError as exc:
+        log(f"custom formats after upsert: {exc}", "WARNING")
+    return [item for item in by_name.values() if isinstance(item, dict)]
 
 
-def format_items_for(tier: str, cf_ids: dict[str, int]) -> list[dict]:
+def format_items_for(tier: str, formats: list[dict]) -> list[dict]:
+    """Arr requires every custom format on the profile, including score 0."""
+    scores = household_format_scores(tier)
     items = []
-    for name, score in household_format_scores(tier).items():
-        cf_id = cf_ids.get(name)
-        if cf_id is None:
+    for fmt in formats:
+        if not isinstance(fmt, dict):
             continue
-        items.append({"format": cf_id, "name": name, "score": score})
+        name = fmt.get("name")
+        fid = fmt.get("id")
+        if not name or fid is None:
+            continue
+        items.append({"format": int(fid), "name": str(name), "score": int(scores.get(name, 0))})
     return items
 
 
@@ -810,12 +866,131 @@ def cutoff_id_for(catalog: dict, names: tuple[str, ...], fallback=None) -> int |
     return quality_id_of(fallback)
 
 
+def top_level_cutoff_id(item: dict) -> int | None:
+    """ValidCutoff matches top-level quality.id or group id, not nested children."""
+    q = item.get("quality") if isinstance(item.get("quality"), dict) else None
+    if q is not None:
+        return quality_id_of(q)
+    gid = quality_id_of(item)
+    if gid in (None, 0):
+        return None
+    return gid
+
+
+def cutoff_names_of(item: dict) -> list[str]:
+    names: list[str] = []
+    q = item.get("quality") if isinstance(item.get("quality"), dict) else None
+    if q and q.get("name"):
+        names.append(str(q["name"]))
+        return names
+    if item.get("name"):
+        names.append(str(item["name"]))
+    for child in item.get("items") or []:
+        if not isinstance(child, dict):
+            continue
+        cq = child.get("quality") if isinstance(child.get("quality"), dict) else None
+        if cq and cq.get("name"):
+            names.append(str(cq["name"]))
+    return names
+
+
+def cutoff_id_from_items(items: list[dict], preferred: tuple[str, ...], fallback=None) -> int | None:
+    allowed: list[tuple[list[str], int]] = []
+    for item in items:
+        if not isinstance(item, dict) or not item.get("allowed"):
+            continue
+        cid = top_level_cutoff_id(item)
+        if cid is None:
+            continue
+        allowed.append((cutoff_names_of(item), cid))
+    for want in preferred:
+        for names, cid in allowed:
+            if want in names:
+                return cid
+    fb = quality_id_of(fallback)
+    if fb is not None and any(cid == fb for _names, cid in allowed):
+        return fb
+    if allowed:
+        return allowed[0][1]
+    return fb
+
+
 def pick_default_profile(profiles: list[dict]) -> dict:
     by_name = {item.get("name"): item for item in profiles if item.get("name")}
     for name in (PROFILE_DEFAULT, *LEGACY_DEFAULT_NAMES):
         if name in by_name:
             return by_name[name]
     return profiles[0]
+
+
+def quality_schema(base: str, api_key: str) -> dict | None:
+    try:
+        schema = http("GET", f"{base}/qualityprofile/schema", headers=arr_headers(api_key))
+    except RuntimeError as exc:
+        log(f"quality profile schema: {exc}", "WARNING")
+        return None
+    return schema if isinstance(schema, dict) else None
+
+
+def quality_catalog_for(base: str, api_key: str, profiles: list[dict]) -> dict:
+    catalog: dict = {}
+    schema = quality_schema(base, api_key)
+    if schema:
+        catalog.update(quality_catalog(schema))
+    for item in profiles:
+        catalog.update(quality_catalog(item))
+    return catalog
+
+
+def profile_id_by_name(base: str, api_key: str, name: str) -> int | None:
+    try:
+        profiles = as_list(http("GET", f"{base}/qualityprofile", headers=arr_headers(api_key)))
+    except RuntimeError:
+        return None
+    for item in profiles:
+        if item.get("name") == name and item.get("id") is not None:
+            try:
+                return int(item["id"])
+            except (TypeError, ValueError):
+                return None
+    return None
+
+
+def profile_id_from_save(saved, name: str, base: str, api_key: str) -> int | None:
+    if isinstance(saved, dict) and saved.get("id") is not None:
+        try:
+            return int(saved["id"])
+        except (TypeError, ValueError):
+            pass
+    if isinstance(saved, int):
+        return saved
+    return profile_id_by_name(base, api_key, name)
+
+
+def prepare_quality_payload(
+    template: dict,
+    name: str,
+    items: list[dict],
+    cutoff_id: int | None,
+    format_items: list[dict],
+    upgrade_allowed: bool,
+) -> dict:
+    payload = json.loads(json.dumps(template))
+    payload.pop("id", None)
+    payload["name"] = name
+    payload["items"] = items
+    payload["upgradeAllowed"] = upgrade_allowed
+    if cutoff_id is not None:
+        payload["cutoff"] = cutoff_id
+    payload["minFormatScore"] = 0
+    payload["cutoffFormatScore"] = 10000 if upgrade_allowed else 0
+    payload["formatItems"] = format_items
+    try:
+        min_up = int(payload.get("minUpgradeFormatScore") or 0)
+    except (TypeError, ValueError):
+        min_up = 0
+    payload["minUpgradeFormatScore"] = min_up if min_up >= 1 else 1
+    return payload
 
 
 def upsert_quality_profile(
@@ -829,32 +1004,36 @@ def upsert_quality_profile(
     upgrade_allowed: bool,
     existing: dict | None,
 ) -> int:
-    payload = json.loads(json.dumps(template))
-    payload.pop("id", None)
-    payload["name"] = name
-    payload["items"] = items
-    payload["upgradeAllowed"] = upgrade_allowed
-    if cutoff_id is not None:
-        payload["cutoff"] = cutoff_id
-    payload["minFormatScore"] = 0
-    payload["cutoffFormatScore"] = 10000 if upgrade_allowed else 0
-    payload["formatItems"] = format_items
+    payload = prepare_quality_payload(
+        template, name, items, cutoff_id, format_items, upgrade_allowed
+    )
     if existing and existing.get("id") is not None:
         payload["id"] = existing["id"]
-        http(
-            "PUT",
-            f"{base}/qualityprofile/{existing['id']}",
+        try:
+            http(
+                "PUT",
+                f"{base}/qualityprofile/{existing['id']}",
+                payload,
+                headers=arr_headers(api_key),
+            )
+            return int(existing["id"])
+        except RuntimeError as exc:
+            log(f"quality profile {name} PUT: {exc}", "WARNING")
+            payload.pop("id", None)
+    try:
+        saved = http(
+            "POST",
+            f"{base}/qualityprofile",
             payload,
             headers=arr_headers(api_key),
         )
-        return int(existing["id"])
-    saved = http(
-        "POST",
-        f"{base}/qualityprofile",
-        payload,
-        headers=arr_headers(api_key),
-    )
-    saved_id = (saved or {}).get("id") if isinstance(saved, dict) else None
+    except RuntimeError as exc:
+        found = profile_id_by_name(base, api_key, name)
+        if found is not None:
+            log(f"quality profile {name} POST: {exc}; using existing id {found}", "WARNING")
+            return found
+        raise RuntimeError(f"quality profile {name}: {exc}") from exc
+    saved_id = profile_id_from_save(saved, name, base, api_key)
     if saved_id is None:
         raise RuntimeError(f"quality profile {name} POST returned no id")
     return int(saved_id)
@@ -866,6 +1045,14 @@ def drop_extra_quality_profiles(base: str, api_key: str) -> None:
         profiles = as_list(http("GET", f"{base}/qualityprofile", headers=arr_headers(api_key)))
     except RuntimeError as exc:
         log(f"quality profiles after upsert: {exc}", "WARNING")
+        return
+    have = {item.get("name") for item in profiles}
+    if not set(PROFILE_NAMES) <= have:
+        log(
+            f"keeping leftover quality profiles until Max/Default/Anything all exist "
+            f"(have {sorted(n for n in have if n)})",
+            "WARNING",
+        )
         return
     for item in profiles:
         name = item.get("name")
@@ -885,65 +1072,117 @@ def drop_extra_quality_profiles(base: str, api_key: str) -> None:
 
 def household_quality_profile(base: str, api_key: str, kind: str):
     """Max (remux/4K), Default (1080p encode), Anything (take what exists)."""
+    try:
+        return apply_household_quality_profiles(base, api_key, kind)
+    except RuntimeError as exc:
+        log(f"{kind} quality profiles: {exc}", "WARNING")
+        return first_profile(base, api_key)
+
+
+def apply_household_quality_profiles(base: str, api_key: str, kind: str):
     profiles = as_list(http("GET", f"{base}/qualityprofile", headers=arr_headers(api_key)))
     if not profiles:
         raise RuntimeError(f"no quality profiles at {base}")
     template = pick_default_profile(profiles)
-    catalog = quality_catalog(template)
+    catalog = quality_catalog_for(base, api_key, profiles)
     if not catalog:
-        for item in profiles:
-            catalog = quality_catalog(item)
-            if catalog:
-                template = item
-                break
+        catalog = quality_catalog(template)
+        if not catalog:
+            for item in profiles:
+                catalog = quality_catalog(item)
+                if catalog:
+                    template = item
+                    break
     if not catalog:
         log(f"{kind} quality profile has no qualities listed; leaving defaults", "WARNING")
         return int(template["id"]), template.get("name") or PROFILE_DEFAULT
 
-    cf_ids = ensure_custom_formats(base, api_key)
+    formats = ensure_custom_formats(base, api_key)
     by_name = {item.get("name"): item for item in profiles if item.get("name")}
     default_existing = pick_default_profile(profiles)
+    ids = group_id_state(profiles + ([template] if template else []))
 
-    default_id = upsert_quality_profile(
-        base,
-        api_key,
-        PROFILE_DEFAULT,
-        template,
-        rebuild_profile_items(catalog, DEFAULT_GROUPS),
-        cutoff_id_for(catalog, ("Bluray-1080p", "WEBDL-1080p", "Bluray-720p"), template.get("cutoff")),
-        format_items_for(PROFILE_DEFAULT, cf_ids),
-        True,
-        default_existing,
-    )
-    upsert_quality_profile(
-        base,
-        api_key,
-        PROFILE_MAX,
-        template,
-        rebuild_profile_items(catalog, MAX_GROUPS),
-        cutoff_id_for(catalog, ("Remux-2160p", "Remux-1080p", "Bluray-1080p"), template.get("cutoff")),
-        format_items_for(PROFILE_MAX, cf_ids),
-        True,
-        by_name.get(PROFILE_MAX),
-    )
-    upsert_quality_profile(
-        base,
-        api_key,
-        PROFILE_ANYTHING,
-        template,
-        rebuild_profile_items(catalog, (), allow_unlisted=True),
-        cutoff_id_for(catalog, ("CAM", "WEBDL-480p", "WEBDL-720p", "WEBDL-1080p"), template.get("cutoff")),
-        format_items_for(PROFILE_ANYTHING, cf_ids),
-        False,
-        by_name.get(PROFILE_ANYTHING),
-    )
+    default_items = rebuild_profile_items(catalog, DEFAULT_GROUPS, id_state=ids)
+    max_items = rebuild_profile_items(catalog, MAX_GROUPS, id_state=ids)
+    anything_items = rebuild_profile_items(catalog, (), allow_unlisted=True, id_state=ids)
+
+    default_id = None
+    try:
+        default_id = upsert_quality_profile(
+            base,
+            api_key,
+            PROFILE_DEFAULT,
+            template,
+            default_items,
+            cutoff_id_from_items(
+                default_items,
+                ("Bluray-1080p", "WEBDL-1080p", "Bluray-720p"),
+                template.get("cutoff"),
+            ),
+            format_items_for(PROFILE_DEFAULT, formats),
+            True,
+            default_existing,
+        )
+    except RuntimeError as exc:
+        log(f"{kind} quality profile {PROFILE_DEFAULT}: {exc}", "WARNING")
+    try:
+        upsert_quality_profile(
+            base,
+            api_key,
+            PROFILE_MAX,
+            template,
+            max_items,
+            cutoff_id_from_items(
+                max_items,
+                ("Remux-2160p", "Remux-1080p", "Bluray-1080p"),
+                template.get("cutoff"),
+            ),
+            format_items_for(PROFILE_MAX, formats),
+            True,
+            by_name.get(PROFILE_MAX),
+        )
+    except RuntimeError as exc:
+        log(f"{kind} quality profile {PROFILE_MAX}: {exc}", "WARNING")
+    try:
+        upsert_quality_profile(
+            base,
+            api_key,
+            PROFILE_ANYTHING,
+            template,
+            anything_items,
+            cutoff_id_from_items(
+                anything_items,
+                ("CAM", "WEBDL-480p", "WEBDL-720p", "WEBDL-1080p"),
+                template.get("cutoff"),
+            ),
+            format_items_for(PROFILE_ANYTHING, formats),
+            False,
+            by_name.get(PROFILE_ANYTHING),
+        )
+    except RuntimeError as exc:
+        log(f"{kind} quality profile {PROFILE_ANYTHING}: {exc}", "WARNING")
     drop_extra_quality_profiles(base, api_key)
     sizes = QUALITY_SIZES_MOVIE if kind == "radarr" else QUALITY_SIZES_SERIES
     apply_quality_sizes(base, api_key, sizes)
-    log(
-        f"{kind} quality profiles: {PROFILE_MAX} (remux/4K), "
-        f"{PROFILE_DEFAULT} (1080p encode), {PROFILE_ANYTHING} (take anything)"
-    )
+    try:
+        now = as_list(http("GET", f"{base}/qualityprofile", headers=arr_headers(api_key)))
+    except RuntimeError:
+        now = []
+    have = {item.get("name") for item in now}
+    if default_id is None:
+        default_id = profile_id_by_name(base, api_key, PROFILE_DEFAULT)
+    if set(PROFILE_NAMES) <= have:
+        log(
+            f"{kind} quality profiles: {PROFILE_MAX} (remux/4K), "
+            f"{PROFILE_DEFAULT} (1080p encode), {PROFILE_ANYTHING} (take anything)"
+        )
+    else:
+        log(
+            f"{kind} quality profiles incomplete (have {sorted(n for n in have if n)})",
+            "WARNING",
+        )
+    if default_id is None:
+        return first_profile(base, api_key)
     return default_id, PROFILE_DEFAULT
 
 
