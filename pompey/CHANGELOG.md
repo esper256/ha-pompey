@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.19
+
+- **Home Assistant options are gone.** `plex_url`, `plex_token`, `source_url`, and `source_key` were leftovers: Plex is Seerr's first-run wizard, sources are Prowlarr on :9696, Proton is paste on the wait screen. `config.yaml` now has empty `options` / `schema`. Re-add a field only when the household must answer it in Home Assistant. Supervisor still writes `{}` to `/data/options.json`. Rebuild so the banner says **0.2.19**.
+
 ## 0.2.18
 
 - **Sources (Prowlarr) are published on host port 9696.** Seerr has no indexer settings — it only talks to Radarr and Sonarr. Adding a second source, rotating a key, or picking a public indexer has to happen in Prowlarr. The sidebar grows **Open sources** next to **Open search**. Radarr, Sonarr, and qBittorrent stay on localhost. First visit to :9696 asks you to set a Prowlarr login (we drop `AuthenticationMethod None` so the LAN is not an open console). Do not port-forward 9696. Rebuild so the banner says **0.2.18**. A rebuild patches an existing localhost Prowlarr `config.xml` without wiping indexers.

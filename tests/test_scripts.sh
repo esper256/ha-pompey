@@ -56,7 +56,7 @@ run() {
   "${ROOT}/tests/with-bashio" "$@"
 }
 
-echo "== banner (fields in options.json) =="
+echo "== banner (empty HA options) =="
 log="$(run "${INIT}/00-banner.sh" 2>&1)"
 printf '%s\n' "${log}"
 grep -q "Pompey" <<<"${log}"
@@ -94,31 +94,6 @@ if grep -q -- "-j DROP" "${IPTABLES_LOG}"; then
   exit 1
 fi
 test "$(jq -r .need_proton "${POMPEY_READY}/status.json")" = true
-
-echo "== banner warns when Plex/source are empty =="
-warn="${WORK}/warn-options.json"
-python3 - "${ROOT}/tests/options.json" "${warn}" <<'PY'
-import json, sys
-data = json.load(open(sys.argv[1], encoding="utf-8"))
-data["plex_token"] = ""
-data["source_url"] = ""
-data["source_key"] = ""
-json.dump(data, open(sys.argv[2], "w"))
-PY
-BASHIO_OPTIONS="${warn}" run "${INIT}/00-banner.sh" >/tmp/pompey-banner-warn.log 2>&1
-grep -q "Plex token is empty" /tmp/pompey-banner-warn.log
-grep -q "No source URL yet" /tmp/pompey-banner-warn.log
-
-echo "== banner warns when Plex address is a hostname =="
-hostn="${WORK}/plex-host.json"
-python3 - "${ROOT}/tests/options.json" "${hostn}" <<'PY'
-import json, sys
-data = json.load(open(sys.argv[1], encoding="utf-8"))
-data["plex_url"] = "http://plex.local:32400"
-json.dump(data, open(sys.argv[2], "w"))
-PY
-BASHIO_OPTIONS="${hostn}" run "${INIT}/00-banner.sh" >/tmp/pompey-banner-host.log 2>&1
-grep -q "numeric IP" /tmp/pompey-banner-host.log
 
 echo "== write-engine-configs from options =="
 run "${BIN}/write-engine-configs"

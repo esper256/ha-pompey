@@ -64,10 +64,10 @@ These are decided so we can build:
 - **Not v1:** picking a specific file when quality and seeds disagree; Cloudflare challenge solvers; Jellyfin; exposing search or sources on the public internet; stuffing Seerr under Ingress.
 - **Plex:** a separate Home Assistant app or another machine. Pompey never runs Plex. Library folders on `/media` (same filesystem as downloads).
 - **Kid vs general:** after a request, TMDB certification routes the root folder. G/PG/PG-13 and TV-Y/TV-G/TV-PG → kid libraries. Everything else, including unknown, → general. We do not guess kid. We do not block the request to ask.
-- **Sources:** we do not ship a catalog of indexers. First-run Pompey asks for at least one source as a URL plus key (plain language). More sources live in Prowlarr on :9696.
+- **Sources:** we do not ship a catalog of indexers. Add or rotate sources in Prowlarr on :9696. Home Assistant has no Pompey options for this.
 
 Hardware: this stack wants a few GB of RAM on top of Home Assistant. A 2 GB Pi is not a target.
 
 ## This repo
 
-`pompey/` is the Home Assistant app for the whole stack. The household guide (install, first run, which URLs you open, updates, what is not ready, roadmap) is the [root README](README.md). `0.2.18` is the current cut on real Home Assistant OS. Recyclarr/TRaSH quality profiles are not in this cut — engines use their defaults.
+`pompey/` is the Home Assistant app for the whole stack. The household guide (install, first run, which URLs you open, updates, what is not ready, roadmap) is the [root README](README.md). `0.2.19` is the current cut on real Home Assistant OS. Recyclarr/TRaSH quality profiles are not in this cut — engines use their defaults.

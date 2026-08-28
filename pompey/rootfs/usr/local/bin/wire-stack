@@ -9,10 +9,11 @@ Seerr→Radarr/Sonarr is required after Seerr is initialized. Before that, the
 Plex wizard has not created user id 1, so the API key 403s; we still mark
 search ready (Seerr is on the published port, Ingress stays Pompey).
 
-Optional (log and continue): Plex token/login/libraries, Seerr local login
-(403 is normal until the wizard creates a user), Seerr chrome settings
-(title, trustProxy). No source URL yet is also optional — the household
-can finish that from the search screen.
+Optional (log and continue): Plex login/libraries when PLEX_URL/PLEX_TOKEN
+are injected (household uses Seerr's wizard), Seerr local login (403 is
+normal until the wizard creates a user), Seerr chrome settings (title,
+trustProxy). No source URL yet is also optional — the household adds
+sources in Prowlarr (Open sources, :9696).
 """
 from __future__ import annotations
 
@@ -74,6 +75,7 @@ def media_root() -> str:
 
 
 def plex_url() -> str:
+    # Not an HA option. Household finishes Plex in Seerr. Tests may inject.
     return env("PLEX_URL")
 
 
@@ -82,6 +84,7 @@ def plex_token() -> str:
 
 
 def indexer_url() -> str:
+    # Not an HA option. Household adds sources in Prowlarr. Integration injects.
     return env("INDEXER_URL")
 
 

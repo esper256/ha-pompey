@@ -311,11 +311,10 @@ class SupervisorConfigSchema(unittest.TestCase):
         self.raw = load_yaml(self.config_path)
 
     def test_household_options_only(self):
-        self.assertEqual(
-            set(self.raw["options"]),
-            {"plex_url", "plex_token", "source_url", "source_key"},
-        )
-        self.assertEqual(set(self.raw["schema"]), set(self.raw["options"]))
+        # Empty on purpose: Plex is Seerr's wizard, sources are Prowlarr,
+        # Proton is wait-screen paste. Re-add a field only when HA must ask.
+        self.assertEqual(self.raw["options"], {})
+        self.assertEqual(self.raw["schema"], {})
         for leaked in (
             "wireguard_config",
             "wireguard_private_key",
@@ -327,8 +326,13 @@ class SupervisorConfigSchema(unittest.TestCase):
             "port_forwarding",
             "media_root",
             "log_level",
+            "plex_url",
+            "plex_token",
+            "source_url",
+            "source_key",
         ):
             self.assertNotIn(leaked, self.raw["schema"], leaked)
+            self.assertNotIn(leaked, self.raw["options"], leaked)
         validated = validate_app_config(self.raw)
         self.assertEqual(validated["slug"], "pompey")
         self.assertIn("aarch64", validated["arch"])
@@ -359,7 +363,7 @@ class SupervisorConfigSchema(unittest.TestCase):
 
     def test_unknown_schema_type_is_rejected(self):
         broken = copy.deepcopy(self.raw)
-        broken["schema"] = dict(broken["schema"])
+        broken["schema"] = dict(broken.get("schema") or {})
         broken["schema"]["wireguard_config"] = "string"
         with self.assertRaisesRegex(ConfigInvalid, "unknown type"):
             validate_app_config(broken)

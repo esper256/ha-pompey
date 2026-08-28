@@ -1,25 +1,3 @@
-configuration:
-  plex_url:
-    name: Plex address
-    description: >-
-      Optional. Skip Seerr's Plex wizard by filling this and the token.
-      Numeric IP of the Plex app you already run, for example
-      http://192.168.1.10:32400 or http://172.30.32.1:32400 if Plex is
-      another add-on on this Home Assistant machine. Pompey does not run
-      Plex. Hostnames will not resolve through Proton DNS. Leave empty to
-      finish Plex on Seerr's first screen (use a numeric IP there too).
-  plex_token:
-    name: Plex token
-    description: >-
-      Optional. Token from the Plex account that owns the server. Open any
-      item on that server in a browser, View Source, search for X-Plex-Token.
-      Leave empty to sign into Plex from Seerr's setup wizard instead.
-  source_url:
-    name: Source URL
-    description: >-
-      Base URL of one source. Pompey does not ship a catalog. You can add
-      more later in Prowlarr (Open sources, port 9696). Seerr cannot add
-      indexers.
-  source_key:
-    name: Source key
-    description: API key for that first source. Extra keys go in Prowlarr.
+# No Home Assistant options. Plex is Seerr's first screen; sources are
+# Prowlarr on port 9696; Proton is paste on the wait screen.
+configuration: {}

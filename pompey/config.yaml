@@ -1,6 +1,6 @@
 # https://developers.home-assistant.io/docs/apps/configuration
 name: Pompey
-version: "0.2.18"
+version: "0.2.19"
 slug: pompey
 description: >-
   Search for a movie or TV show. Confirm if we need you. It lands in the
@@ -44,13 +44,8 @@ map:
     read_only: false
   - type: media
     read_only: false
-options:
-  plex_url: ""
-  plex_token: ""
-  source_url: ""
-  source_key: ""
-schema:
-  plex_url: str
-  plex_token: password
-  source_url: str
-  source_key: password
+# Plex is Seerr's wizard. Sources are Prowlarr on :9696. Proton is
+# wait-screen paste. Re-add a field here only when the household must
+# answer it in Home Assistant.
+options: {}
+schema: {}

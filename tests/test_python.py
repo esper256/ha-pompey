@@ -318,11 +318,11 @@ class OptionsMatchConfig(unittest.TestCase):
         schema_keys = yaml_indent2_keys(cfg, "schema:")
         trans_keys = yaml_indent2_keys(trans, "configuration:")
         supplied = set(OPTIONS)
-        self.assertTrue(option_keys)
+        self.assertEqual(option_keys, [])
+        self.assertEqual(schema_keys, [])
+        self.assertEqual(trans_keys, [])
+        self.assertEqual(supplied, set())
         self.assertEqual(set(option_keys), set(schema_keys) & set(option_keys))
-        for key in option_keys:
-            self.assertIn(key, supplied)
-            self.assertIn(key, trans_keys)
 
 
 class Helpers(unittest.TestCase):
@@ -487,10 +487,10 @@ class WireStack(unittest.TestCase):
                 "POMPEY_SECRETS": str(secrets_path),
                 "POMPEY_READY": str(ready),
                 "MEDIA_ROOT": "/media",
-                "PLEX_URL": OPTIONS["plex_url"],
-                "PLEX_TOKEN": OPTIONS["plex_token"],
-                "INDEXER_URL": OPTIONS["source_url"],
-                "INDEXER_API_KEY": OPTIONS["source_key"],
+                "PLEX_URL": "http://172.30.32.1:32400",
+                "PLEX_TOKEN": "test-plex-token",
+                "INDEXER_URL": "https://example-source.test",
+                "INDEXER_API_KEY": "test-source-key",
                 "QBIT_URL": urls["qbit"],
                 "SONARR_URL": urls["sonarr"],
                 "RADARR_URL": urls["radarr"],
