@@ -56,6 +56,29 @@ def after_download() -> str:
     return "stop_sharing"
 
 
+def preferred_language() -> str:
+    raw = env("PREFERRED_LANGUAGE", "english").lower().replace("-", "_").replace(" ", "_")
+    if raw in {"original", "orig", "native"}:
+        return "original"
+    return "english"
+
+
+def anime_audio() -> str:
+    raw = env("ANIME_AUDIO", "dual_audio").lower().replace("-", "_").replace(" ", "_")
+    if raw in {"original", "orig", "japanese", "ja"}:
+        return "original"
+    if raw in {"english", "eng", "dub", "english_dub"}:
+        return "english"
+    return "dual_audio"
+
+
+def subtitles_pref() -> str:
+    raw = env("SUBTITLES", "english").lower().replace("-", "_").replace(" ", "_")
+    if raw in {"none", "off", "no", "no_subs"}:
+        return "none"
+    return "english"
+
+
 def as_list(value):
     """HTTP JSON is usually an array of objects; stubs and error bodies often are not.
 
@@ -178,8 +201,10 @@ def seerr_api_key_from_disk() -> str:
     return key.strip() if isinstance(key, str) else ""
 
 
-# Seerr: REQUEST + AUTO_APPROVE + AUTO_APPROVE_MOVIE + AUTO_APPROVE_TV
-SEERR_HOUSEHOLD_PERMS = 32 + 128 + 256 + 512
+# Seerr: REQUEST + AUTO_APPROVE + AUTO_APPROVE_MOVIE + AUTO_APPROVE_TV + REQUEST_ADVANCED
+# REQUEST_ADVANCED (8192) is what shows the quality-profile dropdown on a request.
+SEERR_HOUSEHOLD_PERMS = 32 + 128 + 256 + 512 + 8192
+SEERR_REQUEST_ADVANCED = 8192
 
 
 def log(msg: str, level: str = "INFO") -> None:
@@ -479,55 +504,102 @@ def first_profile(base: str, api_key: str):
     return int(profiles[0]["id"]), profiles[0].get("name") or "Default"
 
 
-# TRaSH-shaped HD Bluray + WEB: 1080p encodes, not remux or 4K.
-# A 26GB grab is almost always Remux-1080p or 2160p, which default Arr ranks first.
-HD_PROFILE_NAME = "HD"
-HD_GROUPS = (
-    ("Bluray-1080p", ("Bluray-1080p",)),
-    ("WEB 1080p", ("WEBDL-1080p", "WEBRip-1080p")),
-    ("HDTV-1080p", ("HDTV-1080p",)),
-    ("Bluray-720p", ("Bluray-720p",)),
-    ("WEB 720p", ("WEBDL-720p", "WEBRip-720p")),
+# Three Seerr-selectable profiles. Quality definition sizes are global (MB/minute,
+# not total GB), so Default and Max must not share the same quality's maxSize:
+# Default disallows remux/4K; Max uses those names with large caps.
+PROFILE_DEFAULT = "Default"
+PROFILE_MAX = "Max"
+PROFILE_ANYTHING = "Anything"
+PROFILE_NAMES = (PROFILE_DEFAULT, PROFILE_MAX, PROFILE_ANYTHING)
+LEGACY_DEFAULT_NAMES = ("HD", "Any")
+
+# Worst → best. Arr treats later items as higher quality.
+DEFAULT_GROUPS = (
     ("HDTV-720p", ("HDTV-720p",)),
+    ("WEB 720p", ("WEBDL-720p", "WEBRip-720p")),
+    ("Bluray-720p", ("Bluray-720p",)),
+    ("HDTV-1080p", ("HDTV-1080p",)),
+    ("WEB 1080p", ("WEBDL-1080p", "WEBRip-1080p")),
+    ("Bluray-1080p", ("Bluray-1080p",)),
 )
-HD_CUTOFF = "Bluray-1080p"
-# Quality definition units are MB/minute, not total GB.
-# ~2 hour movie: 85 MB/min ≈ 10 GB; 130 MB/min ≈ 15 GB.
-HD_SIZES_MOVIE = {
-    "WEBDL-720p": (10.0, 30.0, 45.0),
-    "WEBRip-720p": (10.0, 30.0, 45.0),
-    "HDTV-720p": (10.0, 25.0, 40.0),
-    "Bluray-720p": (15.0, 35.0, 55.0),
-    "WEBDL-1080p": (12.5, 50.0, 85.0),
-    "WEBRip-1080p": (12.5, 50.0, 85.0),
-    "HDTV-1080p": (15.0, 40.0, 70.0),
-    "Bluray-1080p": (25.0, 75.0, 130.0),
+MAX_GROUPS = DEFAULT_GROUPS + (
+    ("Remux-1080p", ("Remux-1080p",)),
+    ("HDTV-2160p", ("HDTV-2160p",)),
+    ("WEB 2160p", ("WEBDL-2160p", "WEBRip-2160p")),
+    ("Bluray-2160p", ("Bluray-2160p",)),
+    ("Remux-2160p", ("Remux-2160p",)),
+)
+# Default: 1080p encodes. 2.5–8 GB per 150 min ≈ 16.7–53.3 MB/min.
+# Under ~1 GB for 120 min is 8.3 MB/min — minSize 12.5 rejects that.
+# Max remux/4K sizes only apply to qualities Default does not allow.
+QUALITY_SIZES_MOVIE = {
+    "WEBDL-720p": (5.0, 15.0, 28.0),
+    "WEBRip-720p": (5.0, 15.0, 28.0),
+    "HDTV-720p": (4.0, 12.0, 24.0),
+    "Bluray-720p": (8.0, 18.0, 32.0),
+    "WEBDL-1080p": (12.5, 33.0, 53.0),
+    "WEBRip-1080p": (12.5, 33.0, 53.0),
+    "HDTV-1080p": (10.0, 28.0, 45.0),
+    "Bluray-1080p": (15.0, 40.0, 70.0),
+    "Remux-1080p": (80.0, 180.0, 320.0),
+    "WEBDL-2160p": (20.0, 70.0, 140.0),
+    "WEBRip-2160p": (20.0, 70.0, 140.0),
+    "HDTV-2160p": (15.0, 50.0, 110.0),
+    "Bluray-2160p": (40.0, 120.0, 220.0),
+    "Remux-2160p": (120.0, 350.0, 700.0),
+    "CAM": (0.0, 2.0, 40.0),
+    "TELESYNC": (0.0, 2.0, 40.0),
+    "WORKPRINT": (0.0, 2.0, 40.0),
 }
-HD_SIZES_SERIES = {
-    "WEBDL-720p": (8.0, 16.0, 28.0),
-    "WEBRip-720p": (8.0, 16.0, 28.0),
-    "HDTV-720p": (8.0, 14.0, 24.0),
-    "Bluray-720p": (10.0, 20.0, 32.0),
-    "WEBDL-1080p": (10.0, 25.0, 45.0),
-    "WEBRip-1080p": (10.0, 25.0, 45.0),
-    "HDTV-1080p": (10.0, 22.0, 40.0),
-    "Bluray-1080p": (15.0, 35.0, 60.0),
+QUALITY_SIZES_SERIES = {
+    "WEBDL-720p": (4.0, 10.0, 20.0),
+    "WEBRip-720p": (4.0, 10.0, 20.0),
+    "HDTV-720p": (3.0, 8.0, 16.0),
+    "Bluray-720p": (6.0, 14.0, 24.0),
+    "WEBDL-1080p": (8.0, 22.0, 40.0),
+    "WEBRip-1080p": (8.0, 22.0, 40.0),
+    "HDTV-1080p": (7.0, 18.0, 32.0),
+    "Bluray-1080p": (10.0, 28.0, 50.0),
+    "Remux-1080p": (40.0, 90.0, 180.0),
+    "WEBDL-2160p": (12.0, 40.0, 80.0),
+    "WEBRip-2160p": (12.0, 40.0, 80.0),
+    "HDTV-2160p": (10.0, 30.0, 70.0),
+    "Bluray-2160p": (20.0, 60.0, 120.0),
+    "Remux-2160p": (60.0, 180.0, 400.0),
+    "CAM": (0.0, 1.0, 20.0),
+    "TELESYNC": (0.0, 1.0, 20.0),
+    "WORKPRINT": (0.0, 1.0, 20.0),
 }
-# (name, title regex, score). -10000 is a hard reject in Arr.
-HD_CUSTOM_FORMATS = (
+# Title CFs. Scores are per-profile; -10000 is a hard reject.
+CUSTOM_FORMATS = (
     (
         "Pompey Reject CAM/TS",
         r"(CAMRip|HDCAM|TELESYNC|HDTS|TELECINE|HDTC|WORKPRINT|[-_.]CAM[-_.])",
-        -10000,
     ),
     (
         "Pompey Reject Remux/DISK",
         r"\b(REMUX|BD[-_. ]?DISK|BRDISK|COMPLETE[-_. ]?BLURAY)\b",
-        -10000,
     ),
-    ("Pompey Prefer WEB-DL", r"\bWEB[-_. ]?DL\b", 150),
-    ("Pompey Prefer x265", r"\b(x265|h265|HEVC)\b", 80),
-    ("Pompey Prefer Proper", r"\b(PROPER|REPACK|RERIP)\b", 25),
+    ("Pompey Prefer WEB-DL", r"\bWEB[-_. ]?DL\b"),
+    ("Pompey Prefer x265", r"\b(x265|h265|HEVC)\b"),
+    ("Pompey Prefer Proper", r"\b(PROPER|REPACK|RERIP)\b"),
+    ("Pompey Prefer Remux", r"\bREMUX\b"),
+    (
+        "Pompey Prefer lossless audio",
+        r"\b(TrueHD|TRUEHD|DTS[-_. ]?HD(?:MA)?|DTS[-_. ]?X|Atmos|ATMOS|FLAC|LPCM)\b",
+    ),
+    (
+        "Pompey Dual Audio",
+        r"\b(Dual[-_. ]Audio|DUAL[-_. ]AUDIO|DualAudio|Multi[-_. ]Audio)\b",
+    ),
+    (
+        "Pompey English dub",
+        r"\b(English[-_. ]Dub|ENG(?:LISH)?[-_. ]DUB|DUBBED)\b",
+    ),
+    (
+        "Pompey English subs",
+        r"\b(English[-_. ]Subs?|ENG(?:LISH)?[-_. ]Subs?|\bSUBBED\b|\bSUBS\b)\b",
+    ),
 )
 
 
@@ -560,10 +632,11 @@ def quality_id_of(value) -> int | None:
         return None
 
 
-def rebuild_hd_items(catalog: dict) -> list[dict]:
+def rebuild_profile_items(catalog: dict, groups: tuple, allow_unlisted: bool = False) -> list[dict]:
     used: set[str] = set()
     items: list[dict] = []
-    for group_name, names in HD_GROUPS:
+    grouped = {n for _name, names in groups for n in names}
+    for group_name, names in groups:
         present = [catalog[n] for n in names if n in catalog]
         if not present:
             continue
@@ -581,8 +654,14 @@ def rebuild_hd_items(catalog: dict) -> list[dict]:
     for name, q in catalog.items():
         if name in used:
             continue
-        items.append({"quality": q, "items": [], "allowed": False})
+        allowed = allow_unlisted and name != "BR-DISK" and name not in grouped
+        items.append({"quality": q, "items": [], "allowed": allowed})
     return items
+
+
+def rebuild_hd_items(catalog: dict) -> list[dict]:
+    """Default profile items: 1080p/720p encodes, no remux/4K/CAM."""
+    return rebuild_profile_items(catalog, DEFAULT_GROUPS, allow_unlisted=False)
 
 
 def title_custom_format(name: str, regex: str) -> dict:
@@ -601,8 +680,46 @@ def title_custom_format(name: str, regex: str) -> dict:
     }
 
 
-def ensure_hd_custom_formats(base: str, api_key: str) -> dict[str, int]:
-    """Upsert household encoding CFs. Returns name -> Arr id."""
+def household_format_scores(tier: str) -> dict[str, int]:
+    """Per-profile CF scores. Household language options apply to every tier."""
+    scores: dict[str, int] = {}
+    if tier == PROFILE_DEFAULT:
+        scores = {
+            "Pompey Reject CAM/TS": -10000,
+            "Pompey Reject Remux/DISK": -10000,
+            "Pompey Prefer WEB-DL": 150,
+            "Pompey Prefer x265": 80,
+            "Pompey Prefer Proper": 25,
+        }
+    elif tier == PROFILE_MAX:
+        scores = {
+            "Pompey Reject CAM/TS": -10000,
+            "Pompey Prefer Remux": 200,
+            "Pompey Prefer lossless audio": 150,
+            "Pompey Prefer WEB-DL": 80,
+            "Pompey Prefer Proper": 25,
+        }
+    else:
+        scores = {"Pompey Prefer Proper": 10}
+
+    audio = anime_audio()
+    if audio == "dual_audio":
+        scores["Pompey Dual Audio"] = 200
+    elif audio == "english":
+        scores["Pompey English dub"] = 150
+        scores["Pompey Dual Audio"] = 50
+    # original: dual-audio is neither preferred nor rejected
+
+    if preferred_language() == "english" and audio != "original":
+        scores.setdefault("Pompey English dub", 80)
+
+    if subtitles_pref() == "english":
+        scores["Pompey English subs"] = 50
+    return scores
+
+
+def ensure_custom_formats(base: str, api_key: str) -> dict[str, int]:
+    """Upsert household title CFs. Returns name -> Arr id."""
     try:
         existing = as_list(http("GET", f"{base}/customformat", headers=arr_headers(api_key)))
     except RuntimeError as exc:
@@ -610,7 +727,7 @@ def ensure_hd_custom_formats(base: str, api_key: str) -> dict[str, int]:
         return {}
     by_name = {item.get("name"): item for item in existing if item.get("name")}
     ids: dict[str, int] = {}
-    for name, regex, _score in HD_CUSTOM_FORMATS:
+    for name, regex in CUSTOM_FORMATS:
         payload = title_custom_format(name, regex)
         have = by_name.get(name)
         try:
@@ -639,7 +756,17 @@ def ensure_hd_custom_formats(base: str, api_key: str) -> dict[str, int]:
     return ids
 
 
-def apply_hd_quality_sizes(base: str, api_key: str, sizes: dict) -> None:
+def format_items_for(tier: str, cf_ids: dict[str, int]) -> list[dict]:
+    items = []
+    for name, score in household_format_scores(tier).items():
+        cf_id = cf_ids.get(name)
+        if cf_id is None:
+            continue
+        items.append({"format": cf_id, "name": name, "score": score})
+    return items
+
+
+def apply_quality_sizes(base: str, api_key: str, sizes: dict) -> None:
     try:
         defs = as_list(http("GET", f"{base}/qualitydefinition", headers=arr_headers(api_key)))
     except RuntimeError as exc:
@@ -675,47 +802,149 @@ def apply_hd_quality_sizes(base: str, api_key: str, sizes: dict) -> None:
             log(f"quality size {name}: {exc}", "WARNING")
 
 
+def cutoff_id_for(catalog: dict, names: tuple[str, ...], fallback=None) -> int | None:
+    for name in names:
+        found = quality_id_of(catalog.get(name))
+        if found is not None:
+            return found
+    return quality_id_of(fallback)
+
+
+def pick_default_profile(profiles: list[dict]) -> dict:
+    by_name = {item.get("name"): item for item in profiles if item.get("name")}
+    for name in (PROFILE_DEFAULT, *LEGACY_DEFAULT_NAMES):
+        if name in by_name:
+            return by_name[name]
+    return profiles[0]
+
+
+def upsert_quality_profile(
+    base: str,
+    api_key: str,
+    name: str,
+    template: dict,
+    items: list[dict],
+    cutoff_id: int | None,
+    format_items: list[dict],
+    upgrade_allowed: bool,
+    existing: dict | None,
+) -> int:
+    payload = json.loads(json.dumps(template))
+    payload.pop("id", None)
+    payload["name"] = name
+    payload["items"] = items
+    payload["upgradeAllowed"] = upgrade_allowed
+    if cutoff_id is not None:
+        payload["cutoff"] = cutoff_id
+    payload["minFormatScore"] = 0
+    payload["cutoffFormatScore"] = 10000 if upgrade_allowed else 0
+    payload["formatItems"] = format_items
+    if existing and existing.get("id") is not None:
+        payload["id"] = existing["id"]
+        http(
+            "PUT",
+            f"{base}/qualityprofile/{existing['id']}",
+            payload,
+            headers=arr_headers(api_key),
+        )
+        return int(existing["id"])
+    saved = http(
+        "POST",
+        f"{base}/qualityprofile",
+        payload,
+        headers=arr_headers(api_key),
+    )
+    saved_id = (saved or {}).get("id") if isinstance(saved, dict) else None
+    if saved_id is None:
+        raise RuntimeError(f"quality profile {name} POST returned no id")
+    return int(saved_id)
+
+
+def drop_extra_quality_profiles(base: str, api_key: str) -> None:
+    """Seerr lists every Arr profile in the request dropdown. Keep only the three."""
+    try:
+        profiles = as_list(http("GET", f"{base}/qualityprofile", headers=arr_headers(api_key)))
+    except RuntimeError as exc:
+        log(f"quality profiles after upsert: {exc}", "WARNING")
+        return
+    for item in profiles:
+        name = item.get("name")
+        pid = item.get("id")
+        if name in PROFILE_NAMES or pid is None:
+            continue
+        try:
+            http(
+                "DELETE",
+                f"{base}/qualityprofile/{pid}",
+                headers=arr_headers(api_key),
+            )
+            log(f"removed leftover quality profile {name}")
+        except RuntimeError as exc:
+            log(f"could not remove quality profile {name}: {exc}", "WARNING")
+
+
 def household_quality_profile(base: str, api_key: str, kind: str):
-    """1080p WEB-DL / BluRay encodes. No remux, no 4K. Prefer x265 and WEB-DL."""
+    """Max (remux/4K), Default (1080p encode), Anything (take what exists)."""
     profiles = as_list(http("GET", f"{base}/qualityprofile", headers=arr_headers(api_key)))
     if not profiles:
         raise RuntimeError(f"no quality profiles at {base}")
-    profile = next((item for item in profiles if item.get("name") == HD_PROFILE_NAME), profiles[0])
-    catalog = quality_catalog(profile)
+    template = pick_default_profile(profiles)
+    catalog = quality_catalog(template)
+    if not catalog:
+        for item in profiles:
+            catalog = quality_catalog(item)
+            if catalog:
+                template = item
+                break
     if not catalog:
         log(f"{kind} quality profile has no qualities listed; leaving defaults", "WARNING")
-        return int(profile["id"]), profile.get("name") or "Default"
-    items = rebuild_hd_items(catalog)
-    cutoff_q = catalog.get(HD_CUTOFF) or catalog.get("WEBDL-1080p") or catalog.get("Bluray-720p")
-    cutoff_id = quality_id_of(cutoff_q)
-    if cutoff_id is None:
-        cutoff_id = quality_id_of(profile.get("cutoff"))
-    cf_ids = ensure_hd_custom_formats(base, api_key)
-    format_items = []
-    for name, _regex, score in HD_CUSTOM_FORMATS:
-        cf_id = cf_ids.get(name)
-        if cf_id is None:
-            continue
-        format_items.append({"format": cf_id, "name": name, "score": score})
-    updated = json.loads(json.dumps(profile))
-    updated["name"] = HD_PROFILE_NAME
-    updated["items"] = items
-    updated["upgradeAllowed"] = True
-    if cutoff_id is not None:
-        updated["cutoff"] = cutoff_id
-    updated["minFormatScore"] = 0
-    updated["cutoffFormatScore"] = 10000
-    updated["formatItems"] = format_items
-    http(
-        "PUT",
-        f"{base}/qualityprofile/{profile['id']}",
-        updated,
-        headers=arr_headers(api_key),
+        return int(template["id"]), template.get("name") or PROFILE_DEFAULT
+
+    cf_ids = ensure_custom_formats(base, api_key)
+    by_name = {item.get("name"): item for item in profiles if item.get("name")}
+    default_existing = pick_default_profile(profiles)
+
+    default_id = upsert_quality_profile(
+        base,
+        api_key,
+        PROFILE_DEFAULT,
+        template,
+        rebuild_profile_items(catalog, DEFAULT_GROUPS),
+        cutoff_id_for(catalog, ("Bluray-1080p", "WEBDL-1080p", "Bluray-720p"), template.get("cutoff")),
+        format_items_for(PROFILE_DEFAULT, cf_ids),
+        True,
+        default_existing,
     )
-    sizes = HD_SIZES_MOVIE if kind == "radarr" else HD_SIZES_SERIES
-    apply_hd_quality_sizes(base, api_key, sizes)
-    log(f"{kind} quality profile HD: 1080p WEB-DL/BluRay, no remux/4K")
-    return int(profile["id"]), HD_PROFILE_NAME
+    upsert_quality_profile(
+        base,
+        api_key,
+        PROFILE_MAX,
+        template,
+        rebuild_profile_items(catalog, MAX_GROUPS),
+        cutoff_id_for(catalog, ("Remux-2160p", "Remux-1080p", "Bluray-1080p"), template.get("cutoff")),
+        format_items_for(PROFILE_MAX, cf_ids),
+        True,
+        by_name.get(PROFILE_MAX),
+    )
+    upsert_quality_profile(
+        base,
+        api_key,
+        PROFILE_ANYTHING,
+        template,
+        rebuild_profile_items(catalog, (), allow_unlisted=True),
+        cutoff_id_for(catalog, ("CAM", "WEBDL-480p", "WEBDL-720p", "WEBDL-1080p"), template.get("cutoff")),
+        format_items_for(PROFILE_ANYTHING, cf_ids),
+        False,
+        by_name.get(PROFILE_ANYTHING),
+    )
+    drop_extra_quality_profiles(base, api_key)
+    sizes = QUALITY_SIZES_MOVIE if kind == "radarr" else QUALITY_SIZES_SERIES
+    apply_quality_sizes(base, api_key, sizes)
+    log(
+        f"{kind} quality profiles: {PROFILE_MAX} (remux/4K), "
+        f"{PROFILE_DEFAULT} (1080p encode), {PROFILE_ANYTHING} (take anything)"
+    )
+    return default_id, PROFILE_DEFAULT
 
 
 def language_profile_id(_base: str, _api_key: str):
@@ -1330,6 +1559,30 @@ def configure_seerr(secrets: dict, radarr_profile, sonarr_profile, sonarr_lang) 
         )
     except RuntimeError as exc:
         log(f"seerr main settings: {exc}", "WARNING")
+
+    try:
+        users = s.call("GET", "/api/v1/user") or {}
+        rows = as_list(users)
+        if isinstance(users, dict) and not rows:
+            rows = as_list(users.get("results") or users.get("users") or [])
+        for user in rows:
+            uid = user.get("id")
+            if uid is None:
+                continue
+            try:
+                perms = int(user.get("permissions") or 0)
+            except (TypeError, ValueError):
+                continue
+            if perms & SEERR_REQUEST_ADVANCED:
+                continue
+            update = dict(user)
+            update["permissions"] = perms | SEERR_REQUEST_ADVANCED
+            try:
+                s.call("PUT", f"/api/v1/user/{uid}", update)
+            except RuntimeError as exc:
+                log(f"seerr user {uid} permissions: {exc}", "WARNING")
+    except RuntimeError as exc:
+        log(f"seerr users: {exc}", "WARNING")
 
     try:
         s.call("POST", "/api/v1/settings/network", {"trustProxy": False})

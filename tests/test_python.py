@@ -92,6 +92,28 @@ def any_quality_bundle(profile_id: int = 1, name: str = "Any") -> dict:
     }
 
 
+def allowed_quality_names(profile: dict) -> tuple[set[str], set[str]]:
+    allowed: set[str] = set()
+    blocked: set[str] = set()
+
+    def walk(node: dict) -> None:
+        q = node.get("quality") if isinstance(node.get("quality"), dict) else {}
+        name = q.get("name")
+        if name:
+            (allowed if node.get("allowed") else blocked).add(name)
+        for child in node.get("items") or []:
+            if isinstance(child, dict):
+                walk(child)
+
+    for item in profile.get("items") or []:
+        walk(item)
+    return allowed, blocked
+
+
+def profile_named(profiles: list[dict], name: str) -> dict:
+    return next(item for item in profiles if item.get("name") == name)
+
+
 def png_wh(path: Path) -> tuple[int, int]:
     data = path.read_bytes()
     if data[:8] != b"\x89PNG\r\n\x1a\n" or data[12:16] != b"IHDR":
@@ -161,6 +183,8 @@ class FakeState:
         self.seerr_has_admin = False
         self.seerr_radarr: list[dict] = []
         self.seerr_sonarr: list[dict] = []
+        self.seerr_users: list[dict] = []
+        self.seerr_main: object = None
         self.initialized = False
         self.fail_seerr_radarr = False
         self.fail_indexer = False
@@ -306,6 +330,22 @@ def handler_for(state: FakeState):
                     return self._send(404, {"error": path})
                 if path.endswith("/qualityprofile") and method == "GET":
                     return self._send(body=profiles)
+                if path.endswith("/qualityprofile") and method == "POST":
+                    posted = dict(body or {})
+                    next_id = max((int(p.get("id") or 0) for p in profiles), default=0) + 1
+                    posted["id"] = next_id
+                    profiles.append(posted)
+                    return self._send(201, posted)
+                if "/qualityprofile/" in path and method == "DELETE":
+                    try:
+                        idx = int(path.rsplit("/", 1)[-1])
+                    except ValueError:
+                        return self._send(404, {"error": path})
+                    for i, item in enumerate(profiles):
+                        if item.get("id") == idx:
+                            profiles.pop(i)
+                            return self._send(200, {})
+                    return self._send(404, {"error": path})
                 if "/qualityprofile/" in path and method == "PUT":
                     try:
                         idx = int(path.rsplit("/", 1)[-1])
@@ -469,7 +509,23 @@ def handler_for(state: FakeState):
                 if path == "/api/v1/settings/main" and method == "GET":
                     return self._send(body={"apiKey": "seerr-api-key"})
                 if path == "/api/v1/settings/main" and method == "POST":
+                    state.seerr_main = body
                     return self._send(body=body)
+                if path == "/api/v1/user" and method == "GET":
+                    return self._send(body={"page": 1, "results": state.seerr_users})
+                if path.startswith("/api/v1/user/") and method == "PUT":
+                    try:
+                        uid = int(path.rsplit("/", 1)[-1])
+                    except ValueError:
+                        return self._send(404, {"error": path})
+                    for i, item in enumerate(state.seerr_users):
+                        if item.get("id") == uid:
+                            saved = dict(item)
+                            saved.update(body or {})
+                            saved["id"] = uid
+                            state.seerr_users[i] = saved
+                            return self._send(body=saved)
+                    return self._send(404, {"error": path})
                 if path == "/api/v1/settings/plex/devices/servers":
                     return self._send(
                         body=[
@@ -564,6 +620,9 @@ def handler_for(state: FakeState):
 
         def do_PUT(self):
             self._handle("PUT")
+
+        def do_DELETE(self):
+            self._handle("DELETE")
 
     return Handler
 
@@ -875,23 +934,25 @@ PersistentKeepalive = 25
         self.assertEqual(ws.after_download(), "share_one_day")
         os.environ.pop("AFTER_DOWNLOAD", None)
 
+    def test_language_options_defaults(self):
+        for key in ("PREFERRED_LANGUAGE", "ANIME_AUDIO", "SUBTITLES"):
+            os.environ.pop(key, None)
+        self.assertEqual(ws.preferred_language(), "english")
+        self.assertEqual(ws.anime_audio(), "dual_audio")
+        self.assertEqual(ws.subtitles_pref(), "english")
+        os.environ["PREFERRED_LANGUAGE"] = "original"
+        os.environ["ANIME_AUDIO"] = "english"
+        os.environ["SUBTITLES"] = "none"
+        self.assertEqual(ws.preferred_language(), "original")
+        self.assertEqual(ws.anime_audio(), "english")
+        self.assertEqual(ws.subtitles_pref(), "none")
+        for key in ("PREFERRED_LANGUAGE", "ANIME_AUDIO", "SUBTITLES"):
+            os.environ.pop(key, None)
+
     def test_rebuild_hd_items_disallows_remux_and_4k(self):
         catalog = ws.quality_catalog(any_quality_bundle()["profile"])
         items = ws.rebuild_hd_items(catalog)
-        allowed: set[str] = set()
-        blocked: set[str] = set()
-
-        def walk(node: dict) -> None:
-            q = node.get("quality") if isinstance(node.get("quality"), dict) else {}
-            name = q.get("name")
-            if name:
-                (allowed if node.get("allowed") else blocked).add(name)
-            for child in node.get("items") or []:
-                if isinstance(child, dict):
-                    walk(child)
-
-        for item in items:
-            walk(item)
+        allowed, blocked = allowed_quality_names({"items": items})
         self.assertIn("Bluray-1080p", allowed)
         self.assertIn("WEBDL-1080p", allowed)
         self.assertIn("WEBRip-1080p", allowed)
@@ -899,6 +960,25 @@ PersistentKeepalive = 25
         self.assertIn("Remux-2160p", blocked)
         self.assertIn("WEBDL-2160p", blocked)
         self.assertIn("CAM", blocked)
+
+    def test_max_items_allow_remux_and_reject_cam(self):
+        catalog = ws.quality_catalog(any_quality_bundle()["profile"])
+        items = ws.rebuild_profile_items(catalog, ws.MAX_GROUPS)
+        allowed, blocked = allowed_quality_names({"items": items})
+        self.assertIn("Remux-1080p", allowed)
+        self.assertIn("Remux-2160p", allowed)
+        self.assertIn("Bluray-1080p", allowed)
+        self.assertIn("CAM", blocked)
+        self.assertIn("BR-DISK", blocked)
+
+    def test_anything_items_allow_cam(self):
+        catalog = ws.quality_catalog(any_quality_bundle()["profile"])
+        items = ws.rebuild_profile_items(catalog, (), allow_unlisted=True)
+        allowed, blocked = allowed_quality_names({"items": items})
+        self.assertIn("CAM", allowed)
+        self.assertIn("WEBDL-480p", allowed)
+        self.assertIn("Remux-2160p", allowed)
+        self.assertIn("BR-DISK", blocked)
 
     def test_language_profile_id_skips_http(self):
         self.assertIsNone(ws.language_profile_id("http://127.0.0.1:8989/api/v3", "k"))
@@ -960,6 +1040,9 @@ class WireStack(unittest.TestCase):
                 "MEDIA_TV": "TV/Not Kid Friendly",
                 "MEDIA_TV_KID": "TV/Kid Friendly",
                 "AFTER_DOWNLOAD": "stop_sharing",
+                "PREFERRED_LANGUAGE": "english",
+                "ANIME_AUDIO": "dual_audio",
+                "SUBTITLES": "english",
                 "PLEX_URL": "http://172.30.32.1:32400",
                 "PLEX_TOKEN": "test-plex-token",
                 "INDEXER_URL": "https://example-source.test",
@@ -1034,8 +1117,8 @@ class WireStack(unittest.TestCase):
         self.assertEqual(source_fields["apiKey"], "test-source-key")
         self.assertEqual(self.state.plex_auth, {"authToken": "test-plex-token"})
         self.assertEqual(self.state.seerr_radarr[0]["hostname"], "127.0.0.1")
-        self.assertEqual(self.state.seerr_radarr[0]["activeProfileName"], "HD")
-        self.assertEqual(self.state.seerr_sonarr[0]["activeProfileName"], "HD")
+        self.assertEqual(self.state.seerr_radarr[0]["activeProfileName"], "Default")
+        self.assertEqual(self.state.seerr_sonarr[0]["activeProfileName"], "Default")
         self.assertEqual(self.state.seerr_sonarr[0]["activeDirectory"], "/media/TV/Not Kid Friendly")
         self.assertTrue((self.ready / "seerr-arr").exists())
         self.assertTrue(self.state.initialized)
@@ -1170,48 +1253,93 @@ class WireStack(unittest.TestCase):
         self.assertIn("missing Prowlarr source(s): LimeTorrents", out)
         self.assertIn("Sonarr indexers: 2 (Prowlarr enabled 2)", out)
 
-    def test_applies_hd_profile_instead_of_remux(self):
+    def test_applies_three_quality_tiers(self):
         os.environ["INDEXER_URL"] = ""
         os.environ["INDEXER_API_KEY"] = ""
+        extra = json.loads(json.dumps(any_quality_bundle(2, "HD-720p")["profile"]))
+        ultra = json.loads(json.dumps(any_quality_bundle(3, "Ultra-HD")["profile"]))
+        self.state.radarr_profiles.extend([extra, ultra])
+        self.state.radarr_profiles[0]["name"] = "HD"
         rc = ws.main()
         self.assertEqual(rc, 0)
-        profile = self.state.radarr_profiles[0]
-        self.assertEqual(profile["name"], "HD")
-        allowed: set[str] = set()
-        blocked: set[str] = set()
-
-        def walk(node: dict) -> None:
-            q = node.get("quality") if isinstance(node.get("quality"), dict) else {}
-            name = q.get("name")
-            if name:
-                (allowed if node.get("allowed") else blocked).add(name)
-            for child in node.get("items") or []:
-                if isinstance(child, dict):
-                    walk(child)
-
-        for item in profile.get("items") or []:
-            walk(item)
+        names = {item.get("name") for item in self.state.radarr_profiles}
+        self.assertEqual(names, {"Max", "Default", "Anything"})
+        default = profile_named(self.state.radarr_profiles, "Default")
+        maximum = profile_named(self.state.radarr_profiles, "Max")
+        anything = profile_named(self.state.radarr_profiles, "Anything")
+        allowed, blocked = allowed_quality_names(default)
         self.assertIn("Bluray-1080p", allowed)
         self.assertIn("WEBDL-1080p", allowed)
         self.assertIn("Remux-1080p", blocked)
         self.assertIn("Remux-2160p", blocked)
+        self.assertIn("CAM", blocked)
+        max_allowed, max_blocked = allowed_quality_names(maximum)
+        self.assertIn("Remux-1080p", max_allowed)
+        self.assertIn("Remux-2160p", max_allowed)
+        self.assertIn("CAM", max_blocked)
+        any_allowed, _any_blocked = allowed_quality_names(anything)
+        self.assertIn("CAM", any_allowed)
+        self.assertFalse(anything.get("upgradeAllowed"))
         bluray_id = next(
             item["quality"]["id"]
             for item in any_quality_bundle()["profile"]["items"]
             if item["quality"]["name"] == "Bluray-1080p"
         )
-        self.assertEqual(profile["cutoff"], bluray_id)
-        names = {item["name"] for item in self.state.radarr_formats}
-        self.assertIn("Pompey Prefer x265", names)
-        self.assertIn("Pompey Prefer WEB-DL", names)
-        self.assertIn("Pompey Reject Remux/DISK", names)
-        scores = {item["name"]: item["score"] for item in profile.get("formatItems") or []}
+        remux_4k_id = next(
+            item["quality"]["id"]
+            for item in any_quality_bundle()["profile"]["items"]
+            if item["quality"]["name"] == "Remux-2160p"
+        )
+        self.assertEqual(default["cutoff"], bluray_id)
+        self.assertEqual(maximum["cutoff"], remux_4k_id)
+        cf_names = {item["name"] for item in self.state.radarr_formats}
+        self.assertIn("Pompey Prefer x265", cf_names)
+        self.assertIn("Pompey Prefer Remux", cf_names)
+        self.assertIn("Pompey Dual Audio", cf_names)
+        self.assertIn("Pompey English subs", cf_names)
+        scores = {item["name"]: item["score"] for item in default.get("formatItems") or []}
         self.assertEqual(scores["Pompey Reject Remux/DISK"], -10000)
         self.assertEqual(scores["Pompey Prefer x265"], 80)
-        bluray = next(item for item in self.state.radarr_defs if item["quality"]["name"] == "Bluray-1080p")
-        self.assertEqual(bluray["maxSize"], 130.0)
-        self.assertEqual(self.state.seerr_radarr[0]["activeProfileName"], "HD")
-        self.assertEqual(self.state.sonarr_profiles[0]["name"], "HD")
+        self.assertEqual(scores["Pompey Dual Audio"], 200)
+        self.assertEqual(scores["Pompey English subs"], 50)
+        max_scores = {item["name"]: item["score"] for item in maximum.get("formatItems") or []}
+        self.assertEqual(max_scores["Pompey Prefer Remux"], 200)
+        self.assertEqual(max_scores["Pompey Prefer lossless audio"], 150)
+        self.assertNotIn("Pompey Reject Remux/DISK", max_scores)
+        web = next(item for item in self.state.radarr_defs if item["quality"]["name"] == "WEBDL-1080p")
+        self.assertEqual(web["minSize"], 12.5)
+        self.assertEqual(web["preferredSize"], 33.0)
+        self.assertEqual(web["maxSize"], 53.0)
+        remux = next(item for item in self.state.radarr_defs if item["quality"]["name"] == "Remux-1080p")
+        self.assertEqual(remux["maxSize"], 320.0)
+        self.assertEqual(self.state.seerr_radarr[0]["activeProfileName"], "Default")
+        self.assertEqual(self.state.seerr_sonarr[0]["activeProfileName"], "Default")
+        sonarr_names = {item.get("name") for item in self.state.sonarr_profiles}
+        self.assertEqual(sonarr_names, {"Max", "Default", "Anything"})
+        self.assertEqual(self.state.seerr_main["defaultPermissions"], ws.SEERR_HOUSEHOLD_PERMS)
+        self.assertTrue(ws.SEERR_HOUSEHOLD_PERMS & ws.SEERR_REQUEST_ADVANCED)
+
+    def test_grants_advanced_requests_to_existing_seerr_user(self):
+        os.environ["INDEXER_URL"] = ""
+        os.environ["INDEXER_API_KEY"] = ""
+        self.state.seerr_users = [{"id": 2, "email": "house@local", "permissions": 32 + 128}]
+        rc = ws.main()
+        self.assertEqual(rc, 0)
+        self.assertTrue(self.state.seerr_users[0]["permissions"] & ws.SEERR_REQUEST_ADVANCED)
+
+    def test_original_anime_audio_skips_dual_audio_score(self):
+        os.environ["INDEXER_URL"] = ""
+        os.environ["INDEXER_API_KEY"] = ""
+        os.environ["ANIME_AUDIO"] = "original"
+        os.environ["PREFERRED_LANGUAGE"] = "original"
+        os.environ["SUBTITLES"] = "none"
+        rc = ws.main()
+        self.assertEqual(rc, 0)
+        default = profile_named(self.state.radarr_profiles, "Default")
+        scores = {item["name"]: item["score"] for item in default.get("formatItems") or []}
+        self.assertNotIn("Pompey Dual Audio", scores)
+        self.assertNotIn("Pompey English dub", scores)
+        self.assertNotIn("Pompey English subs", scores)
 
     def test_share_to_ratio_leaves_torrent_until_ratio(self):
         os.environ["INDEXER_URL"] = ""
@@ -1438,8 +1566,8 @@ class WireStack(unittest.TestCase):
             self.state.seerr_sonarr[0]["activeDirectory"],
             "/media/dlna/TV/Not Kid Friendly",
         )
-        self.assertEqual(self.state.seerr_radarr[0]["activeProfileName"], "HD")
-        self.assertEqual(self.state.seerr_sonarr[0]["activeProfileName"], "HD")
+        self.assertEqual(self.state.seerr_radarr[0]["activeProfileName"], "Default")
+        self.assertEqual(self.state.seerr_sonarr[0]["activeProfileName"], "Default")
         self.assertEqual(
             set(self.state.radarr_folders),
             {

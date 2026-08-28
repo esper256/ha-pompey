@@ -4,5 +4,8 @@
   "movies_kid_folder": "Movies/Kid Friendly",
   "tv_folder": "TV/Not Kid Friendly",
   "tv_kid_folder": "TV/Kid Friendly",
-  "after_download": "stop_sharing"
+  "after_download": "stop_sharing",
+  "preferred_language": "english",
+  "anime_audio": "dual_audio",
+  "subtitles": "english"
 }

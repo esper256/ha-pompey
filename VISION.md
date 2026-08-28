@@ -70,4 +70,4 @@ Hardware: this stack wants a few GB of RAM on top of Home Assistant. A 2 GB Pi i
 
 ## This repo
 
-`pompey/` is the Home Assistant app for the whole stack. The household guide (install, first run, which URLs you open, updates, what is not ready, roadmap) is the [root README](README.md). `0.2.27` is the current cut on real Home Assistant OS. Auto-grab uses a household HD profile (1080p WEB-DL/BluRay encodes, no remux/4K). Finished downloads are imported into the library folders, including on a network media share. Live Recyclarr sync of TRaSH scores is still later.
+`pompey/` is the Home Assistant app for the whole stack. The household guide (install, first run, which URLs you open, updates, what is not ready, roadmap) is the [root README](README.md). `0.2.28` is the current cut on real Home Assistant OS. Search offers Max / Default / Anything quality on the request. Language, anime audio, and subtitles are Home Assistant options that score release names. Finished downloads are imported into the library folders, including on a network media share. Live Recyclarr sync of TRaSH scores, and Bazarr for missing subtitles, are still later.
