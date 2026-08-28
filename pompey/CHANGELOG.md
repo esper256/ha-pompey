@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.2
+
+- Supervisor `config.yaml` validator in `tests/test_ha_config.py` (same schema that skips a bad app so it never lists). `timeout` must be 10–300 seconds; **1800 was rejected**, which is why Pompey did not appear under Install app after the repo cloned.
+- `timeout` is now 300 (the maximum). That is Docker start/stop, not the engine download. Engines still fetch after the container is up.
+
 ## 0.2.1
 
 - Ready for a first Home Assistant OS try: Ingress rewriter so Seerr assets load under `/api/hassio_ingress/…`, Proton `PersistentKeepalive`, iptables-legacy kill switch, longer first-boot timeout, auto start on HA reboot.
