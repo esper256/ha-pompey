@@ -402,6 +402,18 @@ rm -rf "${POMPEY_READY}"
 python3 "${BIN}/pompey-status" vpn "Starting" 5
 test -f "${POMPEY_READY}/status.json"
 
+echo "== pompey-vpn-stats writes wg0 counters into status.json =="
+python3 "${BIN}/pompey-status" ready "Ready" 100
+netdev="${WORK}/net-dev"
+printf '%s\n' '  wg0: 9000000 3 0 0 0 0 0 0 111000 1 0 0 0 0 0 0' >"${netdev}"
+POMPEY_NET_DEV="${netdev}" python3 "${BIN}/pompey-vpn-stats"
+test "$(jq -r .vpn.up "${POMPEY_READY}/status.json")" = true
+test "$(jq -r .vpn.rx_bytes "${POMPEY_READY}/status.json")" = 9000000
+test "$(jq -r .vpn.tx_bytes "${POMPEY_READY}/status.json")" = 111000
+test "$(jq -r .search "${POMPEY_READY}/status.json")" = true
+test -x "${BIN}/pompey-vpn-stats"
+test -x "${ROOT}/pompey/rootfs/etc/services.d/vpn-stats/run"
+
 echo "== fetch URL construction (range GET, not a full download) =="
 urls="$(run "${BIN}/fetch-engines" --print-urls)"
 printf '%s\n' "${urls}"

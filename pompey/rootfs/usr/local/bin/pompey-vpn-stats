@@ -1,0 +1,160 @@
+#!/usr/bin/env python3
+"""Sample wg0 byte counters into status.json for the wait-screen graph.
+
+Reads /proc/net/dev (or the fake-VPN netns). Does not change boot step fields.
+"""
+from __future__ import annotations
+
+import json
+import os
+import subprocess
+import sys
+import time
+
+def status_path() -> str:
+    return os.environ.get("POMPEY_STATUS") or os.path.join(
+        os.environ.get("POMPEY_READY", "/tmp/pompey"), "status.json"
+    )
+
+
+def iface_name() -> str:
+    return os.environ.get("WG_IFACE", "wg0")
+
+
+def parse_net_dev(text: str, iface: str):
+    for raw in text.splitlines():
+        if ":" not in raw:
+            continue
+        name, rest = raw.split(":", 1)
+        if name.strip() != iface:
+            continue
+        cols = rest.split()
+        if len(cols) < 9:
+            return None
+        try:
+            return int(cols[0]), int(cols[8])
+        except ValueError:
+            return None
+    return None
+
+
+def read_host_dev(iface: str):
+    path = os.environ.get("POMPEY_NET_DEV", "/proc/net/dev")
+    try:
+        with open(path, encoding="utf-8") as fh:
+            text = fh.read()
+    except OSError:
+        return None
+    return parse_net_dev(text, iface)
+
+
+def read_netns_dev(iface: str):
+    ns = os.environ.get("POMPEY_FAKE_VPN_NETNS", "pompey-dev")
+    inner = ["ip", "netns", "exec", ns, "cat", "/proc/net/dev"]
+    cmd = inner if os.geteuid() == 0 else ["sudo", "-n", *inner]
+    try:
+        proc = subprocess.run(
+            cmd, capture_output=True, text=True, timeout=2, check=False
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if proc.returncode != 0:
+        return None
+    return parse_net_dev(proc.stdout, iface)
+
+
+def read_iface_bytes(iface: str):
+    got = read_host_dev(iface)
+    if got is not None:
+        return got
+    if os.environ.get("POMPEY_FAKE_VPN") == "1":
+        return read_netns_dev(iface)
+    return None
+
+
+def load_status() -> dict | None:
+    path = status_path()
+    if not os.path.isfile(path) or os.path.getsize(path) <= 0:
+        return None
+    try:
+        with open(path, encoding="utf-8") as fh:
+            data = json.load(fh)
+    except (OSError, json.JSONDecodeError, TypeError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def save_status(data: dict) -> None:
+    path = status_path()
+    directory = os.path.dirname(path) or "."
+    tmp = path + ".vpn.tmp"
+    payload = json.dumps(data, indent=2) + "\n"
+    last: OSError | None = None
+    for _ in range(5):
+        try:
+            os.makedirs(directory, exist_ok=True)
+            with open(tmp, "w", encoding="utf-8") as fh:
+                fh.write(payload)
+            os.replace(tmp, path)
+            return
+        except OSError as exc:
+            last = exc
+            time.sleep(0.02)
+    if last is not None:
+        raise last
+
+
+def sample() -> dict:
+    iface = iface_name()
+    got = read_iface_bytes(iface)
+    now_ms = int(time.time() * 1000)
+    if got is None:
+        return {
+            "iface": iface,
+            "up": False,
+            "rx_bytes": 0,
+            "tx_bytes": 0,
+            "sample_ms": now_ms,
+        }
+    rx, tx = got
+    return {
+        "iface": iface,
+        "up": True,
+        "rx_bytes": rx,
+        "tx_bytes": tx,
+        "sample_ms": now_ms,
+    }
+
+
+def write_once() -> int:
+    data = load_status()
+    if data is None:
+        return 0
+    data["vpn"] = sample()
+    try:
+        save_status(data)
+    except OSError:
+        return 0
+    return 0
+
+
+def loop() -> int:
+    interval = float(os.environ.get("POMPEY_VPN_STATS_INTERVAL", "1"))
+    if interval < 0.2:
+        interval = 0.2
+    while True:
+        write_once()
+        time.sleep(interval)
+
+
+def main(argv: list[str]) -> int:
+    if argv[1:] == ["loop"]:
+        return loop()
+    if argv[1:]:
+        print("usage: pompey-vpn-stats [loop]", file=sys.stderr)
+        return 2
+    return write_once()
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv))
