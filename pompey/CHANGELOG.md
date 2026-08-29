@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.37
+
+- Housekeeping will not delete anything that is not a leftover under `downloads/complete`, and it will not scan or import if that folder overlaps a Plex library path. Re-import is skipped whenever the library already has that movie or that `SxxExx` (even if Arr forgot `hasFile`) so a Move cannot recycle-delete the Plex file. Radarr/Sonarr now send replaced files to `downloads/recycle` and do not auto-empty it. qBittorrent still forgets torrents with `deleteFiles=false`. Rebuild so the banner says **0.2.37**.
+
 ## 0.2.36
 
 - A season that searched 9…4 then sat is no longer starved by housekeeping. Refresh/Scan every five minutes are higher priority than EpisodeSearch, so they ate the rest of the queue. Housekeeping now skips Refresh while a search is running, skips Refresh/Scan when `complete/` has no videos, and pokes remaining wanted/missing episodes *after* import — once per missing-id set, not every cycle.

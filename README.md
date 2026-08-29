@@ -4,7 +4,7 @@ Search for a movie or TV show in Home Assistant. Confirm if we need you. It land
 
 Pompey is one Home Assistant OS app. The sidebar is the box: Proton, status, a button to search. Search itself is [Seerr](https://seerr.dev/) on this machine’s port **5055**, not an iframe. Downloads, matching, and the VPN stay inside Pompey. All internet from this app uses Proton WireGuard. If the tunnel is down, internet is dropped. **Plex is a separate Home Assistant app** (or another machine). Pompey does not run Plex.
 
-This is the user guide for the product we are building. It describes the journey as it should feel. [What is not ready yet](#what-is-not-ready-yet) is honest about the current cut (**0.2.36**). The [roadmap](#roadmap) is how we close the gap.
+This is the user guide for the product we are building. It describes the journey as it should feel. [What is not ready yet](#what-is-not-ready-yet) is honest about the current cut (**0.2.37**). The [roadmap](#roadmap) is how we close the gap.
 
 ## How a day with it should feel
 
@@ -169,7 +169,7 @@ A private tracker with a stable API key is set-and-forget. Prowlarr copies that 
 
 ## What is not ready yet
 
-The journey above is the target. **0.2.36** is a real Home Assistant OS install of that box, not the finished household app.
+The journey above is the target. **0.2.37** is a real Home Assistant OS install of that box, not the finished household app.
 
 | In the guide | On the machine today |
 | --- | --- |
@@ -187,7 +187,7 @@ The journey above is the target. **0.2.36** is a real Home Assistant OS install 
 | Jellyfin | Plex only. |
 | Use this from outside the house | Out of scope. Search is on the LAN at :5055. Sources at :9696. Do not port-forward either. |
 
-If search is a blank page on port 5055, or the Plex button on setup does nothing, that is a bug — send the log. Rebuild so the banner says **0.2.36** if a TV season searches a few episodes then sits, or if leftover videos are still sitting loose in `downloads/complete` after the title is in the library. Rebuild to **0.2.34** if leftover torrent *folders* stay after the title is on Plex. Rebuild to **0.2.33** if Seerr never marked a finished title available. Rebuild to **0.2.32** if a finished **video** is still under `downloads/complete`. Rebuild to **0.2.31** if the wait screen says wiring failed (including Sonarr minimum free space ≥ 100) and the request quality list is still Any / HD-720p / Ultra-HD. Rebuild to **0.2.29** if you moved a file by hand and worry qBittorrent will grab it again. Also rebuild if auto-grab picked a huge remux on Default, a Seerr request only title-searched two Prowlarr sources, or you still need tagged app logs, household media-folder defaults, **Open sources**, or an older wait screen.
+If search is a blank page on port 5055, or the Plex button on setup does nothing, that is a bug — send the log. Rebuild so the banner says **0.2.37** if a TV season searches a few episodes then sits, or if leftover videos are still sitting loose in `downloads/complete` after the title is in the library. Rebuild to **0.2.34** if leftover torrent *folders* stay after the title is on Plex. Rebuild to **0.2.33** if Seerr never marked a finished title available. Rebuild to **0.2.32** if a finished **video** is still under `downloads/complete`. Rebuild to **0.2.31** if the wait screen says wiring failed (including Sonarr minimum free space ≥ 100) and the request quality list is still Any / HD-720p / Ultra-HD. Rebuild to **0.2.29** if you moved a file by hand and worry qBittorrent will grab it again. Also rebuild if auto-grab picked a huge remux on Default, a Seerr request only title-searched two Prowlarr sources, or you still need tagged app logs, household media-folder defaults, **Open sources**, or an older wait screen.
 
 ## Roadmap
 
@@ -230,7 +230,7 @@ App config lives in `/addon_configs/<id>_pompey/`. Fetched engines live in the a
 - Search never finds releases: add a source in **Open sources**, and give wiring a minute after the Plex wizard.
 - New titles land on the Home Assistant disk, not the NAS: Media folder should be `/media/<network-storage-name>` (default `/media/dlna`) and the four library fields should be folders Plex already scans. If you installed 0.2.20 with the old `/media` defaults, change Configuration and restart.
 - A TV season searches some episodes in **Open sources** then sits: rebuild to **0.2.36**. Housekeeping no longer posts Refresh/Scan on top of a running EpisodeSearch (those commands jump the queue). Remaining missing episodes get one poke after import. The app log still shows Sonarr’s command queue and wanted/missing first. Send that stretch of the log (not API keys).
-- Download finished but leftover videos are still loose under `downloads/complete` after the title is in Plex: rebuild to **0.2.36**. **0.2.34** only removed leftover torrent folders; a flat `.mkv` in `complete/` was left behind. Housekeeping now deletes that leftover once the library has that movie or that `SxxExx`. Do not drag files out of `complete/` yourself. Do not use Seerr’s red Remove / Clear Data buttons for this. Plex only sees files that made it into the library folders.
+- Download finished but leftover videos are still loose under `downloads/complete` after the title is in Plex: rebuild to **0.2.37**. **0.2.34** only removed leftover torrent folders; a flat `.mkv` in `complete/` was left behind. Housekeeping now deletes that leftover once the library has that movie or that `SxxExx`, and it will not delete or re-import a path that is a Plex library folder. Replaced files go to `downloads/recycle`. Do not drag files out of `complete/` yourself. Do not use Seerr’s red Remove / Clear Data buttons for this. Plex only sees files that made it into the library folders.
 - Plex wizard cannot see the server: numeric IP of **your Plex app**, port 32400 published, LAN not blocked. Pompey does not contain Plex.
 
 More Home Assistant-specific notes (Supervisor skip reasons, copy-to-`/addons`): [pompey/DOCS.md](pompey/DOCS.md).

@@ -246,6 +246,11 @@ class FakeState:
             "skipFreeSpaceCheckWhenImporting": False,
             "minimumFreeSpaceWhenImporting": 100,
             "copyUsingHardlinks": True,
+            "recycleBin": "",
+            "recycleBinCleanupDays": 7,
+            "deleteEmptyFolders": True,
+            "useScriptImport": False,
+            "autoUnmonitorPreviouslyDownloadedMovies": True,
         }
         self.sonarr_media: dict = {
             "id": 1,
@@ -253,6 +258,11 @@ class FakeState:
             "skipFreeSpaceCheckWhenImporting": False,
             "minimumFreeSpaceWhenImporting": 100,
             "copyUsingHardlinks": True,
+            "recycleBin": "",
+            "recycleBinCleanupDays": 7,
+            "deleteEmptyFolders": True,
+            "useScriptImport": False,
+            "autoUnmonitorPreviouslyDownloadedEpisodes": True,
         }
         self.radarr_dl_config: dict = {
             "id": 1,
@@ -1173,6 +1183,14 @@ PersistentKeepalive = 25
         self.assertEqual(iw, ih)
         self.assertGreater(lw, lh)
 
+    def test_wire_stack_never_asks_arr_to_delete_library_titles(self):
+        src = (BIN / "wire-stack").read_text()
+        self.assertNotIn('"deleteFiles": "true"', src)
+        self.assertNotIn("DeleteMovie", src)
+        self.assertNotIn("DeleteSeries", src)
+        self.assertIn('"deleteFiles": "false"', src)
+        self.assertIn("recycleBin", src)
+
     def test_wire_keeps_housekeeping_hidden_qbit(self):
         wire = (ROOT / "pompey/rootfs/etc/services.d/wire/run").read_text()
         self.assertIn("housekeep", wire)
@@ -1226,6 +1244,43 @@ PersistentKeepalive = 25
                 )
             finally:
                 os.environ.pop("MEDIA_ROOT", None)
+
+    def test_safe_to_delete_complete_path_never_touches_library(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as raw:
+            base = Path(raw)
+            complete = base / "downloads" / "complete"
+            movies = base / "Movies" / "Not Kid Friendly" / "Silo"
+            complete.mkdir(parents=True)
+            movies.mkdir(parents=True)
+            leftover = complete / "Silo.S03E01.mkv"
+            leftover.write_bytes(b"copy")
+            library = movies / "Silo.S03E01.mkv"
+            library.write_bytes(b"library")
+            old = {key: os.environ.get(key) for key in ("MEDIA_ROOT", "MEDIA_MOVIES")}
+            os.environ["MEDIA_ROOT"] = str(base)
+            os.environ["MEDIA_MOVIES"] = "Movies/Not Kid Friendly"
+            try:
+                self.assertTrue(ws.safe_to_delete_complete_path(str(leftover)))
+                self.assertFalse(ws.safe_to_delete_complete_path(str(complete)))
+                self.assertFalse(ws.safe_to_delete_complete_path(str(library)))
+                self.assertFalse(ws.safe_to_delete_complete_path(str(movies)))
+                self.assertTrue(ws.path_is_library(str(library)))
+                self.assertFalse(ws.complete_overlaps_library())
+                ws.remove_complete_leftover(str(library), "should not delete")
+                self.assertTrue(library.is_file())
+                os.environ["MEDIA_MOVIES"] = "downloads/complete"
+                self.assertTrue(ws.complete_overlaps_library())
+                self.assertFalse(ws.safe_to_delete_complete_path(str(leftover)))
+                ws.remove_complete_leftover(str(leftover), "overlap")
+                self.assertTrue(leftover.is_file())
+            finally:
+                for key, value in old.items():
+                    if value is None:
+                        os.environ.pop(key, None)
+                    else:
+                        os.environ[key] = value
 
     def test_fill_fields(self):
         resource = {"fields": [{"name": "host", "value": ""}, {"name": "port", "value": 0}]}
@@ -2683,6 +2738,88 @@ class WireStack(unittest.TestCase):
         self.assertTrue(leftover.exists())
         self.assertIn("does not have this video; importing leftover", buf.getvalue())
 
+    def test_housekeep_does_not_reimport_when_library_file_exists_without_hasfile(self):
+        os.environ["INDEXER_URL"] = ""
+        os.environ["INDEXER_API_KEY"] = ""
+        root = self.tmp / "disk-hasfile"
+        complete = root / "downloads" / "complete"
+        complete.mkdir(parents=True)
+        leftover = complete / "Silo.S03E01.mkv"
+        leftover.write_bytes(b"copy")
+        os.environ["MEDIA_ROOT"] = str(root)
+        tv = root / "TV" / "Not Kid Friendly" / "Silo"
+        tv.mkdir(parents=True)
+        (tv / "Silo.S03E01.mkv").write_bytes(b"library")
+        quality = {"quality": {"id": 4, "name": "WEBDL-1080p"}, "revision": {"version": 1}}
+        self.state.series = [
+            {"id": 10, "title": "Silo", "monitored": True, "path": str(tv)}
+        ]
+        self.state.episodes = [
+            {"id": 11, "seriesId": 10, "hasFile": False, "title": "Who Are You?"},
+        ]
+        self.state.sonarr_manual_import = [
+            {
+                "path": str(leftover),
+                "seriesId": 10,
+                "episodeIds": [11],
+                "series": {"id": 10, "title": "Silo", "path": str(tv)},
+                "quality": quality,
+                "languages": [{"id": 1, "name": "English"}],
+                "rejections": [],
+            }
+        ]
+        self.assertEqual(ws.housekeep(), 0)
+        manuals = [
+            item for item in self.state.arr_commands if item.get("name") == "ManualImport"
+        ]
+        self.assertEqual(manuals, [])
+        self.assertFalse(leftover.exists())
+        self.assertTrue((tv / "Silo.S03E01.mkv").is_file())
+
+    def test_housekeep_skips_import_when_complete_is_a_library_folder(self):
+        os.environ["INDEXER_URL"] = ""
+        os.environ["INDEXER_API_KEY"] = ""
+        root = self.tmp / "complete-is-library"
+        complete = root / "downloads" / "complete"
+        complete.mkdir(parents=True)
+        library = complete / "Silo.S03E01.mkv"
+        library.write_bytes(b"library")
+        os.environ["MEDIA_ROOT"] = str(root)
+        os.environ["MEDIA_MOVIES"] = "downloads/complete"
+        os.environ["MEDIA_TV"] = "downloads/complete"
+        quality = {"quality": {"id": 4, "name": "WEBDL-1080p"}, "revision": {"version": 1}}
+        self.state.series = [
+            {"id": 10, "title": "Silo", "monitored": True, "path": str(complete)}
+        ]
+        self.state.episodes = [
+            {"id": 11, "seriesId": 10, "hasFile": True, "title": "Who Are You?"},
+        ]
+        self.state.sonarr_manual_import = [
+            {
+                "path": str(library),
+                "seriesId": 10,
+                "episodeIds": [11],
+                "series": {"id": 10, "title": "Silo", "path": str(complete)},
+                "quality": quality,
+                "languages": [{"id": 1, "name": "English"}],
+                "rejections": [],
+            }
+        ]
+        from io import StringIO
+        from contextlib import redirect_stdout
+
+        buf = StringIO()
+        with redirect_stdout(buf):
+            self.assertEqual(ws.housekeep(), 0)
+        self.assertTrue(library.is_file())
+        self.assertFalse(
+            any(item.get("name") == "ManualImport" for item in self.state.arr_commands)
+        )
+        self.assertFalse(
+            any("Scan" in str(item.get("name")) for item in self.state.arr_commands)
+        )
+        self.assertIn("overlaps a library folder", buf.getvalue())
+
     def test_housekeep_renames_matched_sonarr_drop(self):
         os.environ["INDEXER_URL"] = ""
         os.environ["INDEXER_API_KEY"] = ""
@@ -2863,6 +3000,16 @@ class WireStack(unittest.TestCase):
             self.assertFalse(cfg.get("copyUsingHardlinks"))
             self.assertTrue(cfg.get("importExtraFiles"))
             self.assertEqual(cfg.get("extraFileExtensions"), "srt")
+            self.assertEqual(cfg.get("recycleBin"), "/media/downloads/recycle")
+            self.assertEqual(cfg.get("recycleBinCleanupDays"), 0)
+            self.assertFalse(cfg.get("deleteEmptyFolders"))
+            self.assertFalse(cfg.get("useScriptImport"))
+        self.assertFalse(
+            self.state.radarr_media.get("autoUnmonitorPreviouslyDownloadedMovies")
+        )
+        self.assertFalse(
+            self.state.sonarr_media.get("autoUnmonitorPreviouslyDownloadedEpisodes")
+        )
         for cfg in (self.state.radarr_dl_config, self.state.sonarr_dl_config):
             self.assertTrue(cfg.get("enableCompletedDownloadHandling"))
             self.assertFalse(cfg.get("autoRedownloadFailed"))
