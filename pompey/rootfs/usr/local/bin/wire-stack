@@ -134,16 +134,25 @@ def downloads_complete() -> str:
     return f"{media_root()}/downloads/complete"
 
 
-def download_scan_paths() -> list[str]:
+def download_scan_paths(kind: str | None = None) -> list[str]:
     """Old qBittorrent categories used complete/radarr and complete/sonarr.
 
     New wiring sets the category save path to complete/ itself, so in-progress
     files sit in incomplete/ with no category folder. Arr's folder scan of
-    complete/ can treat a leftover 'radarr' directory as a movie name and never
+    complete/ can treat a leftover 'radarr' directory as a title name and never
     look inside it.
     """
     root = downloads_complete()
-    return [root, os.path.join(root, "radarr"), os.path.join(root, "sonarr")]
+    paths = [root]
+    if kind != "sonarr":
+        paths.append(os.path.join(root, "radarr"))
+    if kind != "radarr":
+        paths.append(os.path.join(root, "sonarr"))
+    return paths
+
+
+def existing_download_scan_paths(kind: str | None = None) -> list[str]:
+    return [path for path in download_scan_paths(kind) if os.path.isdir(path)]
 
 
 def plex_url() -> str:
@@ -552,7 +561,7 @@ def refresh_monitored_downloads(base: str, api_key: str, kind: str) -> None:
 
 def log_stuck_imports(base: str, api_key: str, kind: str) -> None:
     """Arr only warns on a failed move. A finished torrent still in complete/ with
-    status ok is the silent case: Seerr already handed Radarr the library folder,
+    status ok is the silent case: Seerr already handed Arr the library folder,
     qBittorrent never gets that path, and Arr has not started the import yet.
     """
     try:
@@ -566,8 +575,6 @@ def log_stuck_imports(base: str, api_key: str, kind: str) -> None:
         log(f"{kind} queue: {exc}", "WARNING")
         return
     records = as_list(payload)
-    if isinstance(payload, dict) and not records:
-        records = as_list(payload.get("records"))
     shown = 0
     for item in records:
         if not queue_needs_import_log(item):
@@ -606,6 +613,27 @@ def title_library_path(item: dict) -> str:
     return ""
 
 
+def title_needs_library_file(item: dict, kind: str) -> bool:
+    """True when a monitored title is still missing library video.
+
+    Movies: hasFile is False. Series: monitored episodeCount is greater than
+    episodeFileCount (a show with S01 on disk can still be waiting on S02).
+    """
+    if not isinstance(item, dict) or item.get("monitored") is not True:
+        return False
+    if kind == "radarr":
+        return item.get("hasFile") is False
+    stats = item.get("statistics") if isinstance(item.get("statistics"), dict) else {}
+    try:
+        files = int(stats.get("episodeFileCount") or 0)
+        wanted = int(stats.get("episodeCount") or 0)
+    except (TypeError, ValueError):
+        files, wanted = 0, 0
+    if not stats:
+        return True
+    return wanted > 0 and files < wanted
+
+
 def log_titles_waiting_for_library(base: str, api_key: str, kind: str) -> None:
     """Show the folder Seerr/Arr already stored. Empty path means the handoff never landed."""
     endpoint = "movie" if kind == "radarr" else "series"
@@ -616,15 +644,8 @@ def log_titles_waiting_for_library(base: str, api_key: str, kind: str) -> None:
         return
     waiting: list[str] = []
     for item in rows:
-        if item.get("monitored") is not True:
+        if not title_needs_library_file(item, kind):
             continue
-        if kind == "radarr":
-            if item.get("hasFile") is not False:
-                continue
-        else:
-            stats = item.get("statistics") if isinstance(item.get("statistics"), dict) else {}
-            if int(stats.get("episodeFileCount") or 0) > 0:
-                continue
         dest = title_library_path(item) or "NO PATH (Seerr/Arr never stored a library folder)"
         waiting.append(f"{item.get('title')} -> {dest}")
         if len(waiting) >= 10:
@@ -1649,8 +1670,6 @@ def retry_unfilled_titles(radarr: str, radarr_key: str, sonarr: str, sonarr_key:
             headers=arr_headers(sonarr_key),
         )
         records = as_list(missing)
-        if isinstance(missing, dict) and not records:
-            records = as_list(missing.get("records"))
         episode_ids = [
             int(item["id"])
             for item in records
@@ -1756,7 +1775,7 @@ def path_has_video(path: str) -> bool:
 def qbit_payload_gone(item: dict) -> bool:
     """True when the torrent's video is not on disk (moved into the library).
 
-    Leftover .srt/.nfo/.txt next to an already-imported movie do not keep the
+    Leftover .srt/.nfo/.txt next to an already-imported title do not keep the
     torrent alive — those extras are not the library file.
     """
     path = item.get("content_path")
@@ -1903,7 +1922,7 @@ def scan_download_drop(base: str, api_key: str, kind: str) -> None:
     Kid vs Not Kid was stored when Seerr added the title.
     """
     name = "DownloadedMoviesScan" if kind == "radarr" else "DownloadedEpisodesScan"
-    for path in download_scan_paths():
+    for path in existing_download_scan_paths(kind):
         try:
             http(
                 "POST",
@@ -1928,47 +1947,189 @@ def import_rejection_text(item: dict) -> str:
     return "; ".join(bit for bit in bits if bit)
 
 
+def nested_arr_record(item: dict, kind: str) -> dict:
+    key = "movie" if kind == "radarr" else "series"
+    nested = item.get(key)
+    return nested if isinstance(nested, dict) else {}
+
+
+def arr_record_id(item: dict, kind: str):
+    nested = nested_arr_record(item, kind)
+    if kind == "radarr":
+        return item.get("movieId") or nested.get("id")
+    return item.get("seriesId") or nested.get("id")
+
+
+def episode_ids_of(item: dict) -> list:
+    wanted = item.get("episodeIds")
+    if not isinstance(wanted, list):
+        wanted = [
+            ep.get("id")
+            for ep in item.get("episodes") or []
+            if isinstance(ep, dict) and ep.get("id")
+        ]
+    return [eid for eid in wanted if eid]
+
+
+def fetch_arr_record(base: str, api_key: str, kind: str, ident):
+    path = "movie" if kind == "radarr" else "series"
+    return http("GET", f"{base}/{path}/{ident}", headers=arr_headers(api_key))
+
+
+def each_arr(radarr: str, rk: str, sonarr: str, sk: str):
+    return (("radarr", radarr, rk), ("sonarr", sonarr, sk))
+
+
 def arr_import_destination(item: dict, kind: str) -> str:
     """Library folder Arr already has (Seerr's Kid / Not Kid choice), not the filename."""
-    nested_key = "movie" if kind == "radarr" else "series"
-    nested = item.get(nested_key) if isinstance(item.get(nested_key), dict) else {}
-    return title_library_path(nested)
+    return title_library_path(nested_arr_record(item, kind))
 
 
 def arr_already_has_library_file(item: dict, kind: str) -> bool:
     """True when Arr already assigned a library file. Do not ManualImport again.
 
     Re-importing a title that hasFile deletes the library copy (no recycle bin)
-    and treats leftover complete/ extras as a new movie.
+    and the subtitle extras that came with it.
     """
     if kind == "radarr":
-        movie = item.get("movie") if isinstance(item.get("movie"), dict) else {}
-        return movie.get("hasFile") is True
+        return nested_arr_record(item, kind).get("hasFile") is True
     episodes = item.get("episodes") if isinstance(item.get("episodes"), list) else []
     if not episodes:
         return False
     return all(isinstance(ep, dict) and ep.get("hasFile") is True for ep in episodes)
 
 
-def lookup_arr_library_path(base: str, api_key: str, kind: str, row: dict) -> str:
+def lookup_arr_has_file(base: str, api_key: str, kind: str, item: dict) -> bool:
+    """GET /manualimport often omits hasFile even after CDH already imported."""
+    if arr_already_has_library_file(item, kind):
+        return True
+    ident = arr_record_id(item, kind)
+    if not ident:
+        return False
     try:
-        if kind == "radarr" and row.get("movieId"):
-            movie = http(
+        if kind == "radarr":
+            row = fetch_arr_record(base, api_key, kind, ident)
+            return isinstance(row, dict) and row.get("hasFile") is True
+        rows = as_list(
+            http(
                 "GET",
-                f"{base}/movie/{row['movieId']}",
+                f"{base}/episode?seriesId={ident}",
                 headers=arr_headers(api_key),
             )
-            return title_library_path(movie if isinstance(movie, dict) else {})
-        if kind == "sonarr" and row.get("seriesId"):
-            show = http(
-                "GET",
-                f"{base}/series/{row['seriesId']}",
-                headers=arr_headers(api_key),
-            )
-            return title_library_path(show if isinstance(show, dict) else {})
+        )
+        wanted_ids = set(episode_ids_of(item))
+        if not wanted_ids:
+            return False
+        matched = [
+            ep
+            for ep in rows
+            if isinstance(ep, dict) and ep.get("id") in wanted_ids
+        ]
+        return bool(matched) and all(ep.get("hasFile") is True for ep in matched)
+    except RuntimeError:
+        return False
+
+
+EXPECTED_CROSS_KIND_REJECT = ("unknown series", "unknown movie")
+
+
+def is_expected_cross_kind_reject(reason: str) -> bool:
+    low = reason.strip().lower()
+    return any(low == bit or low.startswith(bit) for bit in EXPECTED_CROSS_KIND_REJECT)
+
+
+def release_dir_under_complete(path: str) -> str:
+    """Torrent folder under complete/ (or complete/radarr), not complete/ itself."""
+    root = os.path.normpath(downloads_complete())
+    full = os.path.normpath(path.strip())
+    if os.path.isfile(full) or (
+        not os.path.isdir(full) and os.path.splitext(full)[1]
+    ):
+        full = os.path.dirname(full)
+    if not path_under_complete(full) or full == root:
+        return ""
+    category = {
+        os.path.normpath(os.path.join(root, "radarr")),
+        os.path.normpath(os.path.join(root, "sonarr")),
+    }
+    while True:
+        parent = os.path.dirname(full)
+        if parent == root or parent in category:
+            return full
+        if parent == full:
+            return ""
+        full = parent
+
+
+def library_dir_has_video(path: str) -> bool:
+    return bool(path) and os.path.isdir(path) and path_has_video(path)
+
+
+def remove_complete_release(release_dir: str, reason: str) -> None:
+    if not release_dir or not os.path.isdir(release_dir):
+        return
+    if os.path.normpath(release_dir) == os.path.normpath(downloads_complete()):
+        return
+    try:
+        shutil.rmtree(release_dir)
+    except OSError as exc:
+        log(f"could not remove leftover complete/ folder: {exc}", "WARNING")
+        return
+    log(f"removed leftover complete/ folder ({reason})")
+
+
+def prune_complete_extras() -> None:
+    """Arr imports the video (+ srt) into the library folder, not the torrent dump."""
+    root = downloads_complete()
+    if not os.path.isdir(root):
+        return
+    removed = 0
+
+    def consider(folder: str) -> None:
+        nonlocal removed
+        if not os.path.isdir(folder):
+            return
+        if path_has_video(folder):
+            return
+        try:
+            shutil.rmtree(folder)
+        except OSError:
+            return
+        removed += 1
+
+    try:
+        names = [name for name in os.listdir(root) if not name.startswith(".")]
+    except OSError:
+        return
+    for name in names:
+        full = os.path.join(root, name)
+        if name in ("radarr", "sonarr") and os.path.isdir(full):
+            try:
+                children = [
+                    child for child in os.listdir(full) if not child.startswith(".")
+                ]
+            except OSError:
+                continue
+            for child in children:
+                consider(os.path.join(full, child))
+            continue
+        consider(full)
+    if removed:
+        log(
+            f"removed {removed} leftover complete/ folder(s) "
+            "(extras only; library files kept)"
+        )
+
+
+def lookup_arr_library_path(base: str, api_key: str, kind: str, row: dict) -> str:
+    ident = arr_record_id(row, kind)
+    if not ident:
+        return ""
+    try:
+        rec = fetch_arr_record(base, api_key, kind, ident)
+        return title_library_path(rec if isinstance(rec, dict) else {})
     except RuntimeError:
         return ""
-    return ""
 
 
 def manual_import_file(item: dict, kind: str) -> dict | None:
@@ -1987,22 +2148,13 @@ def manual_import_file(item: dict, kind: str) -> dict | None:
         "releaseGroup": item.get("releaseGroup") or "",
     }
     if kind == "radarr":
-        movie = item.get("movie") if isinstance(item.get("movie"), dict) else {}
-        movie_id = item.get("movieId") or movie.get("id")
+        movie_id = arr_record_id(item, kind)
         if not movie_id:
             return None
         row["movieId"] = movie_id
         return row
-    series = item.get("series") if isinstance(item.get("series"), dict) else {}
-    series_id = item.get("seriesId") or series.get("id")
-    episode_ids = item.get("episodeIds")
-    if not isinstance(episode_ids, list):
-        episode_ids = [
-            ep.get("id")
-            for ep in item.get("episodes") or []
-            if isinstance(ep, dict) and ep.get("id")
-        ]
-    episode_ids = [eid for eid in episode_ids if eid]
+    series_id = arr_record_id(item, kind)
+    episode_ids = episode_ids_of(item)
     if not series_id or not episode_ids:
         return None
     row["seriesId"] = series_id
@@ -2014,9 +2166,7 @@ def import_matched_drop(base: str, api_key: str, kind: str) -> None:
     """Rename matched files Arr already approved. Log why the rest stay in complete/."""
     seen: set[str] = set()
     files: list[dict] = []
-    for folder in download_scan_paths():
-        if not os.path.isdir(folder):
-            continue
+    for folder in existing_download_scan_paths(kind):
         query = urllib.parse.urlencode(
             {"folder": folder, "filterExistingFiles": "false"}
         )
@@ -2036,18 +2186,26 @@ def import_matched_drop(base: str, api_key: str, kind: str) -> None:
             seen.add(path)
             rejected = import_rejection_text(item)
             if rejected:
-                log(
-                    f"{kind} will not import {os.path.basename(path)}: {rejected}",
-                    "WARNING",
-                )
+                if not is_expected_cross_kind_reject(rejected):
+                    log(
+                        f"{kind} will not import {os.path.basename(path)}: {rejected}",
+                        "WARNING",
+                    )
                 continue
-            if arr_already_has_library_file(item, kind):
-                dest = arr_import_destination(item, kind) or "Arr title path"
+            dest = arr_import_destination(item, kind)
+            if lookup_arr_has_file(base, api_key, kind, item):
+                dest = dest or lookup_arr_library_path(base, api_key, kind, item)
+                dest = dest or "Arr title path"
                 log(
                     f"{kind} already has a library file for "
                     f"{os.path.basename(path)} -> {dest} "
                     "(not re-importing leftover complete/ files)"
                 )
+                if library_dir_has_video(dest):
+                    remove_complete_release(
+                        release_dir_under_complete(path),
+                        "title already in the library",
+                    )
                 continue
             row = manual_import_file(item, kind)
             if not row:
@@ -2057,9 +2215,7 @@ def import_matched_drop(base: str, api_key: str, kind: str) -> None:
                     "WARNING",
                 )
                 continue
-            dest = arr_import_destination(item, kind) or lookup_arr_library_path(
-                base, api_key, kind, row
-            )
+            dest = dest or lookup_arr_library_path(base, api_key, kind, row)
             dest = dest or "Arr title path"
             log(
                 f"{kind} importing {os.path.basename(path)} into {dest} "
@@ -2081,7 +2237,7 @@ def import_matched_drop(base: str, api_key: str, kind: str) -> None:
 
 
 def log_complete_drop_contents() -> None:
-    """Warn only when a video is still under complete/. Sidecars are not the movie."""
+    """Warn only when a video is still under complete/. Sidecars are not the title."""
     root = downloads_complete()
     if not os.path.isdir(root):
         log(f"complete folder is missing: {root}", "WARNING")
@@ -2114,7 +2270,7 @@ def log_complete_drop_contents() -> None:
     if extras:
         log(
             f"complete/ leftovers are extras only ({extras} srt/nfo/txt file(s)); "
-            "movies already in the library"
+            "titles already in the library"
         )
         return
     try:
@@ -2462,29 +2618,16 @@ def main() -> int:
     # leave Seerr on stock Any / HD-720p and hang the wait screen.
     sp = household_quality_profile(sonarr, sk, "sonarr")
     rp = household_quality_profile(radarr, rk, "radarr")
-    ensure_media_management(sonarr, sk, "sonarr")
-    ensure_media_management(radarr, rk, "radarr")
-    ensure_download_client_handling(sonarr, sk, "sonarr")
-    ensure_download_client_handling(radarr, rk, "radarr")
+    for kind, base, key in each_arr(radarr, rk, sonarr, sk):
+        ensure_media_management(base, key, kind)
+        ensure_download_client_handling(base, key, kind)
     ensure_prowlarr_app(prowlarr, pk, "Sonarr", "Sonarr", sonarr_url(), sk)
     ensure_prowlarr_app(prowlarr, pk, "Radarr", "Radarr", radarr_url(), rk)
     ensure_indexer(prowlarr, pk)
     sync_prowlarr_indexers(prowlarr, pk)
     log_arr_vs_prowlarr_indexers(radarr, rk, sonarr, sk, prowlarr, pk)
     retry_unfilled_titles(radarr, rk, sonarr, sk)
-    unlock_completed_torrents()
-    refresh_monitored_downloads(radarr, rk, "radarr")
-    refresh_monitored_downloads(sonarr, sk, "sonarr")
-    scan_download_drop(radarr, rk, "radarr")
-    scan_download_drop(sonarr, sk, "sonarr")
-    import_matched_drop(radarr, rk, "radarr")
-    import_matched_drop(sonarr, sk, "sonarr")
-    forget_moved_torrents()
-    log_complete_drop_contents()
-    log_stuck_imports(radarr, rk, "radarr")
-    log_stuck_imports(sonarr, sk, "sonarr")
-    log_titles_waiting_for_library(radarr, rk, "radarr")
-    log_titles_waiting_for_library(sonarr, sk, "sonarr")
+    import_finished_downloads(radarr, rk, sonarr, sk)
     log_recent_prowlarr_searches(prowlarr, pk)
 
     sl = language_profile_id(sonarr, sk)
@@ -2503,6 +2646,27 @@ def main() -> int:
     return 0
 
 
+def import_finished_downloads(radarr: str, rk: str, sonarr: str, sk: str) -> None:
+    """Stop finished torrents, rename into the library, drop leftover complete/ folders.
+
+    Same path for movies and TV. Destination is the Arr title folder Seerr stored.
+    """
+    unlock_completed_torrents()
+    engines = each_arr(radarr, rk, sonarr, sk)
+    for kind, base, key in engines:
+        refresh_monitored_downloads(base, key, kind)
+    for kind, base, key in engines:
+        scan_download_drop(base, key, kind)
+    for kind, base, key in engines:
+        import_matched_drop(base, key, kind)
+    forget_moved_torrents()
+    prune_complete_extras()
+    log_complete_drop_contents()
+    for kind, base, key in engines:
+        log_stuck_imports(base, key, kind)
+        log_titles_waiting_for_library(base, key, kind)
+
+
 def housekeep() -> int:
     """Stop finished torrents, rename into the library, forget rows whose files left."""
     secrets = load_secrets()
@@ -2512,19 +2676,7 @@ def housekeep() -> int:
     sonarr = f"{sonarr_url()}/api/v3"
     radarr = f"{radarr_url()}/api/v3"
     sk, rk = secrets["sonarr_api_key"], secrets["radarr_api_key"]
-    unlock_completed_torrents()
-    refresh_monitored_downloads(radarr, rk, "radarr")
-    refresh_monitored_downloads(sonarr, sk, "sonarr")
-    scan_download_drop(radarr, rk, "radarr")
-    scan_download_drop(sonarr, sk, "sonarr")
-    import_matched_drop(radarr, rk, "radarr")
-    import_matched_drop(sonarr, sk, "sonarr")
-    forget_moved_torrents()
-    log_complete_drop_contents()
-    log_stuck_imports(radarr, rk, "radarr")
-    log_stuck_imports(sonarr, sk, "sonarr")
-    log_titles_waiting_for_library(radarr, rk, "radarr")
-    log_titles_waiting_for_library(sonarr, sk, "sonarr")
+    import_finished_downloads(radarr, rk, sonarr, sk)
     tickle_seerr_availability()
     return 0
 
