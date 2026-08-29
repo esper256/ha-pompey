@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.35
+
+- App log now prints Sonarr/Radarr **command queue** and Sonarr **wanted/missing** at the start of each housekeeping pass (before Refresh/Scan). Use that to see whether a season search stalled (started EpisodeSearch stuck, later episodes still queued) or whether `complete/` is empty while scans still run. Does not change grab/import.
+- The same rebuild drops log junk that hid those lines: Seerr debug Plex-scan “already exists”, Arr `NzbDrone` stack traces (that name is Servarr’s internals, not Usenet), ANSI color, API keys and JWTs in exception URLs, and housekeeping repeating the same `complete/` / waiting-title warning every five minutes until something changes. Structured `[Warn]` / `[Error]` stay. Does not skip scans or start extra EpisodeSearch. Rebuild so the banner says **0.2.35**, then send the log around a stuck season (not API keys).
+
 ## 0.2.34
 
 - Arr imports the **video** (and `.srt`, including a `Subs` folder) into the movie or TV folder Seerr stored. It does not relocate the whole torrent directory, so `downloads/complete` can keep `.nfo` / `.txt` after the title is in Plex. **0.2.33** could also re-import a title Arr had already assigned (the manual-import list often omits `hasFile`), which deleted the library file and the subtitle that came with it. Housekeeping now looks the title up on Radarr or Sonarr, skips that second import, and removes leftover `complete/` folders once the library already has the video. A show with season 1 on disk is still treated as waiting if later seasons are missing. Rebuild so the banner says **0.2.34**. Do not drag leftover extras out by hand.

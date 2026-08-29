@@ -17,6 +17,7 @@ sources in Prowlarr (Open sources, :9696).
 """
 from __future__ import annotations
 
+import datetime
 import json
 import os
 import shutil
@@ -231,6 +232,52 @@ SEERR_REQUEST_ADVANCED = 8192
 def log(msg: str, level: str = "INFO") -> None:
     stamp = time.strftime("%H:%M:%S")
     print(f"[{stamp}] {level}: [wire-stack] {msg}", flush=True)
+
+
+def _quiet_path() -> str:
+    return os.path.join(ready_dir(), "log-quiet.json")
+
+
+def _load_quiet() -> dict:
+    try:
+        with open(_quiet_path(), encoding="utf-8") as fh:
+            data = json.load(fh)
+        return data if isinstance(data, dict) else {}
+    except (OSError, json.JSONDecodeError, TypeError):
+        return {}
+
+
+def _save_quiet(state: dict) -> None:
+    path = _quiet_path()
+    parent = os.path.dirname(path)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
+    tmp = f"{path}.tmp"
+    with open(tmp, "w", encoding="utf-8") as fh:
+        json.dump(state, fh, sort_keys=True)
+    os.replace(tmp, path)
+
+
+def log_if_new(key: str, msg: str, level: str = "INFO") -> None:
+    """Skip a housekeep line that has not changed since the last cycle.
+
+    Housekeep is a new process every few minutes, so this is a small file
+    under POMPEY_READY — not in-memory.
+    """
+    state = _load_quiet()
+    if state.get(key) == msg:
+        return
+    state[key] = msg
+    _save_quiet(state)
+    log(msg, level)
+
+
+def forget_quiet(key: str) -> None:
+    state = _load_quiet()
+    if key not in state:
+        return
+    state.pop(key, None)
+    _save_quiet(state)
 
 
 def mark_status(step: str, label: str, percent: int, error: str = "") -> None:
@@ -510,7 +557,10 @@ def tickle_seerr_availability() -> None:
                 return
             log(f"seerr {job}: {exc}", "WARNING")
     if ran:
-        log("seerr checking Plex and Arr for titles that landed in the library")
+        log_if_new(
+            "seerr-tickle",
+            "seerr checking Plex and Arr for titles that landed in the library",
+        )
 
 
 def ensure_download_client_handling(base: str, api_key: str, kind: str) -> None:
@@ -556,7 +606,11 @@ def refresh_monitored_downloads(base: str, api_key: str, kind: str) -> None:
         {"name": "RefreshMonitoredDownloads"},
         headers=arr_headers(api_key),
     )
-    log(f"{kind} checking completed downloads")
+    key = f"check:{kind}"
+    if count_complete_videos() == 0:
+        forget_quiet(key)
+        return
+    log_if_new(key, f"{kind} checking completed downloads")
 
 
 def log_stuck_imports(base: str, api_key: str, kind: str) -> None:
@@ -597,10 +651,10 @@ def log_stuck_imports(base: str, api_key: str, kind: str) -> None:
         )
         dest = item.get("outputPath") or ""
         where = f" qbit={dest}" if dest else ""
-        log(
-            f"{kind} download not in the library yet: {item.get('title')} ({extra}){where}",
-            "WARNING",
+        msg = (
+            f"{kind} download not in the library yet: {item.get('title')} ({extra}){where}"
         )
+        log_if_new(f"stuck:{kind}:{item.get('title')}", msg, "WARNING")
         shown += 1
         if shown >= 15:
             break
@@ -651,7 +705,182 @@ def log_titles_waiting_for_library(base: str, api_key: str, kind: str) -> None:
         if len(waiting) >= 10:
             break
     if waiting:
-        log(f"{kind} titles with no library file yet: {'; '.join(waiting)}", "WARNING")
+        log_if_new(
+            f"wait:{kind}",
+            f"{kind} titles with no library file yet: {'; '.join(waiting)}",
+            "WARNING",
+        )
+
+
+def parse_arr_time(raw) -> datetime.datetime | None:
+    if not isinstance(raw, str) or not raw.strip():
+        return None
+    text = raw.strip().replace("Z", "+00:00")
+    try:
+        dt = datetime.datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=datetime.timezone.utc)
+    return dt.astimezone(datetime.timezone.utc)
+
+
+def age_label(raw, now: datetime.datetime | None = None) -> str:
+    dt = parse_arr_time(raw)
+    if dt is None:
+        return ""
+    now = now or datetime.datetime.now(datetime.timezone.utc)
+    seconds = int((now - dt).total_seconds())
+    if seconds < 0:
+        seconds = 0
+    if seconds < 60:
+        return f"{seconds}s"
+    if seconds < 3600:
+        return f"{seconds // 60}m"
+    hours = seconds // 3600
+    if hours < 48:
+        return f"{hours}h"
+    return f"{hours // 24}d"
+
+
+def command_search_target(item: dict) -> str:
+    body = item.get("body") if isinstance(item.get("body"), dict) else item
+    if not isinstance(body, dict):
+        return ""
+    series = body.get("seriesTitle") or body.get("series")
+    if isinstance(series, dict):
+        series = series.get("title")
+    bits = []
+    if isinstance(series, str) and series.strip():
+        bits.append(series.strip())
+    season = body.get("seasonNumber")
+    if season is not None:
+        try:
+            bits.append(f"S{int(season):02d}")
+        except (TypeError, ValueError):
+            bits.append(f"S{season}")
+    ids = body.get("episodeIds")
+    if isinstance(ids, list) and ids:
+        bits.append(f"{len(ids)} episode(s)")
+    movie = body.get("movieTitle") or body.get("movie")
+    if isinstance(movie, dict):
+        movie = movie.get("title")
+    if isinstance(movie, str) and movie.strip():
+        bits.append(movie.strip())
+    return " ".join(bits)
+
+
+def format_arr_command(item: dict, now: datetime.datetime | None = None) -> str:
+    name = str(item.get("name") or item.get("commandName") or "command")
+    status = str(item.get("status") or "unknown").lower()
+    stamp = item.get("started") or item.get("queued") or ""
+    age = age_label(stamp, now)
+    target = command_search_target(item)
+    priority = str(item.get("priority") or "").lower()
+    bits = [status, name]
+    if age:
+        bits.append(age)
+    if priority and priority != "normal":
+        bits.append(priority)
+    if target:
+        bits.append(f"({target})")
+    return " ".join(bits)
+
+
+def summarize_arr_commands(rows: list, now: datetime.datetime | None = None) -> str:
+    live = []
+    for item in rows:
+        if not isinstance(item, dict):
+            continue
+        status = str(item.get("status") or "").lower()
+        if status in {"completed", "cancelled", "aborted"}:
+            continue
+        live.append(format_arr_command(item, now))
+    if not live:
+        return "none queued or started"
+    live = live[:8]
+    extra = "" if len(live) < 8 else " …"
+    return "; ".join(live) + extra
+
+
+def missing_episode_label(item: dict) -> str:
+    series = item.get("series") if isinstance(item.get("series"), dict) else {}
+    show = series.get("title") or item.get("seriesTitle") or item.get("title") or "episode"
+    try:
+        season = int(item.get("seasonNumber"))
+        episode = int(item.get("episodeNumber"))
+        return f"{show} S{season:02d}E{episode:02d}"
+    except (TypeError, ValueError):
+        return str(show)
+
+
+def count_complete_videos() -> int:
+    root = downloads_complete()
+    if not os.path.isdir(root):
+        return 0
+    count = 0
+    try:
+        for dirpath, dirnames, filenames in os.walk(root):
+            dirnames[:] = [name for name in dirnames if not name.startswith(".")]
+            for name in filenames:
+                if name.startswith("."):
+                    continue
+                if is_video_file(name):
+                    count += 1
+                    if count >= 50:
+                        return count
+    except OSError:
+        return count
+    return count
+
+
+def log_arr_command_queue(base: str, api_key: str, kind: str) -> None:
+    """Queue state *before* housekeeping posts more Refresh/Scan commands."""
+    try:
+        payload = http("GET", f"{base}/command", headers=arr_headers(api_key))
+    except RuntimeError as exc:
+        log(f"{kind} command queue: {exc}", "WARNING")
+        return
+    summary = summarize_arr_commands(as_list(payload))
+    log(f"{kind} commands: {summary}")
+
+
+def log_sonarr_missing(base: str, api_key: str) -> None:
+    try:
+        payload = http(
+            "GET",
+            f"{base}/wanted/missing?page=1&pageSize=20&sortKey=airDateUtc"
+            "&sortDirection=descending",
+            headers=arr_headers(api_key),
+        )
+    except RuntimeError as exc:
+        log(f"sonarr wanted/missing: {exc}", "WARNING")
+        return
+    records = as_list(payload)
+    total = len(records)
+    if isinstance(payload, dict):
+        try:
+            total = int(payload.get("totalRecords") or total)
+        except (TypeError, ValueError):
+            pass
+    labels = [missing_episode_label(item) for item in records[:8]]
+    shown = ", ".join(labels) if labels else "none"
+    extra = "" if total <= 8 else " …"
+    log(f"sonarr wanted/missing: {total} ({shown}{extra})")
+
+
+def log_search_diagnostics(radarr: str, rk: str, sonarr: str, sk: str) -> None:
+    """Enough to tell a stalled EpisodeSearch from an empty complete/ scan flood.
+
+    Does not start searches or skip import. Read these lines *above* the
+    'checking completed downloads' / 'scanning' lines from the same housekeep.
+    """
+    videos = count_complete_videos()
+    cap = "+" if videos >= 50 else ""
+    log(f"complete/: {videos}{cap} video(s) on disk before Refresh/Scan")
+    log_arr_command_queue(radarr, rk, "radarr")
+    log_arr_command_queue(sonarr, sk, "sonarr")
+    log_sonarr_missing(sonarr, sk)
 
 
 def queue_needs_import_log(item: dict) -> bool:
@@ -1930,9 +2159,14 @@ def scan_download_drop(base: str, api_key: str, kind: str) -> None:
                 {"name": name, "path": path, "importMode": "Move"},
                 headers=arr_headers(api_key),
             )
-            log(
-                f"{kind} scanning {path} for files that already have an Arr library folder"
-            )
+            scan_key = f"scan:{kind}:{path}"
+            if count_complete_videos() == 0:
+                forget_quiet(scan_key)
+            else:
+                log_if_new(
+                    scan_key,
+                    f"{kind} scanning {path} for files that already have an Arr library folder",
+                )
         except RuntimeError as exc:
             log(f"{kind} complete-folder scan {path}: {exc}", "WARNING")
 
@@ -2196,10 +2430,11 @@ def import_matched_drop(base: str, api_key: str, kind: str) -> None:
             if lookup_arr_has_file(base, api_key, kind, item):
                 dest = dest or lookup_arr_library_path(base, api_key, kind, item)
                 dest = dest or "Arr title path"
-                log(
+                log_if_new(
+                    f"hasfile:{kind}:{os.path.basename(path)}",
                     f"{kind} already has a library file for "
                     f"{os.path.basename(path)} -> {dest} "
-                    "(not re-importing leftover complete/ files)"
+                    "(not re-importing leftover complete/ files)",
                 )
                 if library_dir_has_video(dest):
                     remove_complete_release(
@@ -2209,7 +2444,8 @@ def import_matched_drop(base: str, api_key: str, kind: str) -> None:
                 continue
             row = manual_import_file(item, kind)
             if not row:
-                log(
+                log_if_new(
+                    f"nomatch:{kind}:{os.path.basename(path)}",
                     f"{kind} no library match for {os.path.basename(path)} "
                     "(not guessing Kid vs Not Kid from the name)",
                     "WARNING",
@@ -2265,7 +2501,11 @@ def log_complete_drop_contents() -> None:
             break
     if videos:
         extra = " …" if len(videos) >= 20 else ""
-        log(f"still in complete/: {'; '.join(videos)}{extra}", "WARNING")
+        log_if_new(
+            "complete-videos",
+            f"still in complete/: {'; '.join(videos)}{extra}",
+            "WARNING",
+        )
         return
     if extras:
         log(
@@ -2651,6 +2891,7 @@ def import_finished_downloads(radarr: str, rk: str, sonarr: str, sk: str) -> Non
 
     Same path for movies and TV. Destination is the Arr title folder Seerr stored.
     """
+    log_search_diagnostics(radarr, rk, sonarr, sk)
     unlock_completed_torrents()
     engines = each_arr(radarr, rk, sonarr, sk)
     for kind, base, key in engines:

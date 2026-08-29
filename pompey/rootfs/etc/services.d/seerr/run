@@ -39,6 +39,7 @@ mkdir -p "${POMPEY_CONFIG}/seerr"
 rm -f "${POMPEY_CONFIG}/seerr/DOCKER"
 ln -sfn "${POMPEY_CONFIG}/seerr" "${APP}/config"
 export NODE_ENV=production
+export LOG_LEVEL=info
 export PORT="${SEERR_PORT:-5055}"
 # Published on the Home Assistant host. Binding only localhost would
 # make the mapped port refuse LAN clients. Plex is not this process.
