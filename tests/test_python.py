@@ -1506,6 +1506,33 @@ PersistentKeepalive = 25
         )
         self.assertEqual(ws.summarize_arr_commands([], now), "none queued or started")
         self.assertEqual(
+            ws.video_episode_key(
+                "Silo.S03E01.Who.Are.You.1080p.WEBRip.10Bit.DDP5.1.x265-NeoNoir.mkv"
+            ),
+            "S03E01",
+        )
+        self.assertEqual(
+            ws.video_episode_key("Silo.S03E04.1080p.HEVC.x265-MeGusta[EZTVx.to].mkv"),
+            "S03E04",
+        )
+        self.assertEqual(
+            ws.video_episode_key("Wake Up Dead Man A Knives Out Mystery 2025.mkv"),
+            "",
+        )
+        dest = Path(os.environ.get("TEST_TMP") or "/tmp") / f"lib-has-{os.getpid()}"
+        dest.mkdir(parents=True, exist_ok=True)
+        try:
+            (dest / "Silo.S03E04.mkv").write_bytes(b"ok")
+            self.assertTrue(ws.library_has_this_release(str(dest), "Silo.S03E04.mkv"))
+            self.assertFalse(ws.library_has_this_release(str(dest), "Silo.S03E01.mkv"))
+            self.assertTrue(
+                ws.library_has_this_release(str(dest), "Wake Up Dead Man.mkv")
+            )
+        finally:
+            for leftover in dest.glob("*"):
+                leftover.unlink()
+            dest.rmdir()
+        self.assertEqual(
             ws.missing_episode_label(
                 {"seasonNumber": 1, "episodeNumber": 4, "series": {"title": "Show"}}
             ),
@@ -1901,7 +1928,7 @@ class WireStack(unittest.TestCase):
         self.assertFalse(self.state.radarr_dl_config.get("autoRedownloadFailed"))
         self.assertTrue(self.state.radarr_dl_config.get("enableCompletedDownloadHandling"))
         cmd_names = [c.get("name") for c in self.state.arr_commands]
-        self.assertIn("RefreshMonitoredDownloads", cmd_names)
+        self.assertNotIn("RefreshMonitoredDownloads", cmd_names)
         self.assertEqual(
             self.state.seerr_jobs,
             ["plex-recently-added-scan", "radarr-scan", "sonarr-scan"],
@@ -2530,6 +2557,132 @@ class WireStack(unittest.TestCase):
         self.assertFalse(release.exists())
         self.assertTrue((dest / "Show.S01E01.mkv").is_file())
 
+    def test_housekeep_removes_loose_complete_file_when_library_has_episode(self):
+        os.environ["INDEXER_URL"] = ""
+        os.environ["INDEXER_API_KEY"] = ""
+        root = self.tmp / "loose-hasfile"
+        complete = root / "downloads" / "complete"
+        complete.mkdir(parents=True)
+        leftover = complete / "Silo.S03E01.Who.Are.You.1080p.WEBRip.mkv"
+        leftover.write_bytes(b"copy")
+        movie = complete / "Wake Up Dead Man 2025.mkv"
+        movie.write_bytes(b"copy")
+        os.environ["MEDIA_ROOT"] = str(root)
+        tv = root / "TV" / "Not Kid Friendly" / "Silo"
+        tv.mkdir(parents=True)
+        (tv / "Silo.S03E01.mkv").write_bytes(b"library")
+        (tv / "Silo.S03E04.mkv").write_bytes(b"other")
+        films = root / "Movies" / "Not Kid Friendly" / "Wake Up Dead Man (2025)"
+        films.mkdir(parents=True)
+        (films / "Wake Up Dead Man (2025).mkv").write_bytes(b"library")
+        quality = {"quality": {"id": 4, "name": "WEBDL-1080p"}, "revision": {"version": 1}}
+        for movie_row in self.state.movies:
+            if movie_row.get("id") == 2:
+                movie_row["hasFile"] = True
+                movie_row["path"] = str(films)
+        self.state.series = [
+            {
+                "id": 10,
+                "title": "Silo",
+                "monitored": True,
+                "path": str(tv),
+                "statistics": {"episodeFileCount": 2, "episodeCount": 2},
+            }
+        ]
+        self.state.episodes = [
+            {"id": 11, "seriesId": 10, "hasFile": True, "title": "Who Are You?"},
+        ]
+        self.state.manual_import = [
+            {
+                "path": str(movie),
+                "movieId": 2,
+                "movie": {"id": 2, "title": "Wake Up Dead Man", "path": str(films)},
+                "quality": quality,
+                "languages": [{"id": 1, "name": "English"}],
+                "rejections": [],
+            }
+        ]
+        self.state.sonarr_manual_import = [
+            {
+                "path": str(leftover),
+                "seriesId": 10,
+                "episodeIds": [11],
+                "series": {"id": 10, "title": "Silo", "path": str(tv)},
+                "quality": quality,
+                "languages": [{"id": 1, "name": "English"}],
+                "rejections": [],
+            }
+        ]
+        from io import StringIO
+        from contextlib import redirect_stdout
+
+        buf = StringIO()
+        with redirect_stdout(buf):
+            self.assertEqual(ws.housekeep(), 0)
+        manuals = [
+            item for item in self.state.arr_commands if item.get("name") == "ManualImport"
+        ]
+        self.assertEqual(manuals, [])
+        self.assertFalse(leftover.exists())
+        self.assertFalse(movie.exists())
+        self.assertTrue((tv / "Silo.S03E01.mkv").is_file())
+        self.assertTrue((films / "Wake Up Dead Man (2025).mkv").is_file())
+        self.assertIn("removed leftover complete/ file", buf.getvalue())
+
+    def test_housekeep_imports_loose_episode_when_library_has_other_episodes(self):
+        os.environ["INDEXER_URL"] = ""
+        os.environ["INDEXER_API_KEY"] = ""
+        root = self.tmp / "loose-missing-ep"
+        complete = root / "downloads" / "complete"
+        complete.mkdir(parents=True)
+        leftover = complete / "Silo.S03E01.Who.Are.You.1080p.WEBRip.mkv"
+        leftover.write_bytes(b"copy")
+        os.environ["MEDIA_ROOT"] = str(root)
+        tv = root / "TV" / "Not Kid Friendly" / "Silo"
+        tv.mkdir(parents=True)
+        (tv / "Silo.S03E04.mkv").write_bytes(b"other")
+        quality = {"quality": {"id": 4, "name": "WEBDL-1080p"}, "revision": {"version": 1}}
+        self.state.series = [
+            {
+                "id": 10,
+                "title": "Silo",
+                "monitored": True,
+                "path": str(tv),
+                "statistics": {"episodeFileCount": 1, "episodeCount": 2},
+            }
+        ]
+        self.state.episodes = [
+            {"id": 11, "seriesId": 10, "hasFile": True, "title": "Who Are You?"},
+        ]
+        self.state.sonarr_manual_import = [
+            {
+                "path": str(leftover),
+                "seriesId": 10,
+                "episodeIds": [11],
+                "series": {"id": 10, "title": "Silo", "path": str(tv)},
+                "quality": quality,
+                "languages": [{"id": 1, "name": "English"}],
+                "rejections": [],
+            }
+        ]
+        from io import StringIO
+        from contextlib import redirect_stdout
+
+        buf = StringIO()
+        with redirect_stdout(buf):
+            self.assertEqual(ws.housekeep(), 0)
+        manuals = [
+            item for item in self.state.arr_commands if item.get("name") == "ManualImport"
+        ]
+        self.assertEqual(len(manuals), 1)
+        self.assertEqual(manuals[0].get("importMode"), "Move")
+        self.assertEqual(
+            [row.get("path") for row in manuals[0].get("files") or []],
+            [str(leftover)],
+        )
+        self.assertTrue(leftover.exists())
+        self.assertIn("does not have this video; importing leftover", buf.getvalue())
+
     def test_housekeep_renames_matched_sonarr_drop(self):
         os.environ["INDEXER_URL"] = ""
         os.environ["INDEXER_API_KEY"] = ""
@@ -2728,6 +2881,11 @@ class WireStack(unittest.TestCase):
     def test_refresh_imports_when_queue_is_stuck(self):
         os.environ["INDEXER_URL"] = ""
         os.environ["INDEXER_API_KEY"] = ""
+        root = self.tmp / "stuck-refresh"
+        complete = root / "downloads" / "complete"
+        complete.mkdir(parents=True)
+        (complete / "Stuck.mkv").write_bytes(b"ok")
+        os.environ["MEDIA_ROOT"] = str(root)
         self.state.queue = [
             {
                 "title": "Stuck",
@@ -2891,12 +3049,15 @@ class WireStack(unittest.TestCase):
             if call[0] == "sonarr" and str(call[2]).endswith("/command")
         ]
         self.assertEqual(sonarr_command_calls[0][1], "GET")
-        self.assertTrue(
-            any(call[1] == "POST" for call in sonarr_command_calls[1:]),
+        self.assertFalse(
+            any(call[1] == "POST" for call in sonarr_command_calls),
             sonarr_command_calls,
         )
-        self.assertTrue(
+        self.assertFalse(
             any(item.get("name") == "RefreshMonitoredDownloads" for item in self.state.arr_commands)
+        )
+        self.assertFalse(
+            any(item.get("name") == "EpisodeSearch" for item in self.state.arr_commands)
         )
 
     def test_housekeep_repeats_still_in_complete_only_when_set_changes(self):
@@ -2951,6 +3112,108 @@ class WireStack(unittest.TestCase):
         self.assertEqual(movie_retry.get("movieIds"), [99])
         ep_retry = next(c for c in self.state.arr_commands if c.get("name") == "EpisodeSearch")
         self.assertEqual(ep_retry.get("episodeIds"), [44])
+
+    def test_housekeep_retries_missing_episodes_once_per_id_set(self):
+        os.environ["INDEXER_URL"] = ""
+        os.environ["INDEXER_API_KEY"] = ""
+        self.state.wanted_missing = [
+            {"id": 1, "seasonNumber": 3, "episodeNumber": 1, "series": {"title": "Silo"}},
+            {"id": 2, "seasonNumber": 3, "episodeNumber": 2, "series": {"title": "Silo"}},
+            {"id": 3, "seasonNumber": 3, "episodeNumber": 3, "series": {"title": "Silo"}},
+        ]
+        from io import StringIO
+        from contextlib import redirect_stdout
+
+        first = StringIO()
+        with redirect_stdout(first):
+            self.assertEqual(ws.housekeep(), 0)
+        searches = [
+            item for item in self.state.arr_commands if item.get("name") == "EpisodeSearch"
+        ]
+        self.assertEqual(len(searches), 1)
+        self.assertEqual(searches[0].get("episodeIds"), [1, 2, 3])
+        self.assertIn("searching again for 3 missing episode(s)", first.getvalue())
+        self.assertFalse(
+            any(item.get("name") == "RefreshMonitoredDownloads" for item in self.state.arr_commands)
+        )
+
+        self.state.arr_commands.clear()
+        second = StringIO()
+        with redirect_stdout(second):
+            self.assertEqual(ws.housekeep(), 0)
+        self.assertEqual(
+            [item for item in self.state.arr_commands if item.get("name") == "EpisodeSearch"],
+            [],
+        )
+        self.assertNotIn("searching again for", second.getvalue())
+
+        self.state.wanted_missing = self.state.wanted_missing[:2]
+        third = StringIO()
+        with redirect_stdout(third):
+            self.assertEqual(ws.housekeep(), 0)
+        searches = [
+            item for item in self.state.arr_commands if item.get("name") == "EpisodeSearch"
+        ]
+        self.assertEqual(len(searches), 1)
+        self.assertEqual(searches[0].get("episodeIds"), [1, 2])
+        self.assertIn("searching again for 2 missing episode(s)", third.getvalue())
+
+    def test_housekeep_skips_refresh_when_search_running_and_complete_has_videos(self):
+        os.environ["INDEXER_URL"] = ""
+        os.environ["INDEXER_API_KEY"] = ""
+        root = self.tmp / "search-inflight"
+        complete = root / "downloads" / "complete"
+        complete.mkdir(parents=True)
+        leftover = complete / "Silo.S03E04.mkv"
+        leftover.write_bytes(b"copy")
+        os.environ["MEDIA_ROOT"] = str(root)
+        tv = root / "TV" / "Not Kid Friendly" / "Silo"
+        tv.mkdir(parents=True)
+        (tv / "Silo.S03E04.mkv").write_bytes(b"library")
+        self.state.sonarr_command_queue = [
+            {
+                "name": "EpisodeSearch",
+                "status": "started",
+                "priority": "low",
+                "body": {"episodeIds": [1, 2, 3]},
+            }
+        ]
+        self.state.wanted_missing = [
+            {"id": 1, "seasonNumber": 3, "episodeNumber": 1, "series": {"title": "Silo"}},
+        ]
+        self.state.series = [
+            {"id": 10, "title": "Silo", "monitored": True, "path": str(tv)}
+        ]
+        self.state.episodes = [
+            {"id": 14, "seriesId": 10, "hasFile": True, "title": "The Harmless"},
+        ]
+        quality = {"quality": {"id": 4, "name": "WEBDL-1080p"}, "revision": {"version": 1}}
+        self.state.sonarr_manual_import = [
+            {
+                "path": str(leftover),
+                "seriesId": 10,
+                "episodeIds": [14],
+                "series": {"id": 10, "title": "Silo", "path": str(tv)},
+                "quality": quality,
+                "languages": [{"id": 1, "name": "English"}],
+                "rejections": [],
+            }
+        ]
+        from io import StringIO
+        from contextlib import redirect_stdout
+
+        buf = StringIO()
+        with redirect_stdout(buf):
+            self.assertEqual(ws.housekeep(), 0)
+        names = [item.get("name") for item in self.state.arr_commands]
+        self.assertNotIn("RefreshMonitoredDownloads", names)
+        self.assertNotIn("EpisodeSearch", names)
+        self.assertIn("DownloadedEpisodesScan", names)
+        self.assertFalse(leftover.exists())
+        self.assertIn(
+            "not refreshing completed downloads while a search is running",
+            buf.getvalue(),
+        )
 
     def test_points_existing_prowlarr_apps_at_title_search_proxy(self):
         os.environ["INDEXER_URL"] = ""
