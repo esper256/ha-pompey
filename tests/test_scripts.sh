@@ -510,6 +510,10 @@ if grep -q 'deleteFiles.: .true' "${BIN}/wire-stack"; then
   echo "qbit must never delete torrent files (library may be hardlinked)" >&2
   exit 1
 fi
+if grep -E -q 'DeleteMovie|DeleteSeries|deleteFromDisk.: .true' "${BIN}/wire-stack"; then
+  echo "wire-stack must never ask Arr to delete library titles" >&2
+  exit 1
+fi
 if grep -RIn 'pompey-svc' "${ROOT}/pompey/rootfs"; then
   echo "pompey-svc was renamed to pompey-log" >&2
   exit 1

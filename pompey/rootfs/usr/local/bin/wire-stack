@@ -138,6 +138,64 @@ def downloads_complete() -> str:
     return f"{media_root()}/downloads/complete"
 
 
+def downloads_recycle() -> str:
+    """Arr recycle bin. Upgrades move the old library file here instead of deleting it."""
+    return f"{media_root()}/downloads/recycle"
+
+
+def library_dirs() -> list[str]:
+    return [movies_dir(), movies_kid_dir(), tv_dir(), tv_kid_dir()]
+
+
+def resolved_path(path: str) -> str:
+    full = os.path.normpath((path or "").strip())
+    if not full:
+        return ""
+    if not os.path.isabs(full):
+        full = os.path.normpath(os.path.join(media_root(), full))
+    return os.path.realpath(full)
+
+
+def paths_overlap(left: str, right: str) -> bool:
+    a = resolved_path(left)
+    b = resolved_path(right)
+    if not a or not b:
+        return False
+    return a == b or a.startswith(b + os.sep) or b.startswith(a + os.sep)
+
+
+def path_is_library(path: str) -> bool:
+    full = resolved_path(path)
+    if not full:
+        return False
+    for lib in library_dirs():
+        base = resolved_path(lib)
+        if full == base or full.startswith(base + os.sep):
+            return True
+    return False
+
+
+def complete_overlaps_library() -> bool:
+    """True when downloads/complete is a Plex library folder (or a library lives in it)."""
+    complete = downloads_complete()
+    return any(paths_overlap(complete, lib) for lib in library_dirs())
+
+
+def safe_to_delete_complete_path(path: str) -> bool:
+    """Only leftover files under downloads/complete. Never a Plex library path."""
+    if not path or complete_overlaps_library():
+        return False
+    full = resolved_path(path)
+    root = resolved_path(downloads_complete())
+    if not full or not root or full == root:
+        return False
+    if not full.startswith(root + os.sep):
+        return False
+    if path_is_library(full):
+        return False
+    return True
+
+
 def download_scan_paths(kind: str | None = None) -> list[str]:
     """Old qBittorrent categories used complete/radarr and complete/sonarr.
 
@@ -156,7 +214,20 @@ def download_scan_paths(kind: str | None = None) -> list[str]:
 
 
 def existing_download_scan_paths(kind: str | None = None) -> list[str]:
-    return [path for path in download_scan_paths(kind) if os.path.isdir(path)]
+    if complete_overlaps_library():
+        return []
+    root = resolved_path(downloads_complete())
+    found: list[str] = []
+    for path in download_scan_paths(kind):
+        if not os.path.isdir(path):
+            continue
+        full = resolved_path(path)
+        if not full.startswith(root + os.sep) and full != root:
+            continue
+        if path_is_library(path):
+            continue
+        found.append(path)
+    return found
 
 
 def plex_url() -> str:
@@ -364,6 +435,12 @@ def arr_headers(api_key: str) -> dict:
 
 
 def ensure_root_folder(base: str, api_key: str, path: str) -> None:
+    if paths_overlap(path, downloads_complete()):
+        log(
+            f"refusing Arr root folder that overlaps downloads/complete: {path}",
+            "ERROR",
+        )
+        return
     existing = as_list(http("GET", f"{base}/rootfolder", headers=arr_headers(api_key)))
     if any(item.get("path", "").rstrip("/") == path.rstrip("/") for item in existing):
         return
@@ -521,6 +598,25 @@ def ensure_media_management(base: str, api_key: str, kind: str) -> None:
         "importExtraFiles": True,
         "extraFileExtensions": "srt",
     }
+    # Recycle bin is how Arr upgrades avoid permanently deleting a library file
+    # (empty recycleBin + ManualImport/CDH upgrade = dest gone if the move fails).
+    extra = {
+        "recycleBin": downloads_recycle(),
+        "recycleBinCleanupDays": 0,
+        "deleteEmptyFolders": False,
+        "useScriptImport": False,
+        "autoUnmonitorPreviouslyDownloadedEpisodes": False,
+        "autoUnmonitorPreviouslyDownloadedMovies": False,
+    }
+    for key, value in extra.items():
+        if key in cfg:
+            want[key] = value
+    recycle = want.get("recycleBin")
+    if recycle:
+        try:
+            os.makedirs(recycle, exist_ok=True)
+        except OSError as exc:
+            log(f"{kind} recycle folder: {exc}", "WARNING")
     if all(cfg.get(key) == value for key, value in want.items()):
         return
     updated = dict(cfg)
@@ -536,7 +632,10 @@ def ensure_media_management(base: str, api_key: str, kind: str) -> None:
     except RuntimeError as exc:
         log(f"{kind} media management: {exc}", "WARNING")
         return
-    log(f"{kind} import into library folders (rename on the NAS, skip free-space check)")
+    log(
+        f"{kind} import into library folders (rename on the NAS, skip free-space check, "
+        "old files go to downloads/recycle)"
+    )
 
 
 def tickle_seerr_availability() -> None:
@@ -2368,7 +2467,7 @@ def library_dir_has_video(path: str) -> bool:
 def remove_complete_release(release_dir: str, reason: str) -> None:
     if not release_dir or not os.path.isdir(release_dir):
         return
-    if os.path.normpath(release_dir) == os.path.normpath(downloads_complete()):
+    if not safe_to_delete_complete_path(release_dir):
         return
     try:
         shutil.rmtree(release_dir)
@@ -2383,11 +2482,9 @@ def remove_complete_leftover(path: str, reason: str) -> None:
     if not path:
         return
     full = os.path.normpath(path.strip())
-    if not path_under_complete(full):
+    if not safe_to_delete_complete_path(full):
         return
     root = os.path.normpath(downloads_complete())
-    if full == root:
-        return
     if os.path.isfile(full):
         try:
             os.remove(full)
@@ -2405,13 +2502,15 @@ def remove_complete_leftover(path: str, reason: str) -> None:
 def prune_complete_extras() -> None:
     """Arr imports the video (+ srt) into the library folder, not the torrent dump."""
     root = downloads_complete()
-    if not os.path.isdir(root):
+    if not os.path.isdir(root) or complete_overlaps_library():
         return
     removed = 0
 
     def consider(folder: str) -> None:
         nonlocal removed
         if not os.path.isdir(folder):
+            return
+        if not safe_to_delete_complete_path(folder):
             return
         if path_has_video(folder):
             return
@@ -2516,19 +2615,27 @@ def import_matched_drop(base: str, api_key: str, kind: str) -> None:
                         "WARNING",
                     )
                 continue
-            dest = arr_import_destination(item, kind)
+            dest = arr_import_destination(item, kind) or lookup_arr_library_path(
+                base, api_key, kind, item
+            )
+            if path_is_library(path) or not path_under_complete(path):
+                log(
+                    f"{kind} skipped import of {path} "
+                    "(not a leftover under downloads/complete)",
+                    "WARNING",
+                )
+                continue
+            if dest and library_has_this_release(dest, os.path.basename(path)):
+                log_if_new(
+                    f"hasfile:{kind}:{os.path.basename(path)}",
+                    f"{kind} already has a library file for "
+                    f"{os.path.basename(path)} -> {dest} "
+                    "(not re-importing leftover complete/ files)",
+                )
+                remove_complete_leftover(path, "title already in the library")
+                continue
             if lookup_arr_has_file(base, api_key, kind, item):
-                dest = dest or lookup_arr_library_path(base, api_key, kind, item)
                 dest = dest or "Arr title path"
-                if library_has_this_release(dest, os.path.basename(path)):
-                    log_if_new(
-                        f"hasfile:{kind}:{os.path.basename(path)}",
-                        f"{kind} already has a library file for "
-                        f"{os.path.basename(path)} -> {dest} "
-                        "(not re-importing leftover complete/ files)",
-                    )
-                    remove_complete_leftover(path, "title already in the library")
-                    continue
                 log(
                     f"{kind} marks hasFile for {os.path.basename(path)} but "
                     f"{dest} does not have this video; importing leftover"
@@ -2987,6 +3094,17 @@ def import_finished_downloads(radarr: str, rk: str, sonarr: str, sk: str) -> Non
     log_search_diagnostics(radarr, rk, sonarr, sk)
     unlock_completed_torrents()
     engines = each_arr(radarr, rk, sonarr, sk)
+    if complete_overlaps_library():
+        log(
+            "downloads/complete overlaps a library folder; "
+            "not scanning or deleting leftovers (Plex library kept)",
+            "ERROR",
+        )
+        for kind, base, key in engines:
+            log_stuck_imports(base, key, kind)
+            log_titles_waiting_for_library(base, key, kind)
+        retry_unfilled_titles(radarr, rk, sonarr, sk)
+        return
     videos = count_complete_videos()
     searching = arr_search_in_flight(radarr, rk) or arr_search_in_flight(sonarr, sk)
     if videos:
