@@ -10,7 +10,7 @@ ARG BUILD_DESCRIPTION="Search for a movie or show; Proton WireGuard for all inte
 ARG BUILD_NAME="Pompey"
 ARG BUILD_REF
 ARG BUILD_REPOSITORY="esper256/ha-pompey"
-ARG BUILD_VERSION="0.2.34"
+ARG BUILD_VERSION="0.2.35"
 
 RUN apk add --no-cache \
     bind-tools \

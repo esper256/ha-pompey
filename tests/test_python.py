@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.machinery
 import importlib.util
+import datetime
 import json
 import os
 import struct
@@ -235,6 +236,8 @@ class FakeState:
         self.sonarr_indexers: list[dict] = []
         self.commands: list[dict] = []
         self.arr_commands: list[dict] = []
+        self.radarr_command_queue: list[dict] = []
+        self.sonarr_command_queue: list[dict] = []
         self.radarr_media: dict = {
             "id": 1,
             "enableCompletedDownloadHandling": True,
@@ -624,8 +627,14 @@ def handler_for(state: FakeState):
                         ]
                     return self._send(body=rows)
                 if path.endswith("/wanted/missing") and method == "GET":
+                    rows = state.wanted_missing
                     return self._send(
-                        body={"records": state.wanted_missing, "page": 1, "pageSize": 20}
+                        body={
+                            "records": rows,
+                            "page": 1,
+                            "pageSize": 20,
+                            "totalRecords": len(rows),
+                        }
                     )
                 if "/series/" in path and method == "GET":
                     try:
@@ -639,6 +648,13 @@ def handler_for(state: FakeState):
                 if "/series/" in path and method == "PUT":
                     state.moved.append(body)
                     return self._send(body=body)
+                if path.endswith("/command") and method == "GET":
+                    queued = (
+                        state.radarr_command_queue
+                        if role == "radarr"
+                        else state.sonarr_command_queue
+                    )
+                    return self._send(body=queued)
                 if path.endswith("/command") and method == "POST":
                     state.arr_commands.append(body or {})
                     return self._send(201, body or {})
@@ -1455,6 +1471,39 @@ PersistentKeepalive = 25
                 },
                 "sonarr",
             )
+        )
+        now = datetime.datetime(2026, 8, 29, 14, 0, tzinfo=datetime.timezone.utc)
+        self.assertEqual(ws.age_label("2026-08-29T13:46:00Z", now), "14m")
+        self.assertEqual(
+            ws.summarize_arr_commands(
+                [
+                    {
+                        "name": "EpisodeSearch",
+                        "status": "started",
+                        "started": "2026-08-29T13:46:00Z",
+                        "priority": "low",
+                        "body": {"seriesTitle": "Show", "episodeIds": [4]},
+                    },
+                    {
+                        "name": "EpisodeSearch",
+                        "status": "queued",
+                        "queued": "2026-08-29T13:50:00Z",
+                        "priority": "low",
+                        "body": {"episodeIds": [1, 2, 3]},
+                    },
+                    {"name": "RefreshMonitoredDownloads", "status": "completed"},
+                ],
+                now,
+            ),
+            "started EpisodeSearch 14m low (Show 1 episode(s)); "
+            "queued EpisodeSearch 10m low (3 episode(s))",
+        )
+        self.assertEqual(ws.summarize_arr_commands([], now), "none queued or started")
+        self.assertEqual(
+            ws.missing_episode_label(
+                {"seasonNumber": 1, "episodeNumber": 4, "series": {"title": "Show"}}
+            ),
+            "Show S01E04",
         )
         self.assertEqual(
             ws.import_rejection_text(
@@ -2627,6 +2676,73 @@ class WireStack(unittest.TestCase):
             out,
         )
         self.assertNotIn("Caught up", out)
+
+    def test_housekeep_logs_command_queue_and_missing_before_scan(self):
+        os.environ["INDEXER_URL"] = ""
+        os.environ["INDEXER_API_KEY"] = ""
+        started = (
+            datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(minutes=14)
+        ).strftime("%Y-%m-%dT%H:%M:%SZ")
+        self.state.sonarr_command_queue = [
+            {
+                "name": "EpisodeSearch",
+                "status": "started",
+                "started": started,
+                "priority": "low",
+                "body": {"seriesTitle": "Show", "episodeIds": [4]},
+            },
+            {
+                "name": "EpisodeSearch",
+                "status": "queued",
+                "queued": started,
+                "priority": "low",
+                "body": {"episodeIds": [1, 2, 3]},
+            },
+        ]
+        self.state.wanted_missing = [
+            {
+                "id": 4,
+                "seasonNumber": 1,
+                "episodeNumber": 4,
+                "series": {"title": "Show"},
+            },
+            {
+                "id": 3,
+                "seasonNumber": 1,
+                "episodeNumber": 3,
+                "series": {"title": "Show"},
+            },
+        ]
+        from io import StringIO
+        from contextlib import redirect_stdout
+
+        buf = StringIO()
+        with redirect_stdout(buf):
+            rc = ws.housekeep()
+        self.assertEqual(rc, 0)
+        out = buf.getvalue()
+        self.assertIn("complete/: 0 video(s) on disk before Refresh/Scan", out)
+        self.assertIn("sonarr commands: started EpisodeSearch", out)
+        self.assertIn("queued EpisodeSearch", out)
+        self.assertIn("low (Show 1 episode(s))", out)
+        self.assertIn("sonarr wanted/missing: 2 (Show S01E04, Show S01E03)", out)
+        diag = out.find("sonarr commands:")
+        refresh = out.find("sonarr checking completed downloads")
+        self.assertGreaterEqual(diag, 0)
+        self.assertGreater(refresh, diag)
+        sonarr_command_calls = [
+            call
+            for call in self.state.calls
+            if call[0] == "sonarr" and str(call[2]).endswith("/command")
+        ]
+        self.assertEqual(sonarr_command_calls[0][1], "GET")
+        self.assertTrue(
+            any(call[1] == "POST" for call in sonarr_command_calls[1:]),
+            sonarr_command_calls,
+        )
+        self.assertTrue(
+            any(item.get("name") == "RefreshMonitoredDownloads" for item in self.state.arr_commands)
+        )
 
     def test_retries_monitored_titles_still_missing_a_file(self):
         os.environ["INDEXER_URL"] = ""
