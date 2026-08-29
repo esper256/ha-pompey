@@ -105,6 +105,9 @@ test -f "${POMPEY_CONFIG}/qBittorrent/qBittorrent.conf"
 grep -q "BindAddress>127.0.0.1" "${POMPEY_CONFIG}/sonarr/config.xml"
 grep -q "BindAddress>127.0.0.1" "${POMPEY_CONFIG}/radarr/config.xml"
 grep -Fq 'BindAddress>*</BindAddress>' "${POMPEY_CONFIG}/prowlarr/config.xml"
+grep -q "<LogLevel>info</LogLevel>" "${POMPEY_CONFIG}/sonarr/config.xml"
+grep -q "<LogLevel>info</LogLevel>" "${POMPEY_CONFIG}/radarr/config.xml"
+grep -q "<LogLevel>info</LogLevel>" "${POMPEY_CONFIG}/prowlarr/config.xml"
 if grep -q "BindAddress>127.0.0.1" "${POMPEY_CONFIG}/prowlarr/config.xml"; then
   echo "Prowlarr must not bind only localhost" >&2
   exit 1
@@ -161,6 +164,31 @@ grep -q "keep-me" "${POMPEY_CONFIG}/prowlarr/config.xml"
 if grep -qi "AuthenticationMethod>None" "${POMPEY_CONFIG}/prowlarr/config.xml"; then
   echo "upgrade must drop AuthenticationMethod None" >&2
   cat "${POMPEY_CONFIG}/prowlarr/config.xml" >&2
+  exit 1
+fi
+grep -q "<LogLevel>info</LogLevel>" "${POMPEY_CONFIG}/prowlarr/config.xml"
+
+echo "== write-engine-configs pins existing Arr LogLevel to info =="
+python3 - "${POMPEY_CONFIG}/sonarr/config.xml" <<'PY'
+from pathlib import Path
+import sys
+Path(sys.argv[1]).write_text(
+    """<Config>
+  <BindAddress>127.0.0.1</BindAddress>
+  <Port>8989</Port>
+  <ApiKey>keep-sonarr</ApiKey>
+  <LogLevel>debug</LogLevel>
+  <InstanceName>Sonarr</InstanceName>
+</Config>
+"""
+)
+PY
+run "${BIN}/write-engine-configs"
+grep -q "<LogLevel>info</LogLevel>" "${POMPEY_CONFIG}/sonarr/config.xml"
+grep -q "keep-sonarr" "${POMPEY_CONFIG}/sonarr/config.xml"
+if grep -qi "<LogLevel>debug</LogLevel>" "${POMPEY_CONFIG}/sonarr/config.xml"; then
+  echo "existing Arr debug log level must be pinned to info" >&2
+  cat "${POMPEY_CONFIG}/sonarr/config.xml" >&2
   exit 1
 fi
 
@@ -517,6 +545,28 @@ kill "${tail_pid}" 2>/dev/null || true
 wait "${tail_pid}" 2>/dev/null || true
 grep -q "\[Sonarr\] scan started" "${WORK}/tailed.log"
 grep -q "\[Sonarr\] |Error| unable to access folder" "${WORK}/tailed.log"
+
+echo "== pompey-log-emit drops stack frames, seerr debug, and secrets =="
+stack="$(printf '%s\n' 'scan started' '   at NzbDrone.Core.Indexers.HttpIndexerBase.FetchPage' | python3 "${BIN}/pompey-log-emit" Sonarr 2>&1)"
+grep -q "\[Sonarr\] scan started" <<<"${stack}"
+if grep -q 'NzbDrone' <<<"${stack}"; then
+  echo "NzbDrone stack frames must not reach the app log" >&2
+  printf '%s\n' "${stack}" >&2
+  exit 1
+fi
+debug="$(printf '%s\n' $'2026-08-29T10:00:49Z [\033[34mdebug\033[39m][Plex Scan]: Title already exists and no changes detected for Rust' | python3 "${BIN}/pompey-log-emit" Seerr 2>&1)"
+if grep -q 'already exists' <<<"${debug}"; then
+  echo "Seerr debug Plex Scan must not reach the app log" >&2
+  printf '%s\n' "${debug}" >&2
+  exit 1
+fi
+secret="$(python3 "${BIN}/pompey-log-emit" Sonarr '[Warn] HTTP request failed: [GET] http://127.0.0.1:9698/4/api?apikey=supersecretkey&t=tvsearch' 2>&1)"
+grep -q 'apikey=(redacted)' <<<"${secret}"
+if grep -q 'supersecretkey' <<<"${secret}"; then
+  echo "apikey must be redacted" >&2
+  printf '%s\n' "${secret}" >&2
+  exit 1
+fi
 
 echo "== write-engine-configs adds FileLogger to an existing qbit conf =="
 python3 - "${POMPEY_CONFIG}/qBittorrent/qBittorrent.conf" <<'PY'

@@ -234,6 +234,52 @@ def log(msg: str, level: str = "INFO") -> None:
     print(f"[{stamp}] {level}: [wire-stack] {msg}", flush=True)
 
 
+def _quiet_path() -> str:
+    return os.path.join(ready_dir(), "log-quiet.json")
+
+
+def _load_quiet() -> dict:
+    try:
+        with open(_quiet_path(), encoding="utf-8") as fh:
+            data = json.load(fh)
+        return data if isinstance(data, dict) else {}
+    except (OSError, json.JSONDecodeError, TypeError):
+        return {}
+
+
+def _save_quiet(state: dict) -> None:
+    path = _quiet_path()
+    parent = os.path.dirname(path)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
+    tmp = f"{path}.tmp"
+    with open(tmp, "w", encoding="utf-8") as fh:
+        json.dump(state, fh, sort_keys=True)
+    os.replace(tmp, path)
+
+
+def log_if_new(key: str, msg: str, level: str = "INFO") -> None:
+    """Skip a housekeep line that has not changed since the last cycle.
+
+    Housekeep is a new process every few minutes, so this is a small file
+    under POMPEY_READY — not in-memory.
+    """
+    state = _load_quiet()
+    if state.get(key) == msg:
+        return
+    state[key] = msg
+    _save_quiet(state)
+    log(msg, level)
+
+
+def forget_quiet(key: str) -> None:
+    state = _load_quiet()
+    if key not in state:
+        return
+    state.pop(key, None)
+    _save_quiet(state)
+
+
 def mark_status(step: str, label: str, percent: int, error: str = "") -> None:
     script = shutil.which("pompey-status")
     if not script:
@@ -511,7 +557,10 @@ def tickle_seerr_availability() -> None:
                 return
             log(f"seerr {job}: {exc}", "WARNING")
     if ran:
-        log("seerr checking Plex and Arr for titles that landed in the library")
+        log_if_new(
+            "seerr-tickle",
+            "seerr checking Plex and Arr for titles that landed in the library",
+        )
 
 
 def ensure_download_client_handling(base: str, api_key: str, kind: str) -> None:
@@ -557,7 +606,11 @@ def refresh_monitored_downloads(base: str, api_key: str, kind: str) -> None:
         {"name": "RefreshMonitoredDownloads"},
         headers=arr_headers(api_key),
     )
-    log(f"{kind} checking completed downloads")
+    key = f"check:{kind}"
+    if count_complete_videos() == 0:
+        forget_quiet(key)
+        return
+    log_if_new(key, f"{kind} checking completed downloads")
 
 
 def log_stuck_imports(base: str, api_key: str, kind: str) -> None:
@@ -598,10 +651,10 @@ def log_stuck_imports(base: str, api_key: str, kind: str) -> None:
         )
         dest = item.get("outputPath") or ""
         where = f" qbit={dest}" if dest else ""
-        log(
-            f"{kind} download not in the library yet: {item.get('title')} ({extra}){where}",
-            "WARNING",
+        msg = (
+            f"{kind} download not in the library yet: {item.get('title')} ({extra}){where}"
         )
+        log_if_new(f"stuck:{kind}:{item.get('title')}", msg, "WARNING")
         shown += 1
         if shown >= 15:
             break
@@ -652,7 +705,11 @@ def log_titles_waiting_for_library(base: str, api_key: str, kind: str) -> None:
         if len(waiting) >= 10:
             break
     if waiting:
-        log(f"{kind} titles with no library file yet: {'; '.join(waiting)}", "WARNING")
+        log_if_new(
+            f"wait:{kind}",
+            f"{kind} titles with no library file yet: {'; '.join(waiting)}",
+            "WARNING",
+        )
 
 
 def parse_arr_time(raw) -> datetime.datetime | None:
@@ -2102,9 +2159,14 @@ def scan_download_drop(base: str, api_key: str, kind: str) -> None:
                 {"name": name, "path": path, "importMode": "Move"},
                 headers=arr_headers(api_key),
             )
-            log(
-                f"{kind} scanning {path} for files that already have an Arr library folder"
-            )
+            scan_key = f"scan:{kind}:{path}"
+            if count_complete_videos() == 0:
+                forget_quiet(scan_key)
+            else:
+                log_if_new(
+                    scan_key,
+                    f"{kind} scanning {path} for files that already have an Arr library folder",
+                )
         except RuntimeError as exc:
             log(f"{kind} complete-folder scan {path}: {exc}", "WARNING")
 
@@ -2368,10 +2430,11 @@ def import_matched_drop(base: str, api_key: str, kind: str) -> None:
             if lookup_arr_has_file(base, api_key, kind, item):
                 dest = dest or lookup_arr_library_path(base, api_key, kind, item)
                 dest = dest or "Arr title path"
-                log(
+                log_if_new(
+                    f"hasfile:{kind}:{os.path.basename(path)}",
                     f"{kind} already has a library file for "
                     f"{os.path.basename(path)} -> {dest} "
-                    "(not re-importing leftover complete/ files)"
+                    "(not re-importing leftover complete/ files)",
                 )
                 if library_dir_has_video(dest):
                     remove_complete_release(
@@ -2381,7 +2444,8 @@ def import_matched_drop(base: str, api_key: str, kind: str) -> None:
                 continue
             row = manual_import_file(item, kind)
             if not row:
-                log(
+                log_if_new(
+                    f"nomatch:{kind}:{os.path.basename(path)}",
                     f"{kind} no library match for {os.path.basename(path)} "
                     "(not guessing Kid vs Not Kid from the name)",
                     "WARNING",
@@ -2437,7 +2501,11 @@ def log_complete_drop_contents() -> None:
             break
     if videos:
         extra = " …" if len(videos) >= 20 else ""
-        log(f"still in complete/: {'; '.join(videos)}{extra}", "WARNING")
+        log_if_new(
+            "complete-videos",
+            f"still in complete/: {'; '.join(videos)}{extra}",
+            "WARNING",
+        )
         return
     if extras:
         log(

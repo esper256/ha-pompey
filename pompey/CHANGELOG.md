@@ -2,7 +2,8 @@
 
 ## 0.2.35
 
-- App log now prints Sonarr/Radarr **command queue** and Sonarr **wanted/missing** at the start of each housekeeping pass (before Refresh/Scan). Use that to see whether a season search stalled (started EpisodeSearch stuck, later episodes still queued) or whether `complete/` is empty while scans still run. Does not change grab/import. Rebuild so the banner says **0.2.35**, then send the log around a stuck season (not API keys).
+- App log now prints Sonarr/Radarr **command queue** and Sonarr **wanted/missing** at the start of each housekeeping pass (before Refresh/Scan). Use that to see whether a season search stalled (started EpisodeSearch stuck, later episodes still queued) or whether `complete/` is empty while scans still run. Does not change grab/import.
+- The same rebuild drops log junk that hid those lines: Seerr debug Plex-scan “already exists”, Arr `NzbDrone` stack traces (that name is Servarr’s internals, not Usenet), ANSI color, API keys and JWTs in exception URLs, and housekeeping repeating the same `complete/` / waiting-title warning every five minutes until something changes. Structured `[Warn]` / `[Error]` stay. Does not skip scans or start extra EpisodeSearch. Rebuild so the banner says **0.2.35**, then send the log around a stuck season (not API keys).
 
 ## 0.2.34
 

@@ -35,6 +35,7 @@ ws = load("wire_stack", BIN / "wire-stack")
 arrp = load("prowlarr_arr_proxy", BIN / "prowlarr-arr-proxy")
 rr = load("route_rating", BIN / "route-rating")
 wqc = load("wg_quick_contract", ROOT / "tests/lib/wg_quick_contract.py")
+emitmod = load("pompey_log_emit", BIN / "pompey-log-emit")
 
 
 def any_quality_bundle(profile_id: int = 1, name: str = "Any") -> dict:
@@ -1643,6 +1644,99 @@ PersistentKeepalive = 25
         self.assertEqual(ws.as_list({"name": "Unauthorized"}), [])
 
 
+class LogEmit(unittest.TestCase):
+    def setUp(self):
+        emitmod._last_emitted.clear()
+
+    def captured(self, name: str, lines: list[str]) -> tuple[str, str]:
+        from io import StringIO
+        from contextlib import redirect_stdout, redirect_stderr
+
+        out, err = StringIO(), StringIO()
+        with redirect_stdout(out), redirect_stderr(err):
+            for line in lines:
+                emitmod.emit(name, line)
+        return out.getvalue(), err.getvalue()
+
+    def test_keeps_structured_arr_warn_and_error(self):
+        out, err = self.captured(
+            "Radarr",
+            ["WebUI started", "|Error| disk full", "|Warn| slow disk"],
+        )
+        self.assertIn("[Radarr] WebUI started", out)
+        self.assertIn("[Radarr] |Error| disk full", err)
+        self.assertIn("ERROR", err)
+        self.assertIn("[Radarr] |Warn| slow disk", err)
+        self.assertIn("WARNING", err)
+
+    def test_drops_nzbdrone_stack_frames_and_rewrites_exception_type(self):
+        out, err = self.captured(
+            "Sonarr",
+            [
+                "   at NzbDrone.Core.Indexers.HttpIndexerBase`1.FetchPage(IndexerRequest request)",
+                "   at System.Runtime.CompilerServices.TaskAwaiter.HandleNonSuccessAndDebuggerNotification",
+                "NzbDrone.Common.Http.TooManyRequestsException: HTTP request failed: [429:TooManyRequests]",
+            ],
+        )
+        combined = out + err
+        self.assertNotIn("at NzbDrone", combined)
+        self.assertNotIn("at System.", combined)
+        self.assertNotIn("at Arr.", combined)
+        self.assertIn("Arr.Common.Http.TooManyRequestsException", err)
+        self.assertIn("WARNING", err)
+        self.assertNotIn("NzbDrone", combined)
+
+    def test_drops_seerr_debug_plex_scan_and_ansi(self):
+        debug = (
+            "2026-08-29T10:00:49.211Z [\x1b[34mdebug\x1b[39m][Plex Scan]: "
+            "Title already exists and no changes detected for Rust"
+        )
+        error = (
+            "2026-08-29T10:01:11.862Z [\x1b[31merror\x1b[39m][Plex Scan]: "
+            "Failed to process Plex media"
+        )
+        out, err = self.captured("Seerr", [debug, error])
+        combined = out + err
+        self.assertNotIn("already exists", combined)
+        self.assertNotIn("\x1b[", combined)
+        self.assertIn("[error][Plex Scan]: Failed to process Plex media", err)
+        self.assertIn("ERROR", err)
+
+    def test_redacts_apikey_and_jwt_and_drops_json_dump(self):
+        jwt = (
+            "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9."
+            "eyJzdWIiOiJwb21wZXktdGVzdCJ9.signaturepart"
+        )
+        out, err = self.captured(
+            "Prowlarr",
+            [
+                "[Warn] HttpClient: HTTP Error - Res: [GET] http://127.0.0.1:9698/4/api?apikey=supersecretkey&t=tvsearch",
+                '    "errorMessage": "Unable to connect to indexer"',
+                '    "severity": "error"',
+                "<error code=\"429\" description=\"Indexer is disabled\" />",
+                f"[error]: Failed to enrich TMDB show token: {jwt}",
+            ],
+        )
+        combined = out + err
+        self.assertNotIn("supersecretkey", combined)
+        self.assertIn("apikey=(redacted)", err)
+        self.assertNotIn("errorMessage", combined)
+        self.assertNotIn("severity", combined)
+        self.assertNotIn("<error code", combined)
+        self.assertNotIn(jwt, combined)
+        self.assertIn("token:(redacted)", err)
+
+    def test_drops_consecutive_duplicate_lines(self):
+        _, err = self.captured(
+            "Prowlarr",
+            [
+                "[Warn] RadarrV3Proxy: No Results in configured categories",
+                "[Warn] RadarrV3Proxy: No Results in configured categories",
+            ],
+        )
+        self.assertEqual(err.count("No Results in configured categories"), 1)
+
+
 class WireStack(unittest.TestCase):
     def setUp(self):
         self.state = FakeState()
@@ -2726,10 +2820,9 @@ class WireStack(unittest.TestCase):
         self.assertIn("queued EpisodeSearch", out)
         self.assertIn("low (Show 1 episode(s))", out)
         self.assertIn("sonarr wanted/missing: 2 (Show S01E04, Show S01E03)", out)
+        self.assertNotIn("sonarr checking completed downloads", out)
         diag = out.find("sonarr commands:")
-        refresh = out.find("sonarr checking completed downloads")
         self.assertGreaterEqual(diag, 0)
-        self.assertGreater(refresh, diag)
         sonarr_command_calls = [
             call
             for call in self.state.calls
@@ -2743,6 +2836,42 @@ class WireStack(unittest.TestCase):
         self.assertTrue(
             any(item.get("name") == "RefreshMonitoredDownloads" for item in self.state.arr_commands)
         )
+
+    def test_housekeep_repeats_still_in_complete_only_when_set_changes(self):
+        os.environ["INDEXER_URL"] = ""
+        os.environ["INDEXER_API_KEY"] = ""
+        root = self.tmp / "quiet-complete"
+        complete = root / "downloads" / "complete"
+        complete.mkdir(parents=True)
+        (complete / "Stuck.mkv").write_bytes(b"x" * 100)
+        os.environ["MEDIA_ROOT"] = str(root)
+        from io import StringIO
+        from contextlib import redirect_stdout
+
+        first = StringIO()
+        with redirect_stdout(first):
+            self.assertEqual(ws.housekeep(), 0)
+        first_out = first.getvalue()
+        self.assertIn("still in complete/:", first_out)
+        self.assertIn("Stuck.mkv", first_out)
+        self.assertIn("complete/: 1 video(s) on disk before Refresh/Scan", first_out)
+        self.assertIn("sonarr checking completed downloads", first_out)
+
+        second = StringIO()
+        with redirect_stdout(second):
+            self.assertEqual(ws.housekeep(), 0)
+        second_out = second.getvalue()
+        self.assertNotIn("still in complete/:", second_out)
+        self.assertIn("complete/: 1 video(s) on disk before Refresh/Scan", second_out)
+        self.assertNotIn("sonarr checking completed downloads", second_out)
+
+        (complete / "Other.mkv").write_bytes(b"y" * 100)
+        third = StringIO()
+        with redirect_stdout(third):
+            self.assertEqual(ws.housekeep(), 0)
+        third_out = third.getvalue()
+        self.assertIn("still in complete/:", third_out)
+        self.assertIn("Other.mkv", third_out)
 
     def test_retries_monitored_titles_still_missing_a_file(self):
         os.environ["INDEXER_URL"] = ""
