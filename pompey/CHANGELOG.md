@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.36
+
+- A season that searched 9…4 then sat is no longer starved by housekeeping. Refresh/Scan every five minutes are higher priority than EpisodeSearch, so they ate the rest of the queue. Housekeeping now skips Refresh while a search is running, skips Refresh/Scan when `complete/` has no videos, and pokes remaining wanted/missing episodes *after* import — once per missing-id set, not every cycle.
+- Leftover **loose files** in `downloads/complete` (qBittorrent’s flat save path, not a torrent folder) are removed once the library already has that movie or that `SxxExx`. **0.2.34** only deleted leftover folders, so Silo E04/E07 and a finished movie could sit there after Arr had already copied them. If Arr marks `hasFile` but the library folder does not actually have that episode, the leftover is imported instead of deleted. Do not drag those files out by hand.
+
 ## 0.2.35
 
 - App log now prints Sonarr/Radarr **command queue** and Sonarr **wanted/missing** at the start of each housekeeping pass (before Refresh/Scan). Use that to see whether a season search stalled (started EpisodeSearch stuck, later episodes still queued) or whether `complete/` is empty while scans still run. Does not change grab/import.

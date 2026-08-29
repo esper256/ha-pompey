@@ -20,6 +20,7 @@ from __future__ import annotations
 import datetime
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -27,6 +28,8 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+
+EPISODE_KEY_RE = re.compile(r"(?i)S(\d{1,2})E(\d{1,3})")
 
 def secrets_path() -> str:
     return os.environ.get("POMPEY_SECRETS", "/data/pompey/secrets.json")
@@ -872,8 +875,9 @@ def log_sonarr_missing(base: str, api_key: str) -> None:
 def log_search_diagnostics(radarr: str, rk: str, sonarr: str, sk: str) -> None:
     """Enough to tell a stalled EpisodeSearch from an empty complete/ scan flood.
 
-    Does not start searches or skip import. Read these lines *above* the
-    'checking completed downloads' / 'scanning' lines from the same housekeep.
+    Read these lines *above* any 'checking completed downloads' / 'scanning'
+    lines from the same housekeep. Refresh/Scan themselves are skipped when
+    complete/ is empty or a search is already running.
     """
     videos = count_complete_videos()
     cap = "+" if videos >= 50 else ""
@@ -1867,12 +1871,38 @@ def log_recent_prowlarr_searches(prowlarr: str, pkey: str) -> None:
         log(f"could not read Prowlarr history: {exc}", "WARNING")
 
 
+SEARCH_COMMAND_NAMES = {
+    "EpisodeSearch",
+    "MoviesSearch",
+    "SeasonSearch",
+    "SeriesSearch",
+}
+
+
+def arr_search_in_flight(base: str, api_key: str) -> bool:
+    try:
+        rows = as_list(http("GET", f"{base}/command", headers=arr_headers(api_key)))
+    except RuntimeError:
+        return False
+    for item in rows:
+        if not isinstance(item, dict):
+            continue
+        if item.get("name") not in SEARCH_COMMAND_NAMES:
+            continue
+        if str(item.get("status") or "").lower() in {"started", "queued"}:
+            return True
+    return False
+
+
 def retry_unfilled_titles(radarr: str, radarr_key: str, sonarr: str, sonarr_key: str) -> None:
     """Search monitored titles that still have no file. Seerr already handed off.
 
     A request that searched too few indexers stays approved in Seerr; Arr will
     not try again until RSS or a missing-search cycle unless we ask.
+    One poke per missing-id set so housekeep does not re-search every 5 minutes.
     """
+    if arr_search_in_flight(radarr, radarr_key) or arr_search_in_flight(sonarr, sonarr_key):
+        return
     try:
         movies = as_list(http("GET", f"{radarr}/movie", headers=arr_headers(radarr_key)))
         movie_ids = [
@@ -1881,21 +1911,25 @@ def retry_unfilled_titles(radarr: str, radarr_key: str, sonarr: str, sonarr_key:
             if item.get("monitored") is True
             and item.get("hasFile") is False
             and item.get("id") is not None
-        ][:20]
-        if movie_ids:
+        ][:8]
+        token = ",".join(str(i) for i in movie_ids)
+        if movie_ids and _load_quiet().get("retry-movies") != token:
             http(
                 "POST",
                 f"{radarr}/command",
                 {"name": "MoviesSearch", "movieIds": movie_ids},
                 headers=arr_headers(radarr_key),
             )
+            state = _load_quiet()
+            state["retry-movies"] = token
+            _save_quiet(state)
             log(f"searching again for {len(movie_ids)} movie(s) still missing a file")
     except RuntimeError as exc:
         log(f"could not retry movie search: {exc}", "WARNING")
     try:
         missing = http(
             "GET",
-            f"{sonarr}/wanted/missing?pageSize=20",
+            f"{sonarr}/wanted/missing?pageSize=8",
             headers=arr_headers(sonarr_key),
         )
         records = as_list(missing)
@@ -1903,14 +1937,18 @@ def retry_unfilled_titles(radarr: str, radarr_key: str, sonarr: str, sonarr_key:
             int(item["id"])
             for item in records
             if item.get("id") is not None
-        ][:20]
-        if episode_ids:
+        ][:8]
+        token = ",".join(str(i) for i in episode_ids)
+        if episode_ids and _load_quiet().get("retry-episodes") != token:
             http(
                 "POST",
                 f"{sonarr}/command",
                 {"name": "EpisodeSearch", "episodeIds": episode_ids},
                 headers=arr_headers(sonarr_key),
             )
+            state = _load_quiet()
+            state["retry-episodes"] = token
+            _save_quiet(state)
             log(f"searching again for {len(episode_ids)} missing episode(s)")
     except RuntimeError as exc:
         if "404" not in str(exc):
@@ -1980,6 +2018,34 @@ VIDEO_EXTENSIONS = {
 
 def is_video_file(name: str) -> bool:
     return os.path.splitext(name)[1].lower() in VIDEO_EXTENSIONS
+
+
+def video_episode_key(name: str) -> str:
+    match = EPISODE_KEY_RE.search(name or "")
+    if not match:
+        return ""
+    return f"S{int(match.group(1)):02d}E{int(match.group(2)):02d}"
+
+
+def library_has_this_release(dest: str, source_name: str) -> bool:
+    """True when the library folder already has this movie or this SxxExx."""
+    if not dest or not os.path.isdir(dest):
+        return False
+    key = video_episode_key(source_name)
+    try:
+        for dirpath, dirnames, filenames in os.walk(dest):
+            dirnames[:] = [name for name in dirnames if not name.startswith(".")]
+            for name in filenames:
+                if name.startswith(".") or not is_video_file(name):
+                    continue
+                if key:
+                    if video_episode_key(name) == key:
+                        return True
+                    continue
+                return True
+    except OSError:
+        return False
+    return False
 
 
 def path_has_video(path: str) -> bool:
@@ -2312,6 +2378,30 @@ def remove_complete_release(release_dir: str, reason: str) -> None:
     log(f"removed leftover complete/ folder ({reason})")
 
 
+def remove_complete_leftover(path: str, reason: str) -> None:
+    """Drop a leftover video sitting loose in complete/, or its torrent folder."""
+    if not path:
+        return
+    full = os.path.normpath(path.strip())
+    if not path_under_complete(full):
+        return
+    root = os.path.normpath(downloads_complete())
+    if full == root:
+        return
+    if os.path.isfile(full):
+        try:
+            os.remove(full)
+        except OSError as exc:
+            log(f"could not remove leftover complete/ file: {exc}", "WARNING")
+            return
+        log(f"removed leftover complete/ file ({reason}): {os.path.basename(full)}")
+        parent = os.path.dirname(full)
+        if parent != root and os.path.isdir(parent) and not path_has_video(parent):
+            remove_complete_release(parent, reason)
+        return
+    remove_complete_release(release_dir_under_complete(full) or full, reason)
+
+
 def prune_complete_extras() -> None:
     """Arr imports the video (+ srt) into the library folder, not the torrent dump."""
     root = downloads_complete()
@@ -2430,18 +2520,19 @@ def import_matched_drop(base: str, api_key: str, kind: str) -> None:
             if lookup_arr_has_file(base, api_key, kind, item):
                 dest = dest or lookup_arr_library_path(base, api_key, kind, item)
                 dest = dest or "Arr title path"
-                log_if_new(
-                    f"hasfile:{kind}:{os.path.basename(path)}",
-                    f"{kind} already has a library file for "
-                    f"{os.path.basename(path)} -> {dest} "
-                    "(not re-importing leftover complete/ files)",
-                )
-                if library_dir_has_video(dest):
-                    remove_complete_release(
-                        release_dir_under_complete(path),
-                        "title already in the library",
+                if library_has_this_release(dest, os.path.basename(path)):
+                    log_if_new(
+                        f"hasfile:{kind}:{os.path.basename(path)}",
+                        f"{kind} already has a library file for "
+                        f"{os.path.basename(path)} -> {dest} "
+                        "(not re-importing leftover complete/ files)",
                     )
-                continue
+                    remove_complete_leftover(path, "title already in the library")
+                    continue
+                log(
+                    f"{kind} marks hasFile for {os.path.basename(path)} but "
+                    f"{dest} does not have this video; importing leftover"
+                )
             row = manual_import_file(item, kind)
             if not row:
                 log_if_new(
@@ -2866,7 +2957,6 @@ def main() -> int:
     ensure_indexer(prowlarr, pk)
     sync_prowlarr_indexers(prowlarr, pk)
     log_arr_vs_prowlarr_indexers(radarr, rk, sonarr, sk, prowlarr, pk)
-    retry_unfilled_titles(radarr, rk, sonarr, sk)
     import_finished_downloads(radarr, rk, sonarr, sk)
     log_recent_prowlarr_searches(prowlarr, pk)
 
@@ -2887,25 +2977,38 @@ def main() -> int:
 
 
 def import_finished_downloads(radarr: str, rk: str, sonarr: str, sk: str) -> None:
-    """Stop finished torrents, rename into the library, drop leftover complete/ folders.
+    """Stop finished torrents, rename into the library, drop leftover complete/ files.
 
     Same path for movies and TV. Destination is the Arr title folder Seerr stored.
+    Refresh is skipped when complete/ is empty or a search is already running —
+    those commands are higher priority than EpisodeSearch and starve the rest
+    of a season. Missing-title retry runs after import so housekeep also pokes.
     """
     log_search_diagnostics(radarr, rk, sonarr, sk)
     unlock_completed_torrents()
     engines = each_arr(radarr, rk, sonarr, sk)
-    for kind, base, key in engines:
-        refresh_monitored_downloads(base, key, kind)
-    for kind, base, key in engines:
-        scan_download_drop(base, key, kind)
-    for kind, base, key in engines:
-        import_matched_drop(base, key, kind)
+    videos = count_complete_videos()
+    searching = arr_search_in_flight(radarr, rk) or arr_search_in_flight(sonarr, sk)
+    if videos:
+        if searching:
+            log_if_new(
+                "skip-refresh-search",
+                "not refreshing completed downloads while a search is running",
+            )
+        else:
+            for kind, base, key in engines:
+                refresh_monitored_downloads(base, key, kind)
+        for kind, base, key in engines:
+            scan_download_drop(base, key, kind)
+        for kind, base, key in engines:
+            import_matched_drop(base, key, kind)
     forget_moved_torrents()
     prune_complete_extras()
     log_complete_drop_contents()
     for kind, base, key in engines:
         log_stuck_imports(base, key, kind)
         log_titles_waiting_for_library(base, key, kind)
+    retry_unfilled_titles(radarr, rk, sonarr, sk)
 
 
 def housekeep() -> int:
