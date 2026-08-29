@@ -13,6 +13,7 @@
       --line: #2a2d36;
       --focus: #d4af37;
       --err: #e08a7a;
+      --up: #8aa0b4;
     }
 
     * { box-sizing: border-box; }
@@ -168,6 +169,81 @@
     #open-search .hint {
       margin-top: 0.6rem;
     }
+
+    #vpn-bw {
+      margin-top: 1.35rem;
+      padding: 0.85rem 0.95rem 0.75rem;
+      border: 1px solid var(--line);
+      border-radius: 0.45rem;
+      background: #0c1018;
+    }
+
+    #vpn-bw .vpn-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      margin-bottom: 0.65rem;
+      font-family: ui-sans-serif, system-ui, sans-serif;
+      font-size: 0.75rem;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+
+    #vpn-bw .vpn-iface {
+      text-transform: none;
+      letter-spacing: 0;
+      font-variant-numeric: tabular-nums;
+    }
+
+    #vpn-bw .vpn-rates {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0.75rem;
+      margin-bottom: 0.55rem;
+    }
+
+    #vpn-bw .vpn-col {
+      font-family: ui-sans-serif, system-ui, sans-serif;
+    }
+
+    #vpn-bw .vpn-col .dir {
+      font-size: 0.72rem;
+      letter-spacing: 0.03em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 0.15rem;
+    }
+
+    #vpn-bw .vpn-col .rate {
+      font-size: 1.15rem;
+      font-variant-numeric: tabular-nums;
+      color: var(--fg);
+      line-height: 1.2;
+    }
+
+    #vpn-bw .vpn-col.down .rate { color: var(--focus); }
+    #vpn-bw .vpn-col.up .rate { color: var(--up); }
+
+    #vpn-bw .vpn-col .total {
+      margin-top: 0.15rem;
+      font-size: 0.8rem;
+      font-variant-numeric: tabular-nums;
+      color: var(--muted);
+    }
+
+    #vpn-bw svg {
+      display: block;
+      width: 100%;
+      height: 4.25rem;
+    }
+
+    #vpn-bw .vpn-axis {
+      margin-top: 0.35rem;
+      font-family: ui-sans-serif, system-ui, sans-serif;
+      font-size: 0.72rem;
+      color: var(--muted);
+    }
   </style>
 </head>
 <body>
@@ -186,6 +262,30 @@
       <a id="open-sources-btn" href="#" target="_blank" rel="noopener">Open sources</a>
       <p class="hint" id="open-search-url"></p>
     </div>
+    <section id="vpn-bw" hidden aria-label="Proton tunnel bandwidth">
+      <div class="vpn-head">
+        <span>Proton tunnel</span>
+        <span class="vpn-iface" id="vpn-iface">wg0</span>
+      </div>
+      <div class="vpn-rates">
+        <div class="vpn-col down">
+          <div class="dir">Down</div>
+          <div class="rate" id="vpn-down-rate">—</div>
+          <div class="total" id="vpn-down-total">0 B in</div>
+        </div>
+        <div class="vpn-col up">
+          <div class="dir">Up</div>
+          <div class="rate" id="vpn-up-rate">—</div>
+          <div class="total" id="vpn-up-total">0 B out</div>
+        </div>
+      </div>
+      <svg id="vpn-graph" viewBox="0 0 320 68" preserveAspectRatio="none" aria-hidden="true">
+        <path id="vpn-down-fill" fill="rgba(212,175,55,0.16)"></path>
+        <path id="vpn-down-line" fill="none" stroke="#d4af37" stroke-width="1.6"></path>
+        <path id="vpn-up-line" fill="none" stroke="#8aa0b4" stroke-width="1.4"></path>
+      </svg>
+      <p class="vpn-axis" id="vpn-axis">Last two minutes on the VPN adapter</p>
+    </section>
     <p id="file-hint" hidden>This file is only the wait screen. On Home Assistant it lives in the sidebar after Proton is up. In this repo run <code>python3 tests/preview.py</code> to watch progress here.</p>
     <p class="error" id="err" hidden></p>
   </main>
@@ -202,9 +302,103 @@
     const openSearchBtn = document.getElementById("open-search-btn");
     const openSourcesBtn = document.getElementById("open-sources-btn");
     const openSearchUrl = document.getElementById("open-search-url");
+    const vpnBw = document.getElementById("vpn-bw");
+    const vpnIface = document.getElementById("vpn-iface");
+    const vpnDownRate = document.getElementById("vpn-down-rate");
+    const vpnUpRate = document.getElementById("vpn-up-rate");
+    const vpnDownTotal = document.getElementById("vpn-down-total");
+    const vpnUpTotal = document.getElementById("vpn-up-total");
+    const vpnDownFill = document.getElementById("vpn-down-fill");
+    const vpnDownLine = document.getElementById("vpn-down-line");
+    const vpnUpLine = document.getElementById("vpn-up-line");
+    const vpnAxis = document.getElementById("vpn-axis");
     const marks = { pending: "·", active: "›", done: "✓", error: "!" };
     let protonSubmitted = false;
     let lastSig = "";
+    const vpnHist = [];
+    const VPN_KEEP_MS = 120000;
+    let vpnLast = null;
+
+    function fmtBytes(n) {
+      const x = Number(n);
+      if (!Number.isFinite(x) || x < 0) return "0 B";
+      if (x < 1000) return Math.round(x) + " B";
+      const units = ["KB", "MB", "GB", "TB"];
+      let v = x / 1024;
+      let i = 0;
+      while (v >= 1024 && i < units.length - 1) {
+        v /= 1024;
+        i += 1;
+      }
+      const digits = v >= 10 ? 1 : 2;
+      return v.toFixed(digits) + " " + units[i];
+    }
+
+    function fmtRate(bps) {
+      if (!Number.isFinite(bps) || bps < 0) return "—";
+      return fmtBytes(bps) + "/s";
+    }
+
+    function linePath(values, width, height, max) {
+      if (!values.length) return "";
+      const n = values.length;
+      return values.map((v, i) => {
+        const x = n === 1 ? 0 : (i / (n - 1)) * width;
+        const y = max > 0 ? height - (v / max) * (height - 3) - 1.5 : height - 1.5;
+        return (i ? "L" : "M") + x.toFixed(2) + " " + y.toFixed(2);
+      }).join(" ");
+    }
+
+    function renderVpn(data) {
+      const showForm = !protonSubmitted && (
+        Boolean(data.need_proton) || document.activeElement === wg
+      );
+      const vpn = data.vpn;
+      if (showForm || !vpn || vpn.up !== true) {
+        vpnBw.hidden = true;
+        return;
+      }
+      const nowMs = Number(vpn.sample_ms) || Date.now();
+      const rx = Number(vpn.rx_bytes) || 0;
+      const tx = Number(vpn.tx_bytes) || 0;
+      if (vpnLast && nowMs <= vpnLast.t) {
+        vpnBw.hidden = false;
+        return;
+      }
+      if (vpnLast && (rx < vpnLast.rx || tx < vpnLast.tx)) {
+        vpnHist.length = 0;
+        vpnLast = null;
+      }
+      let downBps = 0;
+      let upBps = 0;
+      if (vpnLast && nowMs > vpnLast.t) {
+        const dt = (nowMs - vpnLast.t) / 1000;
+        downBps = Math.max(0, (rx - vpnLast.rx) / dt);
+        upBps = Math.max(0, (tx - vpnLast.tx) / dt);
+      }
+      vpnLast = { t: nowMs, rx, tx };
+      vpnHist.push({ t: nowMs, down: downBps, up: upBps });
+      while (vpnHist.length && nowMs - vpnHist[0].t > VPN_KEEP_MS) {
+        vpnHist.shift();
+      }
+      vpnBw.hidden = false;
+      vpnIface.textContent = vpn.iface || "wg0";
+      vpnDownRate.textContent = vpnHist.length > 1 ? fmtRate(downBps) : "—";
+      vpnUpRate.textContent = vpnHist.length > 1 ? fmtRate(upBps) : "—";
+      vpnDownTotal.textContent = fmtBytes(rx) + " in";
+      vpnUpTotal.textContent = fmtBytes(tx) + " out";
+      const downs = vpnHist.map((p) => p.down);
+      const ups = vpnHist.map((p) => p.up);
+      const max = Math.max(1, ...downs, ...ups);
+      const line = linePath(downs, 320, 68, max);
+      vpnDownLine.setAttribute("d", line);
+      vpnDownFill.setAttribute("d", line ? line + " L320 68 L0 68 Z" : "");
+      vpnUpLine.setAttribute("d", linePath(ups, 320, 68, max));
+      const span = vpnHist.length ? (nowMs - vpnHist[0].t) / 1000 : 0;
+      vpnAxis.textContent = span < 20
+        ? "Rates fill in as traffic crosses the VPN"
+        : "Last two minutes on the VPN adapter";
+    }
 
     if (location.protocol === "file:") {
       fileHint.hidden = false;
@@ -297,7 +491,9 @@
       try {
         const res = await fetch("status.json", { cache: "no-store" });
         if (!res.ok) return;
-        render(await res.json());
+        const data = await res.json();
+        render(data);
+        renderVpn(data);
       } catch (_exc) {
         now.textContent = "Waiting for the box to start…";
       }

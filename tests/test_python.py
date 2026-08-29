@@ -36,6 +36,7 @@ arrp = load("prowlarr_arr_proxy", BIN / "prowlarr-arr-proxy")
 rr = load("route_rating", BIN / "route-rating")
 wqc = load("wg_quick_contract", ROOT / "tests/lib/wg_quick_contract.py")
 emitmod = load("pompey_log_emit", BIN / "pompey-log-emit")
+vpnstats = load("pompey_vpn_stats", BIN / "pompey-vpn-stats")
 
 
 def any_quality_bundle(profile_id: int = 1, name: str = "Any") -> dict:
@@ -1091,6 +1092,10 @@ class Helpers(unittest.TestCase):
         self.assertIn("Paste the Proton WireGuard file", html)
         self.assertIn("lastSig", html)
         self.assertIn("protonSubmitted", html)
+        self.assertIn("vpn-bw", html)
+        self.assertIn("renderVpn", html)
+        self.assertIn("vpn-graph", html)
+        self.assertIn("data.vpn", html)
         cfg = (ROOT / "pompey/config.yaml").read_text()
         self.assertIn("5055/tcp: 5055", cfg)
         self.assertIn("9696/tcp: 9696", cfg)
@@ -1735,6 +1740,63 @@ class LogEmit(unittest.TestCase):
             ],
         )
         self.assertEqual(err.count("No Results in configured categories"), 1)
+
+
+class VpnStats(unittest.TestCase):
+    def test_parse_net_dev_rx_tx(self):
+        text = (
+            "Inter-|   Receive                                                |  Transmit\n"
+            " face |bytes    packets errs drop fifo frame compressed multicast|"
+            "bytes    packets errs drop fifo frame compressed\n"
+            "    lo: 100 1 0 0 0 0 0 0 200 1 0 0 0 0 0 0\n"
+            "  wg0: 12345678 10 0 0 0 0 0 0 98765 4 0 0 0 0 0 0\n"
+        )
+        self.assertEqual(vpnstats.parse_net_dev(text, "wg0"), (12345678, 98765))
+        self.assertIsNone(vpnstats.parse_net_dev(text, "eth0"))
+
+    def test_write_once_merges_vpn_without_clobbering_boot(self):
+        tmp = Path(os.environ.get("TEST_TMP") or "/tmp") / f"pompey-vpn-{os.getpid()}"
+        tmp.mkdir(parents=True, exist_ok=True)
+        status = tmp / "status.json"
+        netdev = tmp / "net-dev"
+        status.write_text(
+            json.dumps(
+                {
+                    "step": "ready",
+                    "label": "Ready",
+                    "percent": 100,
+                    "need_proton": False,
+                    "search": True,
+                    "steps": [{"id": "ready", "label": "Ready", "state": "done"}],
+                }
+            )
+        )
+        netdev.write_text(
+            "wg0: 5000000 1 0 0 0 0 0 0 400000 1 0 0 0 0 0 0\n"
+        )
+        old = {
+            "POMPEY_STATUS": os.environ.get("POMPEY_STATUS"),
+            "POMPEY_NET_DEV": os.environ.get("POMPEY_NET_DEV"),
+            "WG_IFACE": os.environ.get("WG_IFACE"),
+        }
+        try:
+            os.environ["POMPEY_STATUS"] = str(status)
+            os.environ["POMPEY_NET_DEV"] = str(netdev)
+            os.environ["WG_IFACE"] = "wg0"
+            self.assertEqual(vpnstats.write_once(), 0)
+            data = json.loads(status.read_text())
+            self.assertEqual(data["step"], "ready")
+            self.assertTrue(data["search"])
+            self.assertEqual(data["vpn"]["iface"], "wg0")
+            self.assertTrue(data["vpn"]["up"])
+            self.assertEqual(data["vpn"]["rx_bytes"], 5000000)
+            self.assertEqual(data["vpn"]["tx_bytes"], 400000)
+        finally:
+            for key, value in old.items():
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
 
 
 class WireStack(unittest.TestCase):

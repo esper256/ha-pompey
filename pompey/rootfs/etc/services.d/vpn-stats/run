@@ -1,0 +1,11 @@
+#!/command/with-contenv bashio
+# shellcheck shell=bash
+set -euo pipefail
+# shellcheck source=/dev/null
+source "$(command -v pompey-env)"
+
+pompey-log start "VPN stats"
+until [[ -f "${POMPEY_READY}/status.json" ]]; do
+  sleep 1
+done
+exec python3 /usr/local/bin/pompey-vpn-stats loop

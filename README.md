@@ -181,7 +181,7 @@ The journey above is the target. **0.2.35** is a real Home Assistant OS install 
 | Add another source from search/settings | **Open sources** (Prowlarr :9696). A Pompey-native source UI is still roadmap. |
 | Replace Proton / change region from the running app | Paste on first wait screen. No later “new .conf” flow. |
 | Household members as first-class users | Seerr supports users; we have not productized invites or permissions beyond “first admin is the Plex wizard” and advanced-request so the quality dropdown shows. |
-| Status when a download is stuck | App log. No in-sidebar job list. |
+| Status when a download is stuck | App log. No in-sidebar job list. **0.2.35** does show Proton tunnel totals and a short bandwidth graph on the sidebar. |
 | Engine Web UIs for operators | Radarr/Sonarr/qBittorrent stay localhost. Prowlarr is on :9696 for sources. |
 | Cloudflare-protected sources | No challenge solvers. |
 | Jellyfin | Plex only. |

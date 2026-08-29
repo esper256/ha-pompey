@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import random
 import subprocess
 import sys
 import threading
@@ -54,6 +55,28 @@ def status(env: dict, *args: str) -> None:
     subprocess.run([sys.executable, str(STATUS_BIN), *args], check=True, env=env)
 
 
+def write_fake_netdev(path: Path, rx: int, tx: int) -> None:
+    path.write_text(
+        "Inter-|   Receive                                                |  Transmit\n"
+        " face |bytes    packets errs drop fifo frame compressed multicast|"
+        "bytes    packets errs drop fifo frame compressed\n"
+        f"  wg0: {rx} 12 0 0 0 0 0 0 {tx} 8 0 0 0 0 0 0\n"
+    )
+
+
+def vpn_demo(env: dict, netdev: Path, stop: threading.Event) -> None:
+    stats = ROOT / "pompey/rootfs/usr/local/bin/pompey-vpn-stats"
+    rx, tx = 18_000_000, 1_200_000
+    child = env.copy()
+    child["POMPEY_NET_DEV"] = str(netdev)
+    while not stop.is_set():
+        rx += random.randint(40_000, 2_200_000)
+        tx += random.randint(4_000, 220_000)
+        write_fake_netdev(netdev, rx, tx)
+        subprocess.run([sys.executable, str(stats)], check=False, env=child)
+        stop.wait(1)
+
+
 def demo(env: dict, hold_ready: bool, delay: float) -> None:
     sequence = [
         ("vpn", "Starting", "5"),
@@ -90,23 +113,32 @@ def main() -> int:
     env["POMPEY_READY"] = str(work)
     env["POMPEY_STATUS"] = str(status_path)
     status(env, "vpn", "Starting", "5")
+    netdev = work / "net-dev"
+    write_fake_netdev(netdev, 18_000_000, 1_200_000)
+    env["POMPEY_NET_DEV"] = str(netdev)
+    vpn_stop = threading.Event()
+    threading.Thread(
+        target=vpn_demo, args=(env, netdev, vpn_stop), daemon=True
+    ).start()
 
     handler = lambda *a, **k: Handler(*a, status_path=status_path, **k)
     httpd = ThreadingHTTPServer(("127.0.0.1", args.port), handler)
     print(f"Pompey wait screen: http://127.0.0.1:{args.port}/", flush=True)
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
 
-    if not args.no_demo:
-        demo(env, hold_ready=not args.once, delay=args.delay)
-        if args.once:
-            time.sleep(0.5)
-            httpd.shutdown()
-            return 0
     try:
+        if not args.no_demo:
+            demo(env, hold_ready=not args.once, delay=args.delay)
+            if args.once:
+                time.sleep(0.5)
+                return 0
         while True:
             time.sleep(30)
     except KeyboardInterrupt:
         return 0
+    finally:
+        vpn_stop.set()
+        httpd.shutdown()
 
 
 if __name__ == "__main__":
