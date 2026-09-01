@@ -3038,7 +3038,7 @@ class WireStack(unittest.TestCase):
         os.environ["INDEXER_API_KEY"] = ""
         os.environ["MEDIA_ROOT"] = str(self.tmp)
         complete = self.tmp / "downloads" / "complete"
-        complete.mkdir(parents=True)
+        complete.mkdir(parents=True, exist_ok=True)
         (complete / "stuck-title.mkv").write_bytes(b"x" * 50)
         self.state.reject_command_names = {"DownloadedMoviesScan", "DownloadedEpisodesScan"}
         rc = ws.housekeep()
