@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
-"""HTTP fakes for grab wiring: Torznab source + qBittorrent WebUI + Seerr.
+"""HTTP fakes for grab + import: Torznab source + qBittorrent WebUI + Seerr.
 
-No BitTorrent protocol. No .torrent files. The "release" is a magnet string
-that the download-engine WebAPI would receive. Tests stop when that POST
-lands; they never wait on peers or a file on disk.
+No BitTorrent protocol. No .torrent files. No DHT/PEX/LSD. The "release" is a
+magnet string the download-engine WebAPI would receive. On torrents/add the
+fake client writes a sparse video under incomplete/, then moves it to
+complete/ and reports a finished torrent (progress 1, content_path). That is
+enough for housekeep to unlock, ask Arr to ManualImport Move, and forget the
+row with deleteFiles=false — without a torrent client or public peers.
 """
 from __future__ import annotations
 
@@ -11,6 +14,7 @@ import argparse
 import json
 import os
 import re
+import shutil
 import sys
 import threading
 import time
@@ -49,6 +53,48 @@ TV_MAGNET = (
 TV_SIZE_BYTES = 1_073_741_824
 API_KEY = "pompey-dev-source"
 SIZE_BYTES = 4_294_967_296
+# Sparse on-disk fake; big enough that Arr sample detection usually ignores it.
+DEFAULT_VIDEO_BYTES = 32 * 1024 * 1024
+MATROSKA_MAGIC = b"\x1a\x45\xdf\xa3"
+RELEASE_DIR_NAME = "The.Wild.Robot.2024.1080p.WEB-DL.POMPEY"
+TV_DIR_NAME = "Pompey.Test.Show.S01E01.1080p.WEB-DL"
+
+
+def video_size_bytes() -> int:
+    raw = os.environ.get("POMPEY_FAKE_VIDEO_BYTES", "").strip()
+    if raw.isdigit() and int(raw) > 0:
+        return int(raw)
+    return DEFAULT_VIDEO_BYTES
+
+
+def hash_from_magnet(urls: str) -> str:
+    match = re.search(r"btih:([a-fA-F0-9]{40})", urls or "", re.I)
+    if match:
+        return match.group(1).lower()
+    if TV_INFOHASH.lower() in (urls or "").lower():
+        return TV_INFOHASH
+    return INFOHASH
+
+
+def name_from_magnet(urls: str, default: str = RELEASE_DIR_NAME) -> str:
+    match = re.search(r"[?&]dn=([^&]+)", urls or "", re.I)
+    if not match:
+        if hash_from_magnet(urls) == TV_INFOHASH:
+            return TV_DIR_NAME
+        return default
+    raw = urllib.parse.unquote(match.group(1)).strip()
+    cleaned = re.sub(r"[^\w.\- ]+", ".", raw).strip(" .")
+    return cleaned or default
+
+
+def write_fake_video(path: Path, size: int | None = None) -> None:
+    """Sparse Matroska-shaped file. Not a real encode; Arr only needs a size + name."""
+    nbytes = size if size is not None else video_size_bytes()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("wb") as fh:
+        fh.write(MATROSKA_MAGIC + b"POMPEY")
+        if nbytes > fh.tell():
+            fh.truncate(nbytes)
 
 
 def _xml_escape(text: str) -> str:
@@ -225,18 +271,220 @@ def parse_form(headers: dict, raw: bytes) -> dict[str, str]:
 
 
 class FakeState:
-    def __init__(self, work: Path):
+    def __init__(self, work: Path, media_root: Path | None = None, finish_immediately: bool = True):
         self.work = work
         self.work.mkdir(parents=True, exist_ok=True)
+        self.lock = threading.Lock()
+        root = media_root
+        if root is None:
+            env_root = os.environ.get("MEDIA_ROOT", "").strip()
+            root = Path(env_root) if env_root else (work / "media")
+        self.media_root = Path(root)
+        self.incomplete = self.media_root / "downloads" / "incomplete"
+        self.complete = self.media_root / "downloads" / "complete"
+        self.incomplete.mkdir(parents=True, exist_ok=True)
+        self.complete.mkdir(parents=True, exist_ok=True)
+        self.finish_immediately = finish_immediately
         self.adds_path = work / "qbit-adds.jsonl"
+        self.deletes_path = work / "qbit-deletes.jsonl"
+        self.stops_path = work / "qbit-stops.jsonl"
         self.categories: dict[str, dict] = {}
+        self.torrents: dict[str, dict] = {}
         self.seerr = {"initialized": False, "radarr": [], "sonarr": []}
-        if not self.adds_path.exists():
-            self.adds_path.write_text("")
+        for path in (self.adds_path, self.deletes_path, self.stops_path):
+            if not path.exists():
+                path.write_text("")
 
-    def record_add(self, payload: dict) -> None:
-        with self.adds_path.open("a", encoding="utf-8") as fh:
+    def _append_jsonl(self, path: Path, payload: dict) -> None:
+        with path.open("a", encoding="utf-8") as fh:
             fh.write(json.dumps(payload) + "\n")
+
+    def category_save_path(self, name: str) -> Path:
+        row = self.categories.get(name) or {}
+        save = (row.get("savePath") or "").strip()
+        return Path(save) if save else self.complete
+
+    def record_add(self, payload: dict) -> dict:
+        with self.lock:
+            self._append_jsonl(self.adds_path, payload)
+            item = self._start_download_locked(payload)
+            if self.finish_immediately:
+                self._finish_download_locked(item["hash"])
+            return dict(self.torrents[item["hash"]])
+
+    def _start_download_locked(self, payload: dict) -> dict:
+        urls = payload.get("urls") or MAGNET
+        digest = hash_from_magnet(urls)
+        name = name_from_magnet(urls)
+        folder = self.incomplete / name
+        if folder.exists():
+            shutil.rmtree(folder)
+        video = folder / f"{name}.mkv"
+        write_fake_video(video)
+        (folder / f"{name}.nfo").write_text("pompey fake release\n")
+        save = (payload.get("savepath") or payload.get("savePath") or "").strip()
+        category = payload.get("category") or ""
+        if not save:
+            save = str(self.category_save_path(category))
+        item = {
+            "hash": digest,
+            "name": name,
+            "state": "downloading",
+            "progress": 0.4,
+            "amount_left": max(video_size_bytes() // 2, 1),
+            "dlspeed": 0,
+            "upspeed": 0,
+            "eta": 1,
+            "ratio": 0,
+            "category": category,
+            "magnet_uri": urls,
+            "save_path": str(self.incomplete),
+            "content_path": str(folder),
+            "size": video_size_bytes(),
+            "completion_on": 0,
+            "final_save_path": save,
+        }
+        self.torrents[digest] = item
+        return item
+
+    def finish_torrent(self, digest: str) -> dict:
+        with self.lock:
+            return self._finish_download_locked(digest)
+
+    def _finish_download_locked(self, digest: str) -> dict:
+        item = self.torrents.get(digest)
+        if item is None:
+            raise KeyError(digest)
+        src = Path(item["content_path"])
+        dest_root = Path(item.get("final_save_path") or self.complete)
+        dest_root.mkdir(parents=True, exist_ok=True)
+        dest = dest_root / src.name
+        if src.resolve() != dest.resolve():
+            if dest.exists():
+                if dest.is_dir():
+                    shutil.rmtree(dest)
+                else:
+                    dest.unlink()
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(src), str(dest))
+        item["content_path"] = str(dest)
+        item["save_path"] = str(dest_root)
+        item["state"] = "uploading"
+        item["progress"] = 1
+        item["amount_left"] = 0
+        item["dlspeed"] = 0
+        item["completion_on"] = int(time.time())
+        return dict(item)
+
+    def list_torrents(self, category: str = "") -> list[dict]:
+        with self.lock:
+            rows = []
+            for item in self.torrents.values():
+                if category and (item.get("category") or "") != category:
+                    continue
+                rows.append(
+                    {
+                        "hash": item["hash"],
+                        "name": item["name"],
+                        "state": item["state"],
+                        "progress": item["progress"],
+                        "amount_left": item["amount_left"],
+                        "dlspeed": item.get("dlspeed") or 0,
+                        "upspeed": item.get("upspeed") or 0,
+                        "eta": item.get("eta") or 8640000,
+                        "ratio": item.get("ratio") or 0,
+                        "category": item.get("category") or "",
+                        "magnet_uri": item.get("magnet_uri") or "",
+                        "save_path": item.get("save_path") or "",
+                        "content_path": item.get("content_path") or "",
+                        "size": item.get("size") or 0,
+                        "completion_on": item.get("completion_on") or 0,
+                    }
+                )
+            return rows
+
+    def torrent_files(self, digest: str) -> list[dict]:
+        with self.lock:
+            item = self.torrents.get(digest.lower()) or self.torrents.get(digest)
+            if item is None:
+                return []
+            root = Path(item["content_path"])
+            progress = float(item.get("progress") or 0)
+        done = 1 if progress >= 0.999 else 0
+        files: list[dict] = []
+        if root.is_file():
+            return [
+                {
+                    "name": root.name,
+                    "size": root.stat().st_size,
+                    "progress": done,
+                    "priority": 1,
+                }
+            ]
+        if not root.is_dir():
+            return []
+        for path in sorted(root.rglob("*")):
+            if not path.is_file():
+                continue
+            files.append(
+                {
+                    "name": str(path.relative_to(root)),
+                    "size": path.stat().st_size,
+                    "progress": done,
+                    "priority": 1,
+                }
+            )
+        return files
+
+    def torrent_properties(self, digest: str) -> dict:
+        with self.lock:
+            item = self.torrents.get(digest.lower()) or self.torrents.get(digest)
+            if item is None:
+                return {}
+            return {
+                "hash": item["hash"],
+                "save_path": item.get("save_path") or "",
+                "comment": "pompey-fake",
+                "total_size": item.get("size") or 0,
+                "total_downloaded": item.get("size") if item.get("progress", 0) >= 0.999 else 0,
+                "total_uploaded": 0,
+                "addition_date": int(time.time()),
+                "completion_date": item.get("completion_on") or 0,
+            }
+
+    def stop_torrents(self, hashes: str, action: str = "stop") -> None:
+        drop = {part.strip().lower() for part in hashes.split("|") if part.strip()}
+        with self.lock:
+            self._append_jsonl(self.stops_path, {"hashes": hashes, "action": action})
+            for digest, item in self.torrents.items():
+                if digest.lower() in drop:
+                    item["state"] = "stoppedUP"
+
+    def delete_torrents(self, hashes: str, delete_files: str) -> None:
+        drop = {part.strip().lower() for part in hashes.split("|") if part.strip()}
+        remove_files = str(delete_files).lower() in {"true", "1", "yes"}
+        with self.lock:
+            self._append_jsonl(
+                self.deletes_path,
+                {"hashes": hashes, "deleteFiles": str(delete_files)},
+            )
+            gone = []
+            for digest, item in list(self.torrents.items()):
+                if digest.lower() not in drop:
+                    continue
+                gone.append(item)
+                del self.torrents[digest]
+            if not remove_files:
+                return
+            for item in gone:
+                path = Path(item.get("content_path") or "")
+                if not path.exists():
+                    continue
+                if path.is_dir():
+                    shutil.rmtree(path, ignore_errors=True)
+                else:
+                    path.unlink(missing_ok=True)
+
 
 
 def torznab_handler(state: FakeState):
@@ -301,35 +549,31 @@ def qbit_handler(state: FakeState):
                     {
                         "current_network_interface": "wg0",
                         "listen_port": 0,
-                        "save_path": "/tmp/downloads",
-                        "dht": True,
-                        "pex": True,
-                        "lsd": True,
+                        "save_path": str(state.complete),
+                        "temp_path": str(state.incomplete),
+                        "temp_path_enabled": True,
+                        "dht": False,
+                        "pex": False,
+                        "lsd": False,
                     },
                 )
             if path.endswith("/categories"):
                 return self._send(200, state.categories)
+            if path.endswith("/files"):
+                qs = parse_qs(urlparse(self.path).query)
+                digest = (qs.get("hash") or [""])[0]
+                return self._send(200, state.torrent_files(digest))
+            if path.endswith("/properties"):
+                qs = parse_qs(urlparse(self.path).query)
+                digest = (qs.get("hash") or [""])[0]
+                props = state.torrent_properties(digest)
+                if not props:
+                    return self._send(404, "Not Found")
+                return self._send(200, props)
             if path.endswith("/info"):
                 qs = parse_qs(urlparse(self.path).query)
                 want_cat = (qs.get("category") or [""])[0]
-                added = []
-                if state.adds_path.exists():
-                    for line in state.adds_path.read_text().splitlines():
-                        if not line.strip():
-                            continue
-                        row = json.loads(line)
-                        if want_cat and (row.get("category") or "") != want_cat:
-                            continue
-                        added.append(
-                            {
-                                "hash": INFOHASH,
-                                "name": RELEASE_TITLE,
-                                "state": "pausedDL",
-                                "category": row.get("category") or "",
-                                "magnet_uri": row.get("urls") or MAGNET,
-                            }
-                        )
-                return self._send(200, added)
+                return self._send(200, state.list_torrents(want_cat))
             return self._send(200, [])
 
         def do_POST(self) -> None:
@@ -352,6 +596,16 @@ def qbit_handler(state: FakeState):
                     "paused": form.get("paused") or "",
                 }
                 state.record_add(payload)
+                return self._send(200, "Ok.")
+            if path.endswith("/stop") or path.endswith("/pause"):
+                action = "pause" if path.endswith("/pause") else "stop"
+                state.stop_torrents(form.get("hashes") or form.get("hash") or "", action)
+                return self._send(200, "Ok.")
+            if path.endswith("/delete"):
+                state.delete_torrents(
+                    form.get("hashes") or form.get("hash") or "",
+                    form.get("deleteFiles") or "false",
+                )
                 return self._send(200, "Ok.")
             return self._send(200, "Ok.")
 
@@ -429,8 +683,25 @@ def seerr_handler(state: FakeState):
     return Handler
 
 
-def serve(work: Path, host: str = "127.0.0.1", qbit_port: int = 8080, seerr_port: int = 5055, torznab_port: int = 9117) -> None:
-    state = FakeState(work)
+def wait_complete_video(complete: Path, tries: int = 20) -> Path:
+    for _ in range(tries):
+        if complete.is_dir():
+            for path in complete.rglob("*"):
+                if path.is_file() and path.suffix.lower() in {".mkv", ".mp4", ".avi", ".m4v"}:
+                    return path
+        time.sleep(0.5)
+    raise RuntimeError(f"no fake video appeared under {complete}")
+
+
+def serve(
+    work: Path,
+    host: str = "127.0.0.1",
+    qbit_port: int = 8080,
+    seerr_port: int = 5055,
+    torznab_port: int = 9117,
+    media_root: Path | None = None,
+) -> None:
+    state = FakeState(work, media_root=media_root)
     servers = [
         ThreadingHTTPServer((host, qbit_port), qbit_handler(state)),
         ThreadingHTTPServer((host, seerr_port), seerr_handler(state)),
@@ -449,13 +720,16 @@ def serve(work: Path, host: str = "127.0.0.1", qbit_port: int = 8080, seerr_port
                 "magnet": MAGNET,
                 "infohash": INFOHASH,
                 "title": RELEASE_TITLE,
+                "complete": str(state.complete),
+                "incomplete": str(state.incomplete),
             },
             indent=2,
         )
         + "\n"
     )
     print(
-        f"fake source on {host}: qbit={qbit_port} seerr={seerr_port} torznab={torznab_port}",
+        f"fake source on {host}: qbit={qbit_port} seerr={seerr_port} torznab={torznab_port} "
+        f"complete={state.complete}",
         flush=True,
     )
     threading.Event().wait()
@@ -574,6 +848,7 @@ def main(argv: list[str] | None = None) -> int:
     serve_p.add_argument("--qbit-port", type=int, default=8080)
     serve_p.add_argument("--seerr-port", type=int, default=5055)
     serve_p.add_argument("--torznab-port", type=int, default=9117)
+    serve_p.add_argument("--media-root", default="")
     grab_p = sub.add_parser("grab")
     grab_p.add_argument("--prowlarr", required=True)
     grab_p.add_argument("--key", required=True)
@@ -593,7 +868,8 @@ def main(argv: list[str] | None = None) -> int:
         )
         print(json.dumps(added, indent=2))
         return 0
-    serve(Path(args.work), args.host, args.qbit_port, args.seerr_port, args.torznab_port)
+    media_root = Path(args.media_root) if args.media_root else None
+    serve(Path(args.work), args.host, args.qbit_port, args.seerr_port, args.torznab_port, media_root)
     return 0
 
 

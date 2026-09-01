@@ -48,10 +48,12 @@ Realistic stack (still no Proton, still no HAOS). Needs passwordless sudo + `ipr
 
 ```bash
 sudo apt-get install -y iproute2 iptables libicu74
-bash tests/integration.sh      # The Wild Robot via Radarr TMDB lookup, Prowlarr sync of a fake Torznab source into Radarr/Sonarr, then Prowlarr search until the fake qBittorrent WebUI records the magnet add
+bash tests/integration.sh      # The Wild Robot: TMDB lookup, fake Torznab, fake qbit incomplete→complete, real Radarr ManualImport into Movies/Not Kid Friendly
 ```
 
-That downloads official Radarr/Sonarr/Prowlarr into `~/.cache/pompey/engines` on first run. It looks the movie up on TMDB and adds it to Radarr **without searching or downloading from the internet**. A fake Torznab source (`tests/lib/fake_source.py`) answers Prowlarr (movie hit for The Wild Robot; a dummy TV item so Sonarr's indexer test passes). The test fails if Prowlarr does not sync that source into Radarr/Sonarr, then ends when the fake qBittorrent WebUI records `torrents/add` for the movie magnet. Do not start the torrent client, do not wait on peers, and do not add that wait to CI (`tests/run.sh` only). Integration still skips booting Seerr (`POMPEY_SKIP_SEERR=1`); CI already runs the real Seerr API in `tests/test_seerr_real.py`.
+That downloads official Radarr/Sonarr/Prowlarr into `~/.cache/pompey/engines` on first run. It looks the movie up on TMDB and adds it to Radarr **without searching or downloading from the public internet**. A fake Torznab source (`tests/lib/fake_source.py`) answers Prowlarr. The fake qBittorrent WebUI records the magnet add, writes a sparse video under `downloads/incomplete`, moves it to `downloads/complete`, then `wire-stack housekeep` asks **real** Radarr to `ManualImport` Move into `Movies/Not Kid Friendly` and forgets the torrent with `deleteFiles=false`. DHT/PEX/LSD are off on the fake; the magnet tracker is `udp://127.0.0.1:9`. Do not start the torrent client, do not wait on peers, and do not add that wait to CI (`tests/run.sh` only). Integration still skips booting Seerr (`POMPEY_SKIP_SEERR=1`); CI already runs the real Seerr API in `tests/test_seerr_real.py`.
+
+Assumptions that will break if we turn on engine auto-update: [docs/arr-auto-update.md](docs/arr-auto-update.md).
 
 Opening `index.html` as a file is only the wait screen.
 

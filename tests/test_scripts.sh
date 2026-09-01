@@ -507,6 +507,18 @@ test -x "${BIN}/pompey-log-emit"
 test -x "${BIN}/prowlarr-arr-proxy"
 grep -q '127.0.0.1:9698/ping' "${svc}/wire/run"
 grep -q 'wire-stack housekeep' "${svc}/wire/run"
+if ! grep -q 'wire-stack" housekeep' "${ROOT}/tests/integration.sh"; then
+  echo "integration.sh must run housekeep against real Arr after the fake qbit completes" >&2
+  exit 1
+fi
+if ! grep -q 'Movies/Not Kid Friendly' "${ROOT}/tests/integration.sh"; then
+  echo "integration.sh must add the movie under Movies/Not Kid Friendly" >&2
+  exit 1
+fi
+if ! grep -q 'deleteFiles": "false"' "${ROOT}/tests/integration.sh"; then
+  echo "integration.sh must assert housekeep forgets torrents with deleteFiles=false" >&2
+  exit 1
+fi
 if grep -q 'deleteFiles.: .true' "${BIN}/wire-stack"; then
   echo "qbit must never delete torrent files (library may be hardlinked)" >&2
   exit 1
