@@ -10,12 +10,13 @@ ARG BUILD_DESCRIPTION="Search for a movie or show; Proton WireGuard for all inte
 ARG BUILD_NAME="Pompey"
 ARG BUILD_REF
 ARG BUILD_REPOSITORY="esper256/ha-pompey"
-ARG BUILD_VERSION="0.2.37"
+ARG BUILD_VERSION="0.2.38"
 
 RUN apk add --no-cache \
     bind-tools \
     ca-certificates \
     curl \
+    git \
     icu-data-full \
     icu-libs \
     iptables \
@@ -35,6 +36,7 @@ RUN apk add --no-cache \
     unzip \
     wireguard-go \
     wireguard-tools \
+    xz \
     zlib
 
 # crane unpacks Seerr's published image at runtime. Not an engine.

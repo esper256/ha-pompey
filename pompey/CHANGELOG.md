@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.38
+
+- Home Assistant no longer has preferred language / anime audio / subtitles options. Those scored release *names* and did not match how Arr or Seerr actually pick audio. Default and Max now use Arr’s original-language custom format (same mechanism as TRaSH Language: Not Original): a French dub of an English title loses; a French film still matches French. Anything still takes whatever exists. Dual-audio stays a small tie-break. Playback language stays in Plex. Leftover “Pompey English dub/subs” custom formats from 0.2.28 stay at score 0.
+- Recyclarr syncs TRaSH Guides onto **Default** (HD Bluray + WEB / 1080p) and **Max** (UHD Bluray + WEB / 4K encodes, with 1080p as a fallback, remux off). **Anything** stays ours so rare titles can still take CAM. Seerr still shows those three names. No Recyclarr UI and no new Home Assistant options. If Recyclarr is missing, Pompey’s fallback profiles stay. Rebuild so the banner says **0.2.38**.
+
 ## 0.2.37
 
 - Housekeeping will not delete anything that is not a leftover under `downloads/complete`, and it will not scan or import if that folder overlaps a Plex library path. Re-import is skipped whenever the library already has that movie or that `SxxExx` (even if Arr forgot `hasFile`) so a Move cannot recycle-delete the Plex file. Radarr/Sonarr now send replaced files to `downloads/recycle` and do not auto-empty it. qBittorrent still forgets torrents with `deleteFiles=false`. Rebuild so the banner says **0.2.37**.

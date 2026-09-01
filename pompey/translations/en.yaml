@@ -35,21 +35,3 @@ configuration:
       (the default) removes the torrent once the file is in your library.
       Share to 1.0 ratio or for one day if you want to give a little back.
       The library file is kept either way.
-  preferred_language:
-    name: Preferred language
-    description: >-
-      Prefer English-dubbed releases, or leave original audio as-is. This
-      scores the release name (English Dub, Dual Audio). It is not a
-      per-request language picker in search — Seerr does not have one.
-  anime_audio:
-    name: Anime audio
-    description: >-
-      Dual audio (Japanese plus English on the same file) is the default.
-      Original prefers the native track. English prefers a dub. Same
-      scoring as above: the file name, not a track picker inside the file.
-  subtitles:
-    name: Subtitles
-    description: >-
-      Prefer releases that advertise English subtitles. This does not
-      download missing subtitles after the file lands (that would be
-      Bazarr, later). Choose none if you do not want that bias.

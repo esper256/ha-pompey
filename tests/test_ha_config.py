@@ -320,32 +320,17 @@ class SupervisorConfigSchema(unittest.TestCase):
                 "tv_folder",
                 "tv_kid_folder",
                 "after_download",
-                "preferred_language",
-                "anime_audio",
-                "subtitles",
             },
         )
         self.assertEqual(set(self.raw["schema"]), set(self.raw["options"]))
         self.assertEqual(self.raw["options"]["after_download"], "stop_sharing")
-        self.assertEqual(self.raw["options"]["preferred_language"], "english")
-        self.assertEqual(self.raw["options"]["anime_audio"], "dual_audio")
-        self.assertEqual(self.raw["options"]["subtitles"], "english")
         self.assertEqual(
             self.raw["schema"]["after_download"],
             "list(stop_sharing|share_to_ratio|share_one_day)",
         )
-        self.assertEqual(
-            self.raw["schema"]["preferred_language"],
-            "list(english|original)",
-        )
-        self.assertEqual(
-            self.raw["schema"]["anime_audio"],
-            "list(dual_audio|original|english)",
-        )
-        self.assertEqual(
-            self.raw["schema"]["subtitles"],
-            "list(english|none)",
-        )
+        self.assertNotIn("preferred_language", self.raw["options"])
+        self.assertNotIn("anime_audio", self.raw["options"])
+        self.assertNotIn("subtitles", self.raw["options"])
         for leaked in (
             "wireguard_config",
             "wireguard_private_key",

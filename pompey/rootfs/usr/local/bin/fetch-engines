@@ -43,9 +43,10 @@ prowlarr_url="${POMPEY_PROWLARR_URL:-https://prowlarr.servarr.com/v1/update/mast
 sonarr_url="${POMPEY_SONARR_URL:-https://services.sonarr.tv/v1/download/main/latest?version=4&os=${servarr_os}&arch=${servarr_arch}}"
 radarr_url="${POMPEY_RADARR_URL:-https://radarr.servarr.com/v1/update/master/updatefile?os=${servarr_os}&runtime=netcore&arch=${servarr_arch}}"
 qbit_url="${POMPEY_QBIT_URL:-https://github.com/userdocs/qbittorrent-nox-static/releases/latest/download/${qbit_arch}-qbittorrent-nox}"
+recyclarr_url="${POMPEY_RECYCLARR_URL:-https://github.com/recyclarr/recyclarr/releases/latest/download/recyclarr-linux-musl-${servarr_arch}.tar.xz}"
 
 if [[ "${1:-}" == "--print-urls" ]]; then
-  printf '%s\n' "${prowlarr_url}" "${sonarr_url}" "${radarr_url}" "${qbit_url}"
+  printf '%s\n' "${prowlarr_url}" "${sonarr_url}" "${radarr_url}" "${qbit_url}" "${recyclarr_url}"
   exit 0
 fi
 
@@ -192,6 +193,62 @@ fetch_tarball() {
   bashio::log.info "${name} ready (ELF) under ${dest}"
 }
 
+fetch_recyclarr() {
+  if [[ "${POMPEY_SKIP_RECYCLARR:-}" == "1" ]]; then
+    bashio::log.info "Skipping Recyclarr (POMPEY_SKIP_RECYCLARR=1)"
+    return 0
+  fi
+  local dest="${POMPEY_ENGINES}/recyclarr"
+  if [[ -x "${dest}" ]]; then
+    bashio::log.info "Recyclarr already present"
+    return 0
+  fi
+  bashio::log.info "Downloading Recyclarr (linux-musl/${servarr_arch})"
+  pompey-status fetch "Downloading Recyclarr" 50 || true
+  local staging unpack archive headers effective filename magic
+  staging="${POMPEY_ENGINES}/.partial-recyclarr"
+  rm -rf "${staging}"
+  unpack="${staging}/unpack"
+  mkdir -p "${unpack}"
+  archive="${staging}/recyclarr.tar.xz"
+  headers="${staging}/headers.txt"
+  effective="$(
+    curl -fsSL --retry 3 --retry-delay 2 \
+      -D "${headers}" -o "${archive}" -w '%{url_effective}' \
+      "${recyclarr_url}"
+  )"
+  filename="$(header_filename "${headers}")"
+  bashio::log.info "Recyclarr artifact ${filename:-unknown} (${effective})"
+  magic="$(file_magic "${archive}")"
+  # xz signature fd 37 7a 58
+  if [[ "${magic}" != fd377a* ]]; then
+    rm -rf "${staging}"
+    bashio::exit.nok "Recyclarr is not xz (magic ${magic}; ${filename:-${effective}})"
+  fi
+  tar --no-same-owner --no-same-permissions -xJf "${archive}" -C "${unpack}"
+  local bin=""
+  if [[ -f "${unpack}/recyclarr" ]]; then
+    bin="${unpack}/recyclarr"
+  else
+    local candidate
+    while IFS= read -r candidate; do
+      if [[ -f "${candidate}" && "$(basename "${candidate}")" == "recyclarr" ]]; then
+        bin="${candidate}"
+        break
+      fi
+    done < <(find "${unpack}" -type f -name recyclarr)
+  fi
+  if [[ -z "${bin}" ]]; then
+    rm -rf "${staging}"
+    bashio::exit.nok "Failed to unpack Recyclarr (no recyclarr binary)"
+  fi
+  assert_elf_launcher "${bin}"
+  chmod 755 "${bin}"
+  mv "${bin}" "${dest}"
+  rm -rf "${staging}"
+  bashio::log.info "Recyclarr ready (ELF) under ${dest}"
+}
+
 fetch_qbit() {
   if [[ "${POMPEY_SKIP_QBIT:-}" == "1" ]]; then
     bashio::log.info "Skipping qBittorrent-nox (POMPEY_SKIP_QBIT=1)"
@@ -262,6 +319,7 @@ if [[ "${POMPEY_SKIP_RADARR:-}" != "1" ]]; then
   fetch_tarball "Radarr" "${radarr_url}"
 fi
 fetch_qbit
+fetch_recyclarr
 fetch_seerr
 
 bashio::log.info "Engines ready under ${POMPEY_ENGINES}"

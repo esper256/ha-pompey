@@ -27,6 +27,7 @@ export POMPEY_SKIP_QBIT=1
 export POMPEY_SKIP_SEERR=1
 export POMPEY_SKIP_SONARR=1
 export POMPEY_SKIP_RADARR=1
+export POMPEY_SKIP_RECYCLARR=1
 export POMPEY_SERVARR_OS=linuxmusl
 
 mkdir -p "${WORK}/bin" "${POMPEY_ENGINES}" "${POMPEY_CONFIG}" "${POMPEY_READY}" \
@@ -55,6 +56,7 @@ grep -q 'assert_elf_launcher' "${BIN}/fetch-engines"
 grep -q 'POMPEY_SKIP_PROWLARR' "${BIN}/fetch-engines"
 grep -q 'POMPEY_SKIP_SONARR' "${BIN}/fetch-engines"
 grep -q 'POMPEY_SKIP_RADARR' "${BIN}/fetch-engines"
+grep -q 'POMPEY_SKIP_RECYCLARR' "${BIN}/fetch-engines"
 # Staging is under POMPEY_ENGINES (/data/engines), not mktemp in /tmp.
 if grep -nE 'tmp="\$\(mktemp -d\)"' "${BIN}/fetch-engines"; then
   echo "fetch-engines still extracts via mktemp (HAOS /tmp denies chmod)" >&2
