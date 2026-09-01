@@ -173,7 +173,7 @@ def redact(text: str, secrets: dict) -> str:
 def main() -> int:
     binary = recyclarr_bin()
     if not os.path.isfile(binary) or not os.access(binary, os.X_OK):
-        log("Recyclarr binary not on disk; Default/Max stay the Pompey fallback")
+        log("Recyclarr binary not on disk; Default/Max stay name stubs until Recyclarr can sync")
         return 2
     secrets = load_secrets()
     radarr_key = str(secrets.get("radarr_api_key") or "")

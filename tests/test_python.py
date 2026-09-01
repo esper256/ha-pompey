@@ -1646,30 +1646,6 @@ PersistentKeepalive = 25
                 child.unlink()
             empty.rmdir()
 
-    def test_rebuild_hd_items_disallows_remux_and_4k(self):
-        catalog = ws.quality_catalog(any_quality_bundle()["profile"])
-        items = ws.rebuild_hd_items(catalog)
-        allowed, blocked = allowed_quality_names({"items": items})
-        self.assertIn("Bluray-1080p", allowed)
-        self.assertIn("WEBDL-1080p", allowed)
-        self.assertIn("WEBRip-1080p", allowed)
-        self.assertIn("Remux-1080p", blocked)
-        self.assertIn("Remux-2160p", blocked)
-        self.assertIn("WEBDL-2160p", blocked)
-        self.assertIn("CAM", blocked)
-
-    def test_max_items_allow_4k_encode_not_remux(self):
-        catalog = ws.quality_catalog(any_quality_bundle()["profile"])
-        items = ws.rebuild_profile_items(catalog, ws.MAX_GROUPS)
-        allowed, blocked = allowed_quality_names({"items": items})
-        self.assertIn("Bluray-2160p", allowed)
-        self.assertIn("WEBDL-2160p", allowed)
-        self.assertIn("Bluray-1080p", allowed)
-        self.assertIn("Remux-1080p", blocked)
-        self.assertIn("Remux-2160p", blocked)
-        self.assertIn("CAM", blocked)
-        self.assertIn("BR-DISK", blocked)
-
     def test_anything_items_allow_cam(self):
         catalog = ws.quality_catalog(any_quality_bundle()["profile"])
         items = ws.rebuild_profile_items(catalog, (), allow_unlisted=True)
@@ -1681,7 +1657,11 @@ PersistentKeepalive = 25
 
     def test_rebuild_assigns_nonzero_group_ids(self):
         catalog = ws.quality_catalog(any_quality_bundle()["profile"])
-        items = ws.rebuild_profile_items(catalog, ws.DEFAULT_GROUPS)
+        groups_spec = (
+            ("WEB 1080p", ("WEBDL-1080p", "WEBRip-1080p")),
+            ("Bluray-1080p", ("Bluray-1080p",)),
+        )
+        items = ws.rebuild_profile_items(catalog, groups_spec)
         groups = [item for item in items if item.get("quality") is None]
         self.assertTrue(groups)
         ids = [int(item["id"]) for item in groups]
@@ -2155,33 +2135,12 @@ class WireStack(unittest.TestCase):
         default = profile_named(self.state.radarr_profiles, "Default")
         maximum = profile_named(self.state.radarr_profiles, "Max")
         anything = profile_named(self.state.radarr_profiles, "Anything")
-        allowed, blocked = allowed_quality_names(default)
-        self.assertIn("Bluray-1080p", allowed)
-        self.assertIn("WEBDL-1080p", allowed)
-        self.assertIn("Remux-1080p", blocked)
-        self.assertIn("Remux-2160p", blocked)
-        self.assertIn("CAM", blocked)
-        max_allowed, max_blocked = allowed_quality_names(maximum)
-        self.assertIn("Bluray-2160p", max_allowed)
-        self.assertIn("WEBDL-2160p", max_allowed)
-        self.assertIn("Bluray-1080p", max_allowed)
-        self.assertIn("Remux-2160p", max_blocked)
-        self.assertIn("CAM", max_blocked)
+        # Stubs clone stock Arr items until Recyclarr writes TRaSH groups. CAM
+        # on Default/Max is acceptable in that degraded window.
+        _allowed, _blocked = allowed_quality_names(default)
         any_allowed, _any_blocked = allowed_quality_names(anything)
         self.assertIn("CAM", any_allowed)
         self.assertFalse(anything.get("upgradeAllowed"))
-        bluray_id = next(
-            item["quality"]["id"]
-            for item in any_quality_bundle()["profile"]["items"]
-            if item["quality"]["name"] == "Bluray-1080p"
-        )
-        bluray_4k_id = next(
-            item["quality"]["id"]
-            for item in any_quality_bundle()["profile"]["items"]
-            if item["quality"]["name"] == "Bluray-2160p"
-        )
-        self.assertEqual(default["cutoff"], bluray_id)
-        self.assertEqual(maximum["cutoff"], bluray_4k_id)
         cf_names = {item["name"] for item in self.state.radarr_formats}
         self.assertIn("Pompey Prefer x265", cf_names)
         self.assertIn("Pompey Prefer Remux", cf_names)
@@ -2190,32 +2149,20 @@ class WireStack(unittest.TestCase):
         self.assertNotIn("Pompey English dub", cf_names)
         self.assertNotIn("Pompey English subs", cf_names)
         scores = {item["name"]: item["score"] for item in default.get("formatItems") or []}
-        self.assertEqual(scores["Pompey Reject Remux/DISK"], -10000)
-        self.assertEqual(scores["Pompey Prefer x265"], 80)
-        self.assertEqual(scores["Pompey Dual Audio"], 50)
+        self.assertEqual(scores.get("Pompey Prefer x265", 0), 0)
         self.assertEqual(scores[ws.NOT_ORIGINAL_LANGUAGE], -10000)
         self.assertEqual(default.get("language"), {"id": -1, "name": "Any"})
         max_scores = {item["name"]: item["score"] for item in maximum.get("formatItems") or []}
         self.assertEqual(max_scores.get("Pompey Prefer Remux", 0), 0)
         self.assertEqual(max_scores[ws.NOT_ORIGINAL_LANGUAGE], -10000)
+        any_scores = {item["name"]: item["score"] for item in anything.get("formatItems") or []}
+        self.assertEqual(any_scores.get("Pompey Prefer Proper"), 10)
+        self.assertEqual(any_scores.get(ws.NOT_ORIGINAL_LANGUAGE, 0), 0)
         cf_item_names = {item["name"] for item in default.get("formatItems") or []}
         self.assertEqual(cf_item_names, cf_names)
         self.assertGreaterEqual(default.get("minUpgradeFormatScore") or 0, 1)
-        web_group = next(
-            item
-            for item in default["items"]
-            if item.get("name") == "WEB 1080p" or (
-                isinstance(item.get("quality"), dict) and item["quality"].get("name") == "WEB 1080p"
-            )
-        )
-        if web_group.get("quality") is None:
-            self.assertGreater(int(web_group["id"]), 0)
         web = next(item for item in self.state.radarr_defs if item["quality"]["name"] == "WEBDL-1080p")
-        self.assertEqual(web["minSize"], 12.5)
-        self.assertEqual(web["preferredSize"], 33.0)
-        self.assertEqual(web["maxSize"], 53.0)
-        remux = next(item for item in self.state.radarr_defs if item["quality"]["name"] == "Remux-1080p")
-        self.assertEqual(remux["maxSize"], 320.0)
+        self.assertEqual(web["minSize"], 0)
         self.assertEqual(self.state.seerr_radarr[0]["activeProfileName"], "Default")
         self.assertEqual(self.state.seerr_sonarr[0]["activeProfileName"], "Default")
         sonarr_names = {item.get("name") for item in self.state.sonarr_profiles}
@@ -2274,9 +2221,12 @@ class WireStack(unittest.TestCase):
         self.assertTrue(spec["negate"])
         self.assertEqual(spec["fields"][0]["value"], -2)
         default = ws.household_format_scores("Default")
+        maximum = ws.household_format_scores("Max")
         anything = ws.household_format_scores("Anything")
-        self.assertEqual(default[ws.NOT_ORIGINAL_LANGUAGE], -10000)
+        self.assertEqual(default, {ws.NOT_ORIGINAL_LANGUAGE: -10000})
+        self.assertEqual(maximum, {ws.NOT_ORIGINAL_LANGUAGE: -10000})
         self.assertEqual(anything.get(ws.NOT_ORIGINAL_LANGUAGE, 0), 0)
+        self.assertEqual(anything.get("Pompey Prefer Proper"), 10)
 
     def test_recyclarr_yaml_names_default_max_and_keeps_1080p_fallback(self):
         body = recyclarr.render_config(
@@ -2303,6 +2253,15 @@ class WireStack(unittest.TestCase):
         self.assertNotIn("radarr-secret-key", redacted)
         self.assertIn("***", redacted)
 
+    def _radarr_default_puts(self, default_id: int) -> list:
+        return [
+            call
+            for call in self.state.calls
+            if call[0] == "radarr"
+            and call[1] == "PUT"
+            and str(call[2]) == f"/api/v3/qualityprofile/{default_id}"
+        ]
+
     def test_recyclarr_success_skips_later_default_max_puts(self):
         os.environ["INDEXER_URL"] = ""
         os.environ["INDEXER_API_KEY"] = ""
@@ -2318,24 +2277,30 @@ class WireStack(unittest.TestCase):
         self.assertTrue(yaml_path.is_file())
         self.assertEqual(oct(yaml_path.stat().st_mode & 0o777), "0o600")
         default_id = profile_named(self.state.radarr_profiles, "Default")["id"]
-        puts = [
-            call
-            for call in self.state.calls
-            if call[0] == "radarr"
-            and call[1] == "PUT"
-            and str(call[2]) == f"/api/v3/qualityprofile/{default_id}"
-        ]
-        before = len(puts)
+        self.assertEqual(self._radarr_default_puts(default_id), [])
+        marker = self.ready / "recyclarr"
+        os.utime(marker, (1, 1))
         rc = ws.main()
         self.assertEqual(rc, 0)
-        puts_after = [
-            call
-            for call in self.state.calls
-            if call[0] == "radarr"
-            and call[1] == "PUT"
-            and str(call[2]) == f"/api/v3/qualityprofile/{default_id}"
-        ]
-        self.assertEqual(len(puts_after), before)
+        self.assertEqual(self._radarr_default_puts(default_id), [])
+
+    def test_existing_default_items_are_not_rewritten(self):
+        os.environ["INDEXER_URL"] = ""
+        os.environ["INDEXER_API_KEY"] = ""
+        default = json.loads(json.dumps(any_quality_bundle(1, "Default")["profile"]))
+        for item in default["items"]:
+            q = item.get("quality") if isinstance(item.get("quality"), dict) else {}
+            if q.get("name") == "CAM":
+                item["allowed"] = False
+        self.state.radarr_profiles = [default]
+        rc = ws.main()
+        self.assertEqual(rc, 0)
+        after = profile_named(self.state.radarr_profiles, "Default")
+        _allowed, blocked = allowed_quality_names(after)
+        self.assertIn("CAM", blocked)
+        self.assertEqual(self._radarr_default_puts(default["id"]), [])
+        names = {item.get("name") for item in self.state.radarr_profiles}
+        self.assertEqual(names, {"Max", "Default", "Anything"})
 
     def test_share_to_ratio_leaves_torrent_until_ratio(self):
         os.environ["INDEXER_URL"] = ""

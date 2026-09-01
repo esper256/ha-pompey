@@ -36,7 +36,7 @@ The fake WebUI in `tests/lib/fake_source.py` is the realistic seam: receive the 
 | `GET /manualimport?folder=&filterExistingFiles=` | `import_matched_drop` | List shape change (no `movie` nested object, no `rejections`, no `hasFile`) either re-imports (deletes the library copy) or never matches. |
 | `enableCompletedDownloadHandling` and `skipFreeSpaceCheckWhenImporting` on media management | `ensure_media_management` | NAS that reports 0 bytes free skips import again. |
 | `removeCompletedDownloads` tied to `after_download` | download client PUT | `true` plus a forget race deletes `complete/` before Arr copies. |
-| Quality **names** `WEBDL-1080p`, `Bluray-2160p`, `Remux-2160p` (not `WEB-DL` / `Remux`) | `DEFAULT_GROUPS` / `MAX_GROUPS` | Profiles silently omit the intended qualities. Sonarr vs Radarr already disagree on Remux vs Remux-2160p. |
+| Quality **names** in Recyclarr YAML (`Bluray-2160p`, `WEB 2160p`, remux off) | `recyclarr-sync` `render_config` | Guide rename: Recyclarr exits non-zero or Max loses 1080p fallback. Pompey no longer encodes `WEBDL-*` names for Default/Max. |
 | Language CF: `LanguageSpecification` with value `-2` (Original), negate | `not_original_language_format` | Original-audio scoring stops; dubs win on Default/Max. Recyclarr’s TRaSH Original is the preferred owner — this CF is the fallback when Recyclarr is missing. |
 | Custom format `fields: [{name, value}]` | `ensure_custom_formats` | Arr has flipped between `{name,value}` and a dict more than once. |
 | Root-folder POST `{path}` | `ensure_root_folder` | Kid vs Not Kid folders fail to register; Seerr routes into the wrong library. |
@@ -64,9 +64,9 @@ The fake WebUI in `tests/lib/fake_source.py` is the realistic seam: receive the 
 
 | Assumption | Where | If it moves |
 | --- | --- | --- |
-| Binary CLI: `RECYCLARR_CONFIG_DIR` + `RECYCLARR_DATA_DIR` + `recyclarr sync -c` (v8 dropped `--app-data`) | `recyclarr-sync` | Already broke once. Next CLI rename leaves Default/Max on the Pompey fallback. |
+| Binary CLI: `RECYCLARR_CONFIG_DIR` + `RECYCLARR_DATA_DIR` + `recyclarr sync -c` (v8 dropped `--app-data`) | `recyclarr-sync` | Already broke once. Next CLI rename leaves Default/Max as name stubs (stock Arr clone) until Recyclarr can sync. |
 | Quality-profile **trash_ids** (`d1d67249…` HD, `64fb5f98…` UHD, Sonarr WEB-1080p / WEB-2160p) | `recyclarr-sync` | Guide rename/split: Recyclarr exits non-zero; we log and keep stale profiles. |
-| Recyclarr YAML `name: Default` / `Max` with `reset_unmatched_scores` | generated `recyclarr.yml` | Reset wipes Pompey CFs (Not Original, reject CAM) if we ever let Recyclarr own those names without re-applying scores. |
+| Recyclarr YAML `name: Default` / `Max` with `reset_unmatched_scores` | generated `recyclarr.yml` | Reset is correct for Default/Max (TRaSH owns scores). A YAML that named Anything would wipe CAM-allowed scores. |
 | `delete_old_custom_formats: false` | YAML | `true` would delete Anything’s formats or leftover household CFs. |
 | Anything is **not** Recyclarr-managed | `apply_household_quality_profiles` | A third TRaSH profile named similarly would fight CAM-allowed. |
 | Daily sync of TRaSH JSON while the Recyclarr **binary** stays frozen | housekeep `run_recyclarr` | Guide-side quality sizes / Original language scores can still move under a frozen binary. That is already “auto-update” for scoring, just not for the Arr apps. |
@@ -93,7 +93,7 @@ The fake WebUI in `tests/lib/fake_source.py` is the realistic seam: receive the 
 1. Keep `tests/integration.sh` green against **whatever binary fetch-engines just pulled** (a nightly job, not only the cached tarball on the agent VM).
 2. Re-apply `UpdateAutomatically=False` on every start until we intentionally flip it, or stop writing that flag and pin versions in fetch URLs instead of `latest`.
 3. Treat Recyclarr trash_ids and qbit stop/pause as **contract tests** (HTTP fixture + one real-Arr import), not comments.
-4. Do not let Recyclarr `reset_unmatched_scores` run without re-asserting Pompey CFs on Anything and the Not Original fallback.
+4. Do not let Recyclarr YAML name Anything. Re-assert Pompey CFs on Anything after Recyclarr. Default/Max scores are Recyclarr's.
 5. When Arr ships `/api/v4`, gate with a probed capability list rather than a big-bang string replace.
 
 Until then, freeze-on-first-fetch is the feature. Auto-update is a contract change, not a toggle.
