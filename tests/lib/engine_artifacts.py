@@ -206,6 +206,7 @@ class DispositionHandler(SimpleHTTPRequestHandler):
         name = Path(self.path.split("?", 1)[0]).name
         if name:
             self.send_header("Content-Disposition", f'attachment; filename="{name}"')
+            self.send_header("ETag", f'"{name}"')
         super().end_headers()
 
     def log_message(self, fmt: str, *args: object) -> None:

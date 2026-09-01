@@ -4,7 +4,7 @@ set -euo pipefail
 # shellcheck source=/dev/null
 source "$(command -v pompey-env)"
 
-bashio::log.info "Pompey ${BUILD_VERSION:-0.2.38} starting"
+bashio::log.info "Pompey ${BUILD_VERSION:-0.2.39} starting"
 pompey-status vpn "Starting" 5 || true
 
 mkdir -p "${POMPEY_CONFIG}/wireguard" "${POMPEY_WG_ETC}" "${POMPEY_VPN_TMP}" "${POMPEY_NGINX_RUN}"
@@ -38,4 +38,4 @@ else
   bashio::log.info "Proton WireGuard file is present"
 fi
 
-bashio::log.info "After the tunnel is up, Pompey fetches the household UI and hidden engines. First start can take several minutes."
+bashio::log.info "After the tunnel is up, Pompey fetches the household UI and hidden engines (and refreshes them when upstream has moved). First start can take several minutes."

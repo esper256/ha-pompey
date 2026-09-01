@@ -39,4 +39,4 @@ Do not publish download peer ports on the Home Assistant host. Leave **5055** pu
 
 Library and download paths come from the app options (media folder + four relative library folders). Downloads are `<media folder>/downloads/`.
 
-App config: `/addon_configs/<hash>_pompey/`. Engines: add-on **data** (`/data/engines` in the container). Restarting does not re-download engines that are already present.
+App config: `/addon_configs/<hash>_pompey/`. Engines: add-on **data** (`/data/engines` in the container). A restart checks upstream and skips the download when the on-disk copy is already current.
