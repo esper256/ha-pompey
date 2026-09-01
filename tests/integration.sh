@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
 # Realistic agent run: fake wg0, official TV/movie engines, TMDB lookup,
-# then Prowlarr search against a fake Torznab source until the fake
-# qBittorrent WebUI records a magnet add. Not HAOS. Not Proton.
-# Never starts a torrent client or waits on peers.
+# Prowlarr search against a fake Torznab source, then a fake qBittorrent
+# WebUI that writes incomplete/ then complete/. Asserts: incomplete never
+# reaches the library; a finished file does; downloads/ does not keep leftover
+# videos. Does not care whether Arr completed-download handling or housekeep
+# did the rename. Not HAOS. Not Proton. Never starts a torrent client or
+# talks to public BitTorrent nodes.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -12,6 +15,8 @@ export POMPEY_FAKE_VPN=1
 export POMPEY_SKIP_SEERR="${POMPEY_SKIP_SEERR:-1}"
 export POMPEY_SKIP_QBIT=1
 export POMPEY_SKIP_RECYCLARR="${POMPEY_SKIP_RECYCLARR:-1}"
+# Sparse fake video; large enough that Arr sample detection usually ignores it.
+export POMPEY_FAKE_VIDEO_BYTES="${POMPEY_FAKE_VIDEO_BYTES:-134217728}"
 
 MOVIE="${POMPEY_TEST_MOVIE:-The Wild Robot}"
 TMDB="${POMPEY_TEST_TMDB:-1184918}"
@@ -158,9 +163,16 @@ ns "${POMPEY_ENGINES}/Radarr/Radarr" -nobrowser -data="${POMPEY_CONFIG}/radarr" 
   >"${WORK}/radarr.log" 2>&1 &
 PIDS+=("$!")
 
-# wire-stack waits on the download-engine WebUI. Answer HTTP only — do not run it.
-log "HTTP stubs (Torznab source + download-engine WebUI + Seerr); no torrent client"
-ns python3 "${ROOT}/tests/lib/fake_source.py" serve --work "${WORK}" \
+# HTTP stubs (Torznab source + download-engine WebUI + Seerr). --hold keeps the
+# fake download in incomplete/ so we can prove it never reaches the library.
+log "HTTP stubs (Torznab + fake qBittorrent WebUI + Seerr); no torrent client"
+ns env \
+  POMPEY_FAKE_VIDEO_BYTES="${POMPEY_FAKE_VIDEO_BYTES}" \
+  MEDIA_ROOT="${MEDIA_ROOT}" \
+  python3 "${ROOT}/tests/lib/fake_source.py" serve \
+  --work "${WORK}" \
+  --media-root "${MEDIA_ROOT}" \
+  --hold \
   >"${WORK}/http-stub.log" 2>&1 &
 PIDS+=("$!")
 
@@ -184,26 +196,40 @@ export PROWLARR_URL=http://127.0.0.1:9696
 export SEERR_URL=http://127.0.0.1:5055
 export POMPEY_WAIT_TRIES=30
 export POMPEY_WAIT_SLEEP=2
+export MEDIA_MOVIES="Movies/Not Kid Friendly"
+export MEDIA_MOVIES_KID="Movies/Kid Friendly"
+export MEDIA_TV="TV/Not Kid Friendly"
+export MEDIA_TV_KID="TV/Kid Friendly"
+export AFTER_DOWNLOAD="stop_sharing"
+
+stack_python() {
+  ns env \
+    POMPEY_SECRETS="${POMPEY_SECRETS}" \
+    POMPEY_READY="${POMPEY_READY}" \
+    MEDIA_ROOT="${MEDIA_ROOT}" \
+    MEDIA_MOVIES="${MEDIA_MOVIES}" \
+    MEDIA_MOVIES_KID="${MEDIA_MOVIES_KID}" \
+    MEDIA_TV="${MEDIA_TV}" \
+    MEDIA_TV_KID="${MEDIA_TV_KID}" \
+    AFTER_DOWNLOAD="${AFTER_DOWNLOAD}" \
+    PLEX_URL="${PLEX_URL}" \
+    PLEX_TOKEN="${PLEX_TOKEN}" \
+    INDEXER_URL="${INDEXER_URL}" \
+    INDEXER_API_KEY="${INDEXER_API_KEY}" \
+    QBIT_URL="${QBIT_URL}" \
+    SONARR_URL="${SONARR_URL}" \
+    RADARR_URL="${RADARR_URL}" \
+    PROWLARR_URL="${PROWLARR_URL}" \
+    SEERR_URL="${SEERR_URL}" \
+    NGINX_INGRESS_CONF="${NGINX_INGRESS_CONF}" \
+    INGRESS_PORT="${INGRESS_PORT}" \
+    POMPEY_WAIT_TRIES="${POMPEY_WAIT_TRIES}" \
+    POMPEY_WAIT_SLEEP="${POMPEY_WAIT_SLEEP}" \
+    python3 "$@"
+}
 
 log "wire localhost engines"
-ns env \
-  POMPEY_SECRETS="${POMPEY_SECRETS}" \
-  POMPEY_READY="${POMPEY_READY}" \
-  MEDIA_ROOT="${MEDIA_ROOT}" \
-  PLEX_URL="${PLEX_URL}" \
-  PLEX_TOKEN="${PLEX_TOKEN}" \
-  INDEXER_URL="${INDEXER_URL}" \
-  INDEXER_API_KEY="${INDEXER_API_KEY}" \
-  QBIT_URL="${QBIT_URL}" \
-  SONARR_URL="${SONARR_URL}" \
-  RADARR_URL="${RADARR_URL}" \
-  PROWLARR_URL="${PROWLARR_URL}" \
-  SEERR_URL="${SEERR_URL}" \
-  NGINX_INGRESS_CONF="${NGINX_INGRESS_CONF}" \
-  INGRESS_PORT="${INGRESS_PORT}" \
-  POMPEY_WAIT_TRIES="${POMPEY_WAIT_TRIES}" \
-  POMPEY_WAIT_SLEEP="${POMPEY_WAIT_SLEEP}" \
-  python3 "${BIN}/wire-stack"
+stack_python "${BIN}/wire-stack"
 test -f "${POMPEY_READY}/arr-wired"
 test -f "${POMPEY_READY}/wired"
 test "$(jq -r .search "${POMPEY_READY}/status.json")" = true
@@ -280,8 +306,9 @@ title="$(echo "${movie}" | jq -r .title)"
 year="$(echo "${movie}" | jq -r .year)"
 log "matched ${title} (${year}) tmdb=$(echo "${movie}" | jq -r .tmdbId)"
 
-profile="$(arr "${RADARR}" "${RADARR_KEY}" GET "/api/v3/qualityprofile" | jq '.[0].id')"
-root="${MEDIA_ROOT}/Movies"
+profile="$(arr "${RADARR}" "${RADARR_KEY}" GET "/api/v3/qualityprofile" \
+  | jq '[.[] | select(.name=="Default")][0].id // .[0].id')"
+root="${MEDIA_ROOT}/Movies/Not Kid Friendly"
 add="$(python3 - "${movie}" "${profile}" "${root}" <<'PY'
 import json, sys
 src = json.loads(sys.argv[1])
@@ -360,10 +387,139 @@ cat "${WORK}/grab.log"
 grep -q 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' "${WORK}/qbit-adds.jsonl"
 log "fake qBittorrent recorded magnet add"
 
+library_root="${MEDIA_ROOT}/Movies/Not Kid Friendly"
+downloads="${MEDIA_ROOT}/downloads"
+
+video_files() {
+  local dir="$1"
+  [[ -d "${dir}" ]] || return 0
+  find "${dir}" -type f \( -iname '*.mkv' -o -iname '*.mp4' -o -iname '*.avi' -o -iname '*.m4v' \) 2>/dev/null || true
+}
+
+nonhidden_files() {
+  local dir="$1"
+  [[ -d "${dir}" ]] || return 0
+  find "${dir}" -type f ! -name '.*' 2>/dev/null || true
+}
+
+dump_import_debug() {
+  echo "---- housekeep.log ----" >&2
+  cat "${WORK}/housekeep.log" >&2 || true
+  echo "---- downloads/ ----" >&2
+  find "${downloads}" -print >&2 || true
+  echo "---- library ----" >&2
+  find "${library_root}" -print >&2 || true
+  echo "---- radarr.log (tail) ----" >&2
+  tail -n 120 "${WORK}/radarr.log" >&2 || true
+}
+
+run_housekeep() {
+  if ! stack_python "${BIN}/wire-stack" housekeep >>"${WORK}/housekeep.log" 2>&1; then
+    echo "wire-stack housekeep failed" >&2
+    tail -n 80 "${WORK}/housekeep.log" >&2 || true
+    echo "---- radarr.log (tail) ----" >&2
+    tail -n 80 "${WORK}/radarr.log" >&2 || true
+    exit 1
+  fi
+}
+
+incomplete_video=""
+for _ in $(seq 1 15); do
+  incomplete_video="$(video_files "${downloads}/incomplete" | head -n1 || true)"
+  if [[ -n "${incomplete_video}" ]]; then
+    break
+  fi
+  sleep 1
+done
+if [[ -z "${incomplete_video}" ]]; then
+  echo "fake qBittorrent never wrote a video under downloads/incomplete" >&2
+  find "${downloads}" -print >&2 || true
+  cat "${WORK}/http-stub.log" >&2 || true
+  exit 1
+fi
+log "held in incomplete/: ${incomplete_video#"${MEDIA_ROOT}/"}"
+
+# Housekeep (and Arr CDH) run while the file is still downloading.
+run_housekeep
+run_housekeep
+if [[ -n "$(video_files "${library_root}")" ]]; then
+  echo "incomplete download leaked into the library" >&2
+  dump_import_debug
+  exit 1
+fi
+if [[ -n "$(video_files "${downloads}/complete")" ]]; then
+  echo "incomplete download showed up in complete/ before finish" >&2
+  dump_import_debug
+  exit 1
+fi
+if [[ ! -f "${incomplete_video}" ]]; then
+  echo "incomplete video disappeared before finish: ${incomplete_video}" >&2
+  dump_import_debug
+  exit 1
+fi
+log "incomplete file stayed out of the library"
+
+log "mark download finished"
+if ! ns curl -fsS -X POST --max-time 10 "http://127.0.0.1:8080/pompey/finish" >/dev/null; then
+  echo "fake qBittorrent /pompey/finish failed" >&2
+  cat "${WORK}/http-stub.log" >&2 || true
+  exit 1
+fi
+
+settled=""
+library_video=""
+for _ in $(seq 1 30); do
+  run_housekeep
+  library_video="$(video_files "${library_root}" | head -n1 || true)"
+  leftover_videos="$(video_files "${downloads}")"
+  leftover_complete="$(nonhidden_files "${downloads}/complete")"
+  leftover_incomplete="$(nonhidden_files "${downloads}/incomplete")"
+  if [[ -n "${library_video}" \
+     && -z "${leftover_videos}" \
+     && -z "${leftover_complete}" \
+     && -z "${leftover_incomplete}" ]]; then
+    settled=1
+    break
+  fi
+  sleep 3
+done
+
+if [[ -z "${library_video}" ]]; then
+  echo "finished download never reached ${library_root}" >&2
+  dump_import_debug
+  movie_row="$(arr "${RADARR}" "${RADARR_KEY}" GET "/api/v3/movie" \
+    | jq --argjson t "${TMDB}" '[.[] | select(.tmdbId==$t)][0]')"
+  echo "radarr movie: ${movie_row}" >&2
+  exit 1
+fi
+if [[ -z "${settled}" ]]; then
+  echo "library has the title but downloads/ still has leftover files" >&2
+  dump_import_debug
+  exit 1
+fi
+log "library has ${library_video#"${MEDIA_ROOT}/"}; downloads/ is empty of leftovers"
+
+if [[ ! -f "${library_video}" ]]; then
+  echo "library video disappeared: ${library_video}" >&2
+  exit 1
+fi
+
+movie_row="$(arr "${RADARR}" "${RADARR_KEY}" GET "/api/v3/movie" \
+  | jq --argjson t "${TMDB}" '[.[] | select(.tmdbId==$t)][0] | {title, tmdbId, hasFile, path}')"
+echo "${movie_row}"
+movie_path="$(echo "${movie_row}" | jq -r .path)"
+case "${movie_path}" in
+  */Movies/Not\ Kid\ Friendly/*) ;;
+  *)
+    echo "movie path is not under Movies/Not Kid Friendly: ${movie_path}" >&2
+    exit 1
+    ;;
+esac
+
 if ns sh -c "ss -tuanp 2>/dev/null | grep -q '10.2.0.2'" || ns sh -c "ss -tuan 2>/dev/null | grep -q '10.2.0.2'"; then
   log "saw sockets bound to 10.2.0.2 (wg0)"
 else
   log "lookup already went through the fake wg0 netns"
 fi
 
-log "integration ok: ${title} is in Radarr; Prowlarr synced the fake source into Radarr/Sonarr; Prowlarr search grabbed the magnet into the fake qBittorrent WebUI (no torrent client)"
+log "integration ok: incomplete stayed out of the library; ${title} landed in Movies/Not Kid Friendly; downloads/ did not keep leftover files (no torrent client)"

@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib.machinery
 import importlib.util
 import json
+import os
 import tempfile
 import threading
 import time
@@ -31,9 +32,11 @@ fs = _load()
 
 class FakeSourceHTTP(unittest.TestCase):
     def setUp(self):
+        os.environ["POMPEY_FAKE_VIDEO_BYTES"] = "65536"
         self.td = tempfile.TemporaryDirectory(prefix="pompey-fake-source-")
         work = Path(self.td.name)
-        self.state = fs.FakeState(work)
+        self.media = work / "media"
+        self.state = fs.FakeState(work, media_root=self.media)
         self.torznab = fs.ThreadingHTTPServer(("127.0.0.1", 0), fs.torznab_handler(self.state))
         self.qbit = fs.ThreadingHTTPServer(("127.0.0.1", 0), fs.qbit_handler(self.state))
         threading.Thread(target=self.torznab.serve_forever, daemon=True).start()
@@ -52,6 +55,33 @@ class FakeSourceHTTP(unittest.TestCase):
     def _get(self, url: str) -> tuple[int, bytes]:
         with urllib.request.urlopen(url, timeout=5) as resp:
             return resp.status, resp.read()
+
+    def _qbit_form(self, path: str, fields: dict[str, str]) -> None:
+        conn = HTTPConnection("127.0.0.1", self.qbit.server_address[1], timeout=5)
+        conn.request(
+            "POST",
+            "/api/v2/auth/login",
+            body=urllib.parse.urlencode({"username": "pompey", "password": "x"}),
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+        )
+        login = conn.getresponse()
+        login.read()
+        self.assertEqual(login.status, 200)
+        cookie = login.getheader("Set-Cookie")
+        self.assertIn("SID=", cookie or "")
+        conn.request(
+            "POST",
+            path,
+            body=urllib.parse.urlencode(fields),
+            headers={
+                "Content-Type": "application/x-www-form-urlencoded",
+                "Cookie": (cookie or "").split(";", 1)[0],
+            },
+        )
+        resp = conn.getresponse()
+        body = resp.read()
+        self.assertEqual(resp.status, 200, body)
+        conn.close()
 
     def test_caps_is_torznab(self):
         _, body = self._get(self.tz + "/api?t=caps")
@@ -96,34 +126,19 @@ class FakeSourceHTTP(unittest.TestCase):
         self.assertNotIn(fs.TV_TITLE, text)
         self.assertNotIn("<item>", text)
 
+    def test_qbit_disables_dht_pex_lsd(self):
+        _, body = self._get(self.qb + "/api/v2/app/preferences")
+        prefs = json.loads(body.decode())
+        self.assertFalse(prefs["dht"])
+        self.assertFalse(prefs["pex"])
+        self.assertFalse(prefs["lsd"])
+        self.assertEqual(prefs["save_path"], str(self.media / "downloads" / "complete"))
+
     def test_qbit_records_magnet_add(self):
-        conn = HTTPConnection("127.0.0.1", self.qbit.server_address[1], timeout=5)
-        conn.request(
-            "POST",
-            "/api/v2/auth/login",
-            body=urllib.parse.urlencode({"username": "pompey", "password": "x"}),
-            headers={"Content-Type": "application/x-www-form-urlencoded"},
-        )
-        login = conn.getresponse()
-        login.read()
-        self.assertEqual(login.status, 200)
-        cookie = login.getheader("Set-Cookie")
-        self.assertIn("SID=", cookie or "")
-        conn.request(
-            "POST",
+        self._qbit_form(
             "/api/v2/torrents/add",
-            body=urllib.parse.urlencode(
-                {"urls": fs.MAGNET, "category": "radarr", "savepath": "/media/downloads"}
-            ),
-            headers={
-                "Content-Type": "application/x-www-form-urlencoded",
-                "Cookie": (cookie or "").split(";", 1)[0],
-            },
+            {"urls": fs.MAGNET, "category": "radarr", "savepath": ""},
         )
-        added = conn.getresponse()
-        self.assertEqual(added.status, 200)
-        added.read()
-        conn.close()
         lines = [
             json.loads(line)
             for line in self.state.adds_path.read_text().splitlines()
@@ -131,8 +146,54 @@ class FakeSourceHTTP(unittest.TestCase):
         ]
         self.assertEqual(len(lines), 1)
         self.assertEqual(lines[0]["urls"], fs.MAGNET)
-        self.assertEqual(lines[0]["category"], "radarr")
         self.assertIn(fs.INFOHASH, lines[0]["urls"])
+
+    def test_held_download_stays_in_incomplete_not_library(self):
+        delayed = fs.FakeState(
+            Path(self.td.name) / "held",
+            media_root=Path(self.td.name) / "held-media",
+            finish_immediately=False,
+        )
+        library = delayed.media_root / "Movies" / "Not Kid Friendly"
+        library.mkdir(parents=True)
+        delayed.record_add({"urls": fs.MAGNET, "category": "radarr", "savepath": ""})
+        incomplete_video = (
+            delayed.incomplete / fs.RELEASE_DIR_NAME / f"{fs.RELEASE_DIR_NAME}.mkv"
+        )
+        self.assertTrue(incomplete_video.is_file())
+        self.assertFalse(any(delayed.complete.rglob("*.mkv")))
+        self.assertFalse(any(library.rglob("*.mkv")))
+
+    def test_finish_moves_out_of_incomplete(self):
+        delayed = fs.FakeState(
+            Path(self.td.name) / "finish",
+            media_root=Path(self.td.name) / "finish-media",
+            finish_immediately=False,
+        )
+        delayed.record_add({"urls": fs.MAGNET, "category": "radarr", "savepath": ""})
+        delayed.finish_held_torrents()
+        self.assertFalse(any(p.is_file() for p in delayed.incomplete.rglob("*")))
+        self.assertTrue(any(delayed.complete.rglob("*.mkv")))
+
+    def test_pompey_finish_endpoint(self):
+        held = fs.FakeState(
+            Path(self.td.name) / "http-hold",
+            media_root=Path(self.td.name) / "http-hold-media",
+            finish_immediately=False,
+        )
+        qbit = fs.ThreadingHTTPServer(("127.0.0.1", 0), fs.qbit_handler(held))
+        threading.Thread(target=qbit.serve_forever, daemon=True).start()
+        time.sleep(0.05)
+        held.record_add({"urls": fs.MAGNET, "category": "radarr"})
+        conn = HTTPConnection("127.0.0.1", qbit.server_address[1], timeout=5)
+        conn.request("POST", "/pompey/finish")
+        resp = conn.getresponse()
+        self.assertEqual(resp.status, 200, resp.read())
+        conn.close()
+        qbit.shutdown()
+        qbit.server_close()
+        self.assertTrue(any(held.complete.rglob("*.mkv")))
+        self.assertFalse(any(p.is_file() for p in held.incomplete.rglob("*")))
 
     def test_fixture_is_not_the_old_torznab_path(self):
         self.assertFalse((ROOT / "tests/dev/torznab.py").exists())
