@@ -27,9 +27,6 @@ if declare -F bashio::config >/dev/null 2>&1; then
   : "${MEDIA_TV:=$(bashio::config 'tv_folder')}"
   : "${MEDIA_TV_KID:=$(bashio::config 'tv_kid_folder')}"
   : "${AFTER_DOWNLOAD:=$(bashio::config 'after_download')}"
-  : "${PREFERRED_LANGUAGE:=$(bashio::config 'preferred_language')}"
-  : "${ANIME_AUDIO:=$(bashio::config 'anime_audio')}"
-  : "${SUBTITLES:=$(bashio::config 'subtitles')}"
 fi
 MEDIA_ROOT="${MEDIA_ROOT:-/media/dlna}"
 MEDIA_MOVIES="${MEDIA_MOVIES:-Movies/Not Kid Friendly}"
@@ -37,9 +34,6 @@ MEDIA_MOVIES_KID="${MEDIA_MOVIES_KID:-Movies/Kid Friendly}"
 MEDIA_TV="${MEDIA_TV:-TV/Not Kid Friendly}"
 MEDIA_TV_KID="${MEDIA_TV_KID:-TV/Kid Friendly}"
 AFTER_DOWNLOAD="${AFTER_DOWNLOAD:-stop_sharing}"
-PREFERRED_LANGUAGE="${PREFERRED_LANGUAGE:-english}"
-ANIME_AUDIO="${ANIME_AUDIO:-dual_audio}"
-SUBTITLES="${SUBTITLES:-english}"
 MEDIA_ROOT="${MEDIA_ROOT%/}"
 MEDIA_MOVIES="${MEDIA_MOVIES#/}"
 MEDIA_MOVIES="${MEDIA_MOVIES%/}"
@@ -50,7 +44,6 @@ MEDIA_TV="${MEDIA_TV%/}"
 MEDIA_TV_KID="${MEDIA_TV_KID#/}"
 MEDIA_TV_KID="${MEDIA_TV_KID%/}"
 export MEDIA_ROOT MEDIA_MOVIES MEDIA_MOVIES_KID MEDIA_TV MEDIA_TV_KID AFTER_DOWNLOAD
-export PREFERRED_LANGUAGE ANIME_AUDIO SUBTITLES
 
 mkdir -p \
   "${POMPEY_DATA}" \

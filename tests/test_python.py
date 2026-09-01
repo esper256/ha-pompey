@@ -90,6 +90,7 @@ def any_quality_bundle(profile_id: int = 1, name: str = "Any") -> dict:
             "minFormatScore": 0,
             "cutoffFormatScore": 0,
             "formatItems": [],
+            "language": {"id": 1, "name": "English"},
         },
         "definitions": defs,
     }
@@ -1304,21 +1305,6 @@ PersistentKeepalive = 25
         self.assertEqual(ws.after_download(), "share_one_day")
         os.environ.pop("AFTER_DOWNLOAD", None)
 
-    def test_language_options_defaults(self):
-        for key in ("PREFERRED_LANGUAGE", "ANIME_AUDIO", "SUBTITLES"):
-            os.environ.pop(key, None)
-        self.assertEqual(ws.preferred_language(), "english")
-        self.assertEqual(ws.anime_audio(), "dual_audio")
-        self.assertEqual(ws.subtitles_pref(), "english")
-        os.environ["PREFERRED_LANGUAGE"] = "original"
-        os.environ["ANIME_AUDIO"] = "english"
-        os.environ["SUBTITLES"] = "none"
-        self.assertEqual(ws.preferred_language(), "original")
-        self.assertEqual(ws.anime_audio(), "english")
-        self.assertEqual(ws.subtitles_pref(), "none")
-        for key in ("PREFERRED_LANGUAGE", "ANIME_AUDIO", "SUBTITLES"):
-            os.environ.pop(key, None)
-
     def test_qbit_forgets_missing_files_not_active_downloads(self):
         self.assertTrue(
             ws.qbit_should_forget({"hash": "aa", "state": "missingFiles", "progress": 1})
@@ -1924,9 +1910,6 @@ class WireStack(unittest.TestCase):
                 "MEDIA_TV": "TV/Not Kid Friendly",
                 "MEDIA_TV_KID": "TV/Kid Friendly",
                 "AFTER_DOWNLOAD": "stop_sharing",
-                "PREFERRED_LANGUAGE": "english",
-                "ANIME_AUDIO": "dual_audio",
-                "SUBTITLES": "english",
                 "PLEX_URL": "http://172.30.32.1:32400",
                 "PLEX_TOKEN": "test-plex-token",
                 "INDEXER_URL": "https://example-source.test",
@@ -2192,12 +2175,15 @@ class WireStack(unittest.TestCase):
         self.assertIn("Pompey Prefer x265", cf_names)
         self.assertIn("Pompey Prefer Remux", cf_names)
         self.assertIn("Pompey Dual Audio", cf_names)
-        self.assertIn("Pompey English subs", cf_names)
+        self.assertIn(ws.NOT_ORIGINAL_LANGUAGE, cf_names)
+        self.assertNotIn("Pompey English dub", cf_names)
+        self.assertNotIn("Pompey English subs", cf_names)
         scores = {item["name"]: item["score"] for item in default.get("formatItems") or []}
         self.assertEqual(scores["Pompey Reject Remux/DISK"], -10000)
         self.assertEqual(scores["Pompey Prefer x265"], 80)
-        self.assertEqual(scores["Pompey Dual Audio"], 200)
-        self.assertEqual(scores["Pompey English subs"], 50)
+        self.assertEqual(scores["Pompey Dual Audio"], 50)
+        self.assertEqual(scores[ws.NOT_ORIGINAL_LANGUAGE], -10000)
+        self.assertEqual(default.get("language"), {"id": -1, "name": "Any"})
         max_scores = {item["name"]: item["score"] for item in maximum.get("formatItems") or []}
         self.assertEqual(max_scores["Pompey Prefer Remux"], 200)
         self.assertEqual(max_scores["Pompey Prefer lossless audio"], 150)
@@ -2272,19 +2258,15 @@ class WireStack(unittest.TestCase):
         self.assertEqual(rc, 0)
         self.assertTrue(self.state.seerr_users[0]["permissions"] & ws.SEERR_REQUEST_ADVANCED)
 
-    def test_original_anime_audio_skips_dual_audio_score(self):
-        os.environ["INDEXER_URL"] = ""
-        os.environ["INDEXER_API_KEY"] = ""
-        os.environ["ANIME_AUDIO"] = "original"
-        os.environ["PREFERRED_LANGUAGE"] = "original"
-        os.environ["SUBTITLES"] = "none"
-        rc = ws.main()
-        self.assertEqual(rc, 0)
-        default = profile_named(self.state.radarr_profiles, "Default")
-        scores = {item["name"]: item["score"] for item in default.get("formatItems") or []}
-        self.assertEqual(scores.get("Pompey Dual Audio", 0), 0)
-        self.assertEqual(scores.get("Pompey English dub", 0), 0)
-        self.assertEqual(scores.get("Pompey English subs", 0), 0)
+    def test_not_original_language_cf_uses_arr_language_id(self):
+        spec = ws.not_original_language_format()["specifications"][0]
+        self.assertEqual(spec["implementation"], "LanguageSpecification")
+        self.assertTrue(spec["negate"])
+        self.assertEqual(spec["fields"][0]["value"], -2)
+        default = ws.household_format_scores("Default")
+        anything = ws.household_format_scores("Anything")
+        self.assertEqual(default[ws.NOT_ORIGINAL_LANGUAGE], -10000)
+        self.assertEqual(anything.get(ws.NOT_ORIGINAL_LANGUAGE, 0), 0)
 
     def test_share_to_ratio_leaves_torrent_until_ratio(self):
         os.environ["INDEXER_URL"] = ""

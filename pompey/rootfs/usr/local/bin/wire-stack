@@ -60,29 +60,6 @@ def after_download() -> str:
     return "stop_sharing"
 
 
-def preferred_language() -> str:
-    raw = env("PREFERRED_LANGUAGE", "english").lower().replace("-", "_").replace(" ", "_")
-    if raw in {"original", "orig", "native"}:
-        return "original"
-    return "english"
-
-
-def anime_audio() -> str:
-    raw = env("ANIME_AUDIO", "dual_audio").lower().replace("-", "_").replace(" ", "_")
-    if raw in {"original", "orig", "japanese", "ja"}:
-        return "original"
-    if raw in {"english", "eng", "dub", "english_dub"}:
-        return "english"
-    return "dual_audio"
-
-
-def subtitles_pref() -> str:
-    raw = env("SUBTITLES", "english").lower().replace("-", "_").replace(" ", "_")
-    if raw in {"none", "off", "no", "no_subs"}:
-        return "none"
-    return "english"
-
-
 def as_list(value):
     """HTTP JSON is usually an array of objects; stubs and error bodies often are not.
 
@@ -1099,15 +1076,10 @@ CUSTOM_FORMATS = (
         "Pompey Dual Audio",
         r"\b(Dual[-_. ]Audio|DUAL[-_. ]AUDIO|DualAudio|Multi[-_. ]Audio)\b",
     ),
-    (
-        "Pompey English dub",
-        r"\b(English[-_. ]Dub|ENG(?:LISH)?[-_. ]DUB|DUBBED)\b",
-    ),
-    (
-        "Pompey English subs",
-        r"\b(English[-_. ]Subs?|ENG(?:LISH)?[-_. ]Subs?|\bSUBBED\b|\bSUBS\b)\b",
-    ),
 )
+
+# Arr language id -2 is the title's original audio (TMDB / series metadata).
+NOT_ORIGINAL_LANGUAGE = "Pompey Not Original Language"
 
 
 def quality_catalog(profile: dict) -> dict:
@@ -1231,8 +1203,36 @@ def title_custom_format(name: str, regex: str) -> dict:
     }
 
 
+def not_original_language_format() -> dict:
+    """Arr-native original-audio filter (TRaSH Language: Not Original).
+
+    Score -10000 on Default/Max so a French dub of an English title loses to
+    the original, while a French film still matches its original audio. Anything
+    does not use this reject. HA has no language picker — Seerr does not either.
+    """
+    return {
+        "name": NOT_ORIGINAL_LANGUAGE,
+        "includeCustomFormatWhenRenaming": False,
+        "specifications": [
+            {
+                "name": "Not Original Language",
+                "implementation": "LanguageSpecification",
+                "negate": True,
+                "required": False,
+                "fields": [{"name": "value", "value": -2}],
+            }
+        ],
+    }
+
+
+def household_custom_formats() -> list[dict]:
+    rows = [title_custom_format(name, regex) for name, regex in CUSTOM_FORMATS]
+    rows.append(not_original_language_format())
+    return rows
+
+
 def household_format_scores(tier: str) -> dict[str, int]:
-    """Per-profile CF scores. Household language options apply to every tier."""
+    """Per-profile CF scores. Language is Arr original-audio, not HA options."""
     scores: dict[str, int] = {}
     if tier == PROFILE_DEFAULT:
         scores = {
@@ -1241,6 +1241,8 @@ def household_format_scores(tier: str) -> dict[str, int]:
             "Pompey Prefer WEB-DL": 150,
             "Pompey Prefer x265": 80,
             "Pompey Prefer Proper": 25,
+            "Pompey Dual Audio": 50,
+            NOT_ORIGINAL_LANGUAGE: -10000,
         }
     elif tier == PROFILE_MAX:
         scores = {
@@ -1249,23 +1251,11 @@ def household_format_scores(tier: str) -> dict[str, int]:
             "Pompey Prefer lossless audio": 150,
             "Pompey Prefer WEB-DL": 80,
             "Pompey Prefer Proper": 25,
+            "Pompey Dual Audio": 50,
+            NOT_ORIGINAL_LANGUAGE: -10000,
         }
     else:
         scores = {"Pompey Prefer Proper": 10}
-
-    audio = anime_audio()
-    if audio == "dual_audio":
-        scores["Pompey Dual Audio"] = 200
-    elif audio == "english":
-        scores["Pompey English dub"] = 150
-        scores["Pompey Dual Audio"] = 50
-    # original: dual-audio is neither preferred nor rejected
-
-    if preferred_language() == "english" and audio != "original":
-        scores.setdefault("Pompey English dub", 80)
-
-    if subtitles_pref() == "english":
-        scores["Pompey English subs"] = 50
     return scores
 
 
@@ -1277,8 +1267,8 @@ def ensure_custom_formats(base: str, api_key: str) -> list[dict]:
         log(f"custom formats: {exc}", "WARNING")
         return []
     by_name = {item.get("name"): item for item in existing if item.get("name")}
-    for name, regex in CUSTOM_FORMATS:
-        payload = title_custom_format(name, regex)
+    for payload in household_custom_formats():
+        name = payload.get("name")
         have = by_name.get(name)
         try:
             if have and have.get("id") is not None:
@@ -1492,6 +1482,9 @@ def prepare_quality_payload(
     payload["minFormatScore"] = 0
     payload["cutoffFormatScore"] = 10000 if upgrade_allowed else 0
     payload["formatItems"] = format_items
+    # Language CFs (original audio) only work when the profile language is Any.
+    if "language" in payload:
+        payload["language"] = {"id": -1, "name": "Any"}
     try:
         min_up = int(payload.get("minUpgradeFormatScore") or 0)
     except (TypeError, ValueError):

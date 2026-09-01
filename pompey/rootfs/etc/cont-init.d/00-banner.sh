@@ -4,7 +4,7 @@ set -euo pipefail
 # shellcheck source=/dev/null
 source "$(command -v pompey-env)"
 
-bashio::log.info "Pompey ${BUILD_VERSION:-0.2.37} starting"
+bashio::log.info "Pompey ${BUILD_VERSION:-0.2.38} starting"
 pompey-status vpn "Starting" 5 || true
 
 mkdir -p "${POMPEY_CONFIG}/wireguard" "${POMPEY_WG_ETC}" "${POMPEY_VPN_TMP}" "${POMPEY_NGINX_RUN}"
