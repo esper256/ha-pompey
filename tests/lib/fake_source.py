@@ -3,10 +3,10 @@
 
 No BitTorrent protocol. No .torrent files. No DHT/PEX/LSD. The "release" is a
 magnet string the download-engine WebAPI would receive. On torrents/add the
-fake client writes a sparse video under incomplete/, then moves it to
-complete/ and reports a finished torrent (progress 1, content_path). That is
-enough for housekeep to unlock, ask Arr to ManualImport Move, and forget the
-row with deleteFiles=false — without a torrent client or public peers.
+fake client writes a sparse video under incomplete/. POST /pompey/finish (or
+finish_immediately) moves it to complete/ so Arr/housekeep can treat it as a
+finished download. Tests assert library outcomes, not which process moved the
+file. Tracker on the fixture magnet is udp://127.0.0.1:9.
 """
 from __future__ import annotations
 
@@ -485,6 +485,15 @@ class FakeState:
                 else:
                     path.unlink(missing_ok=True)
 
+    def finish_held_torrents(self) -> list[dict]:
+        with self.lock:
+            held = [
+                digest
+                for digest, item in self.torrents.items()
+                if float(item.get("progress") or 0) < 0.999
+            ]
+        return [self.finish_torrent(digest) for digest in held]
+
 
 
 def torznab_handler(state: FakeState):
@@ -597,6 +606,9 @@ def qbit_handler(state: FakeState):
                 }
                 state.record_add(payload)
                 return self._send(200, "Ok.")
+            if path.rstrip("/").endswith("/pompey/finish"):
+                state.finish_held_torrents()
+                return self._send(200, "Ok.")
             if path.endswith("/stop") or path.endswith("/pause"):
                 action = "pause" if path.endswith("/pause") else "stop"
                 state.stop_torrents(form.get("hashes") or form.get("hash") or "", action)
@@ -700,8 +712,9 @@ def serve(
     seerr_port: int = 5055,
     torznab_port: int = 9117,
     media_root: Path | None = None,
+    finish_immediately: bool = True,
 ) -> None:
-    state = FakeState(work, media_root=media_root)
+    state = FakeState(work, media_root=media_root, finish_immediately=finish_immediately)
     servers = [
         ThreadingHTTPServer((host, qbit_port), qbit_handler(state)),
         ThreadingHTTPServer((host, seerr_port), seerr_handler(state)),
@@ -849,6 +862,11 @@ def main(argv: list[str] | None = None) -> int:
     serve_p.add_argument("--seerr-port", type=int, default=5055)
     serve_p.add_argument("--torznab-port", type=int, default=9117)
     serve_p.add_argument("--media-root", default="")
+    serve_p.add_argument(
+        "--hold",
+        action="store_true",
+        help="Leave adds in incomplete/ until POST /pompey/finish",
+    )
     grab_p = sub.add_parser("grab")
     grab_p.add_argument("--prowlarr", required=True)
     grab_p.add_argument("--key", required=True)
@@ -869,7 +887,15 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(added, indent=2))
         return 0
     media_root = Path(args.media_root) if args.media_root else None
-    serve(Path(args.work), args.host, args.qbit_port, args.seerr_port, args.torznab_port, media_root)
+    serve(
+        Path(args.work),
+        args.host,
+        args.qbit_port,
+        args.seerr_port,
+        args.torznab_port,
+        media_root,
+        finish_immediately=not args.hold,
+    )
     return 0
 
 

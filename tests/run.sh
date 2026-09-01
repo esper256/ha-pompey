@@ -6,10 +6,10 @@ cd "${ROOT}"
 
 echo "== tests must not involve BitTorrent =="
 # Patterns live only in this file. --exclude keeps this guard from matching itself.
-# HTTP fakes (Torznab XML, qBittorrent WebUI torrents/add + incomplete→complete
-# materialize) are allowed so we can prove grab and library import without a
-# torrent client. See tests/lib/fake_source.py. Never start qBittorrent-nox and
-# never join a public swarm.
+# HTTP fakes (Torznab XML, qBittorrent WebUI torrents/add + incomplete/ files)
+# are allowed so we can prove grab and library outcomes without a torrent
+# client. See tests/lib/fake_source.py. Never start qBittorrent-nox and never
+# join a public swarm.
 if hits="$(grep -RInE --include='*.py' --include='*.sh' --include='*.json' --include='*.md' \
     --exclude='run.sh' \
     --exclude='fake_source.py' \

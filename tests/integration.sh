@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # Realistic agent run: fake wg0, official TV/movie engines, TMDB lookup,
-# Prowlarr search against a fake Torznab source, then the fake qBittorrent
-# WebUI materializes a video incomplete/ → complete/. Housekeep asks real
-# Radarr to ManualImport Move into Movies/Not Kid Friendly and forgets the
-# torrent with deleteFiles=false. Not HAOS. Not Proton. Never starts a
-# torrent client, never talks to public BitTorrent nodes.
+# Prowlarr search against a fake Torznab source, then a fake qBittorrent
+# WebUI that writes incomplete/ then complete/. Asserts: incomplete never
+# reaches the library; a finished file does; downloads/ does not keep leftover
+# videos. Does not care whether Arr completed-download handling or housekeep
+# did the rename. Not HAOS. Not Proton. Never starts a torrent client or
+# talks to public BitTorrent nodes.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -162,8 +163,8 @@ ns "${POMPEY_ENGINES}/Radarr/Radarr" -nobrowser -data="${POMPEY_CONFIG}/radarr" 
   >"${WORK}/radarr.log" 2>&1 &
 PIDS+=("$!")
 
-# HTTP stubs (Torznab source + download-engine WebUI + Seerr). The fake
-# qBittorrent writes a sparse video under MEDIA_ROOT; it does not speak BitTorrent.
+# HTTP stubs (Torznab source + download-engine WebUI + Seerr). --hold keeps the
+# fake download in incomplete/ so we can prove it never reaches the library.
 log "HTTP stubs (Torznab + fake qBittorrent WebUI + Seerr); no torrent client"
 ns env \
   POMPEY_FAKE_VIDEO_BYTES="${POMPEY_FAKE_VIDEO_BYTES}" \
@@ -171,6 +172,7 @@ ns env \
   python3 "${ROOT}/tests/lib/fake_source.py" serve \
   --work "${WORK}" \
   --media-root "${MEDIA_ROOT}" \
+  --hold \
   >"${WORK}/http-stub.log" 2>&1 &
 PIDS+=("$!")
 
@@ -385,28 +387,33 @@ cat "${WORK}/grab.log"
 grep -q 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' "${WORK}/qbit-adds.jsonl"
 log "fake qBittorrent recorded magnet add"
 
-complete_video=""
-for _ in $(seq 1 15); do
-  complete_video="$(find "${MEDIA_ROOT}/downloads/complete" -type f \( -name '*.mkv' -o -name '*.mp4' \) 2>/dev/null | head -n1 || true)"
-  if [[ -n "${complete_video}" ]]; then
-    break
-  fi
-  sleep 1
-done
-if [[ -z "${complete_video}" ]]; then
-  echo "fake qBittorrent never materialized a video under downloads/complete" >&2
-  echo "---- complete/ ----" >&2
-  find "${MEDIA_ROOT}/downloads" -print >&2 || true
-  echo "---- http-stub.log ----" >&2
-  cat "${WORK}/http-stub.log" >&2 || true
-  exit 1
-fi
-log "fake qBittorrent finished into complete/: ${complete_video#"${MEDIA_ROOT}/"}"
-
 library_root="${MEDIA_ROOT}/Movies/Not Kid Friendly"
-library_video=""
-imported=""
-for _ in $(seq 1 30); do
+downloads="${MEDIA_ROOT}/downloads"
+
+video_files() {
+  local dir="$1"
+  [[ -d "${dir}" ]] || return 0
+  find "${dir}" -type f \( -iname '*.mkv' -o -iname '*.mp4' -o -iname '*.avi' -o -iname '*.m4v' \) 2>/dev/null || true
+}
+
+nonhidden_files() {
+  local dir="$1"
+  [[ -d "${dir}" ]] || return 0
+  find "${dir}" -type f ! -name '.*' 2>/dev/null || true
+}
+
+dump_import_debug() {
+  echo "---- housekeep.log ----" >&2
+  cat "${WORK}/housekeep.log" >&2 || true
+  echo "---- downloads/ ----" >&2
+  find "${downloads}" -print >&2 || true
+  echo "---- library ----" >&2
+  find "${library_root}" -print >&2 || true
+  echo "---- radarr.log (tail) ----" >&2
+  tail -n 120 "${WORK}/radarr.log" >&2 || true
+}
+
+run_housekeep() {
   if ! stack_python "${BIN}/wire-stack" housekeep >>"${WORK}/housekeep.log" 2>&1; then
     echo "wire-stack housekeep failed" >&2
     tail -n 80 "${WORK}/housekeep.log" >&2 || true
@@ -414,45 +421,83 @@ for _ in $(seq 1 30); do
     tail -n 80 "${WORK}/radarr.log" >&2 || true
     exit 1
   fi
-  library_video="$(find "${library_root}" -type f \( -name '*.mkv' -o -name '*.mp4' \) 2>/dev/null | head -n1 || true)"
-  if [[ -n "${library_video}" ]]; then
-    imported=1
+}
+
+incomplete_video=""
+for _ in $(seq 1 15); do
+  incomplete_video="$(video_files "${downloads}/incomplete" | head -n1 || true)"
+  if [[ -n "${incomplete_video}" ]]; then
+    break
+  fi
+  sleep 1
+done
+if [[ -z "${incomplete_video}" ]]; then
+  echo "fake qBittorrent never wrote a video under downloads/incomplete" >&2
+  find "${downloads}" -print >&2 || true
+  cat "${WORK}/http-stub.log" >&2 || true
+  exit 1
+fi
+log "held in incomplete/: ${incomplete_video#"${MEDIA_ROOT}/"}"
+
+# Housekeep (and Arr CDH) run while the file is still downloading.
+run_housekeep
+run_housekeep
+if [[ -n "$(video_files "${library_root}")" ]]; then
+  echo "incomplete download leaked into the library" >&2
+  dump_import_debug
+  exit 1
+fi
+if [[ -n "$(video_files "${downloads}/complete")" ]]; then
+  echo "incomplete download showed up in complete/ before finish" >&2
+  dump_import_debug
+  exit 1
+fi
+if [[ ! -f "${incomplete_video}" ]]; then
+  echo "incomplete video disappeared before finish: ${incomplete_video}" >&2
+  dump_import_debug
+  exit 1
+fi
+log "incomplete file stayed out of the library"
+
+log "mark download finished"
+if ! ns curl -fsS -X POST --max-time 10 "http://127.0.0.1:8080/pompey/finish" >/dev/null; then
+  echo "fake qBittorrent /pompey/finish failed" >&2
+  cat "${WORK}/http-stub.log" >&2 || true
+  exit 1
+fi
+
+settled=""
+library_video=""
+for _ in $(seq 1 30); do
+  run_housekeep
+  library_video="$(video_files "${library_root}" | head -n1 || true)"
+  leftover_videos="$(video_files "${downloads}")"
+  leftover_complete="$(nonhidden_files "${downloads}/complete")"
+  leftover_incomplete="$(nonhidden_files "${downloads}/incomplete")"
+  if [[ -n "${library_video}" \
+     && -z "${leftover_videos}" \
+     && -z "${leftover_complete}" \
+     && -z "${leftover_incomplete}" ]]; then
+    settled=1
     break
   fi
   sleep 3
 done
 
-if [[ -z "${imported}" ]]; then
-  echo "housekeep never moved a video into ${library_root}" >&2
-  echo "---- housekeep.log ----" >&2
-  cat "${WORK}/housekeep.log" >&2 || true
-  echo "---- complete/ ----" >&2
-  find "${MEDIA_ROOT}/downloads/complete" -print >&2 || true
-  echo "---- library ----" >&2
-  find "${library_root}" -print >&2 || true
-  echo "---- radarr.log (tail) ----" >&2
-  tail -n 120 "${WORK}/radarr.log" >&2 || true
+if [[ -z "${library_video}" ]]; then
+  echo "finished download never reached ${library_root}" >&2
+  dump_import_debug
   movie_row="$(arr "${RADARR}" "${RADARR_KEY}" GET "/api/v3/movie" \
     | jq --argjson t "${TMDB}" '[.[] | select(.tmdbId==$t)][0]')"
   echo "radarr movie: ${movie_row}" >&2
   exit 1
 fi
-log "library has ${library_video#"${MEDIA_ROOT}/"}"
-
-# Second pass: forget the torrent (deleteFiles=false) and drop leftover extras.
-if ! stack_python "${BIN}/wire-stack" housekeep >>"${WORK}/housekeep.log" 2>&1; then
-  echo "wire-stack housekeep (forget pass) failed" >&2
-  tail -n 80 "${WORK}/housekeep.log" >&2 || true
+if [[ -z "${settled}" ]]; then
+  echo "library has the title but downloads/ still has leftover files" >&2
+  dump_import_debug
   exit 1
 fi
-
-leftover_video="$(find "${MEDIA_ROOT}/downloads/complete" -type f \( -name '*.mkv' -o -name '*.mp4' \) 2>/dev/null | head -n1 || true)"
-if [[ -n "${leftover_video}" ]]; then
-  echo "video still in complete/ after import: ${leftover_video}" >&2
-  echo "---- housekeep.log (tail) ----" >&2
-  tail -n 80 "${WORK}/housekeep.log" >&2 || true
-  exit 1
-fi
+log "library has ${library_video#"${MEDIA_ROOT}/"}; downloads/ is empty of leftovers"
 
 if [[ ! -f "${library_video}" ]]; then
   echo "library video disappeared: ${library_video}" >&2
@@ -462,10 +507,6 @@ fi
 movie_row="$(arr "${RADARR}" "${RADARR_KEY}" GET "/api/v3/movie" \
   | jq --argjson t "${TMDB}" '[.[] | select(.tmdbId==$t)][0] | {title, tmdbId, hasFile, path}')"
 echo "${movie_row}"
-if ! echo "${movie_row}" | jq -e '.hasFile == true' >/dev/null; then
-  echo "Radarr hasFile is not true after import: ${movie_row}" >&2
-  exit 1
-fi
 movie_path="$(echo "${movie_row}" | jq -r .path)"
 case "${movie_path}" in
   */Movies/Not\ Kid\ Friendly/*) ;;
@@ -475,25 +516,10 @@ case "${movie_path}" in
     ;;
 esac
 
-if [[ ! -f "${WORK}/qbit-deletes.jsonl" ]] || ! grep -q 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' "${WORK}/qbit-deletes.jsonl"; then
-  echo "housekeep did not forget the torrent from fake qBittorrent" >&2
-  echo "---- qbit-deletes.jsonl ----" >&2
-  cat "${WORK}/qbit-deletes.jsonl" >&2 || true
-  echo "---- housekeep.log (tail) ----" >&2
-  tail -n 80 "${WORK}/housekeep.log" >&2 || true
-  exit 1
-fi
-if grep -qi 'deleteFiles.: .true' "${WORK}/qbit-deletes.jsonl"; then
-  echo "housekeep deleted torrent data; it must send deleteFiles=false" >&2
-  cat "${WORK}/qbit-deletes.jsonl" >&2
-  exit 1
-fi
-grep -q 'deleteFiles": "false"' "${WORK}/qbit-deletes.jsonl"
-
 if ns sh -c "ss -tuanp 2>/dev/null | grep -q '10.2.0.2'" || ns sh -c "ss -tuan 2>/dev/null | grep -q '10.2.0.2'"; then
   log "saw sockets bound to 10.2.0.2 (wg0)"
 else
   log "lookup already went through the fake wg0 netns"
 fi
 
-log "integration ok: ${title} is in Radarr under Movies/Not Kid Friendly; fake qBittorrent materialized complete/; housekeep imported the video into the library and forgot the torrent without deleting files (no torrent client)"
+log "integration ok: incomplete stayed out of the library; ${title} landed in Movies/Not Kid Friendly; downloads/ did not keep leftover files (no torrent client)"

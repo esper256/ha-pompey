@@ -48,10 +48,10 @@ Realistic stack (still no Proton, still no HAOS). Needs passwordless sudo + `ipr
 
 ```bash
 sudo apt-get install -y iproute2 iptables libicu74
-bash tests/integration.sh      # The Wild Robot: TMDB lookup, fake Torznab, fake qbit incomplete→complete, real Radarr ManualImport into Movies/Not Kid Friendly
+bash tests/integration.sh      # The Wild Robot: incomplete stays out of the library, a finished file lands in Movies/Not Kid Friendly, downloads/ does not keep leftovers
 ```
 
-That downloads official Radarr/Sonarr/Prowlarr into `~/.cache/pompey/engines` on first run. It looks the movie up on TMDB and adds it to Radarr **without searching or downloading from the public internet**. A fake Torznab source (`tests/lib/fake_source.py`) answers Prowlarr. The fake qBittorrent WebUI records the magnet add, writes a sparse video under `downloads/incomplete`, moves it to `downloads/complete`, then `wire-stack housekeep` asks **real** Radarr to `ManualImport` Move into `Movies/Not Kid Friendly` and forgets the torrent with `deleteFiles=false`. DHT/PEX/LSD are off on the fake; the magnet tracker is `udp://127.0.0.1:9`. Do not start the torrent client, do not wait on peers, and do not add that wait to CI (`tests/run.sh` only). Integration still skips booting Seerr (`POMPEY_SKIP_SEERR=1`); CI already runs the real Seerr API in `tests/test_seerr_real.py`.
+That downloads official Radarr/Sonarr/Prowlarr into `~/.cache/pompey/engines` on first run. It looks the movie up on TMDB and adds it to Radarr **without searching or downloading from the public internet**. A fake Torznab source (`tests/lib/fake_source.py`) answers Prowlarr. The fake qBittorrent WebUI records the magnet add and holds a sparse video in `downloads/incomplete` until the test marks it finished. The script then waits until the title is in `Movies/Not Kid Friendly` and `downloads/` has no leftover files. It does **not** assert whether Arr completed-download handling or housekeep did the rename. DHT/PEX/LSD are off on the fake; the magnet tracker is `udp://127.0.0.1:9`. Do not start the torrent client, do not wait on peers, and do not add that wait to CI (`tests/run.sh` only). Integration still skips booting Seerr (`POMPEY_SKIP_SEERR=1`); CI already runs the real Seerr API in `tests/test_seerr_real.py`.
 
 Assumptions that will break if we turn on engine auto-update: [docs/arr-auto-update.md](docs/arr-auto-update.md).
 

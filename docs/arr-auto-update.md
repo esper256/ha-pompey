@@ -4,7 +4,7 @@ Pompey freezes engines on first fetch (`fetch-engines` skip-if-present) and writ
 
 That freeze is why household wiring survived months of uptime. Turning auto-update on (Arr’s own updater, a newer tarball on restart, Recyclarr `latest`, Seerr `latest`) does not require rewriting the product. It does invalidate a list of **shape assumptions** we encoded as string literals. This note is the map for that cleanup — not a promise to enable updates in this change.
 
-The import path (`complete/` → Plex library folder) is the other brittle piece. Unit tests mock Arr’s JSON. `tests/integration.sh` now runs **real** Radarr against a fake qBittorrent that materializes a file. Keep that test when the stack starts moving.
+The import path (`complete/` → Plex library folder) is the other brittle piece. Unit tests mock Arr’s JSON. `tests/integration.sh` now runs **real** Radarr against a fake qBittorrent that materializes a file. It asserts three outcomes: incomplete files never reach the library, a finished file does, and `downloads/` does not keep leftover videos. It does not pin which process renamed the file. Keep that test when the stack starts moving.
 
 ## Why not a second BitTorrent node in tests
 

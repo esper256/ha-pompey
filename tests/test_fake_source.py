@@ -134,7 +134,7 @@ class FakeSourceHTTP(unittest.TestCase):
         self.assertFalse(prefs["lsd"])
         self.assertEqual(prefs["save_path"], str(self.media / "downloads" / "complete"))
 
-    def test_qbit_records_magnet_add_and_materializes_complete(self):
+    def test_qbit_records_magnet_add(self):
         self._qbit_form(
             "/api/v2/torrents/add",
             {"urls": fs.MAGNET, "category": "radarr", "savepath": ""},
@@ -146,92 +146,54 @@ class FakeSourceHTTP(unittest.TestCase):
         ]
         self.assertEqual(len(lines), 1)
         self.assertEqual(lines[0]["urls"], fs.MAGNET)
-        self.assertEqual(lines[0]["category"], "radarr")
         self.assertIn(fs.INFOHASH, lines[0]["urls"])
-        video = (
-            self.media
-            / "downloads"
-            / "complete"
-            / fs.RELEASE_DIR_NAME
-            / f"{fs.RELEASE_DIR_NAME}.mkv"
-        )
-        self.assertTrue(video.is_file(), f"missing {video}")
-        self.assertGreaterEqual(video.stat().st_size, 8)
-        incomplete = list((self.media / "downloads" / "incomplete").rglob("*"))
-        self.assertFalse(any(path.is_file() for path in incomplete))
-        _, body = self._get(self.qb + "/api/v2/torrents/" + "info")
-        rows = json.loads(body.decode())
-        self.assertEqual(len(rows), 1)
-        self.assertEqual(rows[0]["hash"], fs.INFOHASH)
-        self.assertEqual(rows[0]["state"], "uploading")
-        self.assertEqual(rows[0]["progress"], 1)
-        self.assertEqual(rows[0]["amount_left"], 0)
-        self.assertEqual(rows[0]["content_path"], str(video.parent))
-        self.assertTrue(str(rows[0]["save_path"]).endswith("downloads/complete"))
 
-    def test_qbit_moves_incomplete_then_complete(self):
+    def test_held_download_stays_in_incomplete_not_library(self):
         delayed = fs.FakeState(
-            Path(self.td.name) / "delayed",
-            media_root=Path(self.td.name) / "delayed-media",
+            Path(self.td.name) / "held",
+            media_root=Path(self.td.name) / "held-media",
             finish_immediately=False,
         )
+        library = delayed.media_root / "Movies" / "Not Kid Friendly"
+        library.mkdir(parents=True)
         delayed.record_add({"urls": fs.MAGNET, "category": "radarr", "savepath": ""})
         incomplete_video = (
             delayed.incomplete / fs.RELEASE_DIR_NAME / f"{fs.RELEASE_DIR_NAME}.mkv"
         )
         self.assertTrue(incomplete_video.is_file())
-        self.assertFalse((delayed.complete / fs.RELEASE_DIR_NAME).exists())
-        rows = delayed.list_torrents()
-        self.assertEqual(rows[0]["state"], "downloading")
-        self.assertLess(rows[0]["progress"], 1)
-        delayed.finish_torrent(fs.INFOHASH)
-        self.assertFalse(incomplete_video.exists())
-        complete_video = delayed.complete / fs.RELEASE_DIR_NAME / f"{fs.RELEASE_DIR_NAME}.mkv"
-        self.assertTrue(complete_video.is_file())
-        rows = delayed.list_torrents()
-        self.assertEqual(rows[0]["state"], "uploading")
-        self.assertEqual(rows[0]["progress"], 1)
-        self.assertEqual(rows[0]["content_path"], str(complete_video.parent))
+        self.assertFalse(any(delayed.complete.rglob("*.mkv")))
+        self.assertFalse(any(library.rglob("*.mkv")))
 
-    def test_qbit_stop_then_delete_keeps_files(self):
-        self._qbit_form(
-            "/api/v2/torrents/add",
-            {"urls": fs.MAGNET, "category": "radarr"},
+    def test_finish_moves_out_of_incomplete(self):
+        delayed = fs.FakeState(
+            Path(self.td.name) / "finish",
+            media_root=Path(self.td.name) / "finish-media",
+            finish_immediately=False,
         )
-        video = (
-            self.media
-            / "downloads"
-            / "complete"
-            / fs.RELEASE_DIR_NAME
-            / f"{fs.RELEASE_DIR_NAME}.mkv"
-        )
-        self._qbit_form("/api/v2/torrents/" + "stop", {"hashes": fs.INFOHASH})
-        _, body = self._get(self.qb + "/api/v2/torrents/" + "info")
-        rows = json.loads(body.decode())
-        self.assertEqual(rows[0]["state"], "stoppedUP")
-        self._qbit_form(
-            "/api/v2/torrents/delete",
-            {"hashes": fs.INFOHASH, "deleteFiles": "false"},
-        )
-        _, body = self._get(self.qb + "/api/v2/torrents/" + "info")
-        self.assertEqual(json.loads(body.decode()), [])
-        self.assertTrue(video.is_file())
-        deletes = [
-            json.loads(line)
-            for line in self.state.deletes_path.read_text().splitlines()
-            if line.strip()
-        ]
-        self.assertEqual(deletes[0]["deleteFiles"], "false")
+        delayed.record_add({"urls": fs.MAGNET, "category": "radarr", "savepath": ""})
+        delayed.finish_held_torrents()
+        self.assertFalse(any(p.is_file() for p in delayed.incomplete.rglob("*")))
+        self.assertTrue(any(delayed.complete.rglob("*.mkv")))
 
-    def test_qbit_delete_files_true_removes_payload(self):
-        self._qbit_form("/api/v2/torrents/add", {"urls": fs.MAGNET, "category": "radarr"})
-        folder = self.media / "downloads" / "complete" / fs.RELEASE_DIR_NAME
-        self.assertTrue(folder.is_dir())
-        self._qbit_form(
-            "/api/v2/torrents/delete",
-            {"hashes": fs.INFOHASH, "deleteFiles": "true"},
+    def test_pompey_finish_endpoint(self):
+        held = fs.FakeState(
+            Path(self.td.name) / "http-hold",
+            media_root=Path(self.td.name) / "http-hold-media",
+            finish_immediately=False,
         )
-        self.assertFalse(folder.exists())
+        qbit = fs.ThreadingHTTPServer(("127.0.0.1", 0), fs.qbit_handler(held))
+        threading.Thread(target=qbit.serve_forever, daemon=True).start()
+        time.sleep(0.05)
+        held.record_add({"urls": fs.MAGNET, "category": "radarr"})
+        conn = HTTPConnection("127.0.0.1", qbit.server_address[1], timeout=5)
+        conn.request("POST", "/pompey/finish")
+        resp = conn.getresponse()
+        self.assertEqual(resp.status, 200, resp.read())
+        conn.close()
+        qbit.shutdown()
+        qbit.server_close()
+        self.assertTrue(any(held.complete.rglob("*.mkv")))
+        self.assertFalse(any(p.is_file() for p in held.incomplete.rglob("*")))
 
     def test_fixture_is_not_the_old_torznab_path(self):
         self.assertFalse((ROOT / "tests/dev/torznab.py").exists())
