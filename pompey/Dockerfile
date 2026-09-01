@@ -16,6 +16,7 @@ RUN apk add --no-cache \
     bind-tools \
     ca-certificates \
     curl \
+    git \
     icu-data-full \
     icu-libs \
     iptables \
@@ -35,6 +36,7 @@ RUN apk add --no-cache \
     unzip \
     wireguard-go \
     wireguard-tools \
+    xz \
     zlib
 
 # crane unpacks Seerr's published image at runtime. Not an engine.

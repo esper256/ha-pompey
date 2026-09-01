@@ -990,7 +990,7 @@ def first_profile(base: str, api_key: str):
 
 # Three Seerr-selectable profiles. Quality definition sizes are global (MB/minute,
 # not total GB), so Default and Max must not share the same quality's maxSize:
-# Default disallows remux/4K; Max uses those names with large caps.
+# Default disallows remux/4K; Max allows 4K encodes (not remux).
 PROFILE_DEFAULT = "Default"
 PROFILE_MAX = "Max"
 PROFILE_ANYTHING = "Anything"
@@ -1006,12 +1006,10 @@ DEFAULT_GROUPS = (
     ("WEB 1080p", ("WEBDL-1080p", "WEBRip-1080p")),
     ("Bluray-1080p", ("Bluray-1080p",)),
 )
+# Fallback Max when Recyclarr has not run: 4K encodes, 1080p underneath, no remux.
 MAX_GROUPS = DEFAULT_GROUPS + (
-    ("Remux-1080p", ("Remux-1080p",)),
-    ("HDTV-2160p", ("HDTV-2160p",)),
     ("WEB 2160p", ("WEBDL-2160p", "WEBRip-2160p")),
     ("Bluray-2160p", ("Bluray-2160p",)),
-    ("Remux-2160p", ("Remux-2160p",)),
 )
 # Default: 1080p encodes. 2.5–8 GB per 150 min ≈ 16.7–53.3 MB/min.
 # Under ~1 GB for 120 min is 8.3 MB/min — minSize 12.5 rejects that.
@@ -1247,9 +1245,9 @@ def household_format_scores(tier: str) -> dict[str, int]:
     elif tier == PROFILE_MAX:
         scores = {
             "Pompey Reject CAM/TS": -10000,
-            "Pompey Prefer Remux": 200,
-            "Pompey Prefer lossless audio": 150,
+            "Pompey Reject Remux/DISK": -10000,
             "Pompey Prefer WEB-DL": 80,
+            "Pompey Prefer x265": 80,
             "Pompey Prefer Proper": 25,
             "Pompey Dual Audio": 50,
             NOT_ORIGINAL_LANGUAGE: -10000,
@@ -1570,8 +1568,87 @@ def drop_extra_quality_profiles(base: str, api_key: str) -> None:
             log(f"could not remove quality profile {name}: {exc}", "WARNING")
 
 
+def recyclarr_marker() -> str:
+    return os.path.join(ready_dir(), "recyclarr")
+
+
+def recyclarr_is_fresh() -> bool:
+    """True when Recyclarr already synced recently. Skip fighting Default/Max."""
+    path = recyclarr_marker()
+    if not os.path.isfile(path):
+        return False
+    try:
+        max_age = float(env("POMPEY_RECYCLARR_MAX_AGE", "86400") or "86400")
+    except ValueError:
+        max_age = 86400.0
+    try:
+        return (time.time() - os.path.getmtime(path)) < max_age
+    except OSError:
+        return False
+
+
+def recyclarr_sync_script() -> str:
+    override = env("POMPEY_RECYCLARR_SYNC")
+    if override:
+        return override
+    here = os.path.dirname(os.path.abspath(__file__))
+    sibling = os.path.join(here, "recyclarr-sync")
+    if os.path.isfile(sibling):
+        return sibling
+    return "/usr/local/bin/recyclarr-sync"
+
+
+def recyclarr_binary() -> str:
+    override = env("POMPEY_RECYCLARR")
+    if override:
+        return override
+    return os.path.join(env("POMPEY_ENGINES", "/data/engines"), "recyclarr")
+
+
+def run_recyclarr(*, force: bool = False) -> bool:
+    """Sync TRaSH onto Default/Max. Failures leave the Pompey fallback in place."""
+    if not force and recyclarr_is_fresh():
+        return True
+    binary = recyclarr_binary()
+    if not os.path.isfile(binary) or not os.access(binary, os.X_OK):
+        log_if_new(
+            "recyclarr-missing",
+            "Recyclarr binary not on disk; Default/Max stay the fallback",
+        )
+        return False
+    script = recyclarr_sync_script()
+    if not os.path.isfile(script):
+        log("Recyclarr sync script missing; Default/Max stay the fallback", "WARNING")
+        return False
+    try:
+        proc = subprocess.run(
+            [sys.executable, script],
+            check=False,
+            timeout=int(env("POMPEY_RECYCLARR_TIMEOUT", "600") or "600"),
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        log(f"Recyclarr: {exc}", "WARNING")
+        return False
+    if proc.returncode != 0:
+        return False
+    os.makedirs(ready_dir(), exist_ok=True)
+    marker = recyclarr_marker()
+    with open(marker, "w", encoding="utf-8") as fh:
+        fh.write("ok\n")
+    return True
+
+
+def profile_id_of(item: dict) -> int | None:
+    try:
+        if item.get("id") is not None:
+            return int(item["id"])
+    except (TypeError, ValueError):
+        return None
+    return None
+
+
 def household_quality_profile(base: str, api_key: str, kind: str):
-    """Max (remux/4K), Default (1080p encode), Anything (take what exists)."""
+    """Max (4K encode), Default (1080p encode), Anything (take what exists)."""
     try:
         return apply_household_quality_profiles(base, api_key, kind)
     except RuntimeError as exc:
@@ -1601,48 +1678,53 @@ def apply_household_quality_profiles(base: str, api_key: str, kind: str):
     by_name = {item.get("name"): item for item in profiles if item.get("name")}
     default_existing = pick_default_profile(profiles)
     ids = group_id_state(profiles + ([template] if template else []))
+    recyclarr_owns = recyclarr_is_fresh() and PROFILE_DEFAULT in by_name and PROFILE_MAX in by_name
 
     default_items = rebuild_profile_items(catalog, DEFAULT_GROUPS, id_state=ids)
     max_items = rebuild_profile_items(catalog, MAX_GROUPS, id_state=ids)
     anything_items = rebuild_profile_items(catalog, (), allow_unlisted=True, id_state=ids)
 
     default_id = None
-    try:
-        default_id = upsert_quality_profile(
-            base,
-            api_key,
-            PROFILE_DEFAULT,
-            template,
-            default_items,
-            cutoff_id_from_items(
+    if recyclarr_owns:
+        default_id = profile_id_of(by_name.get(PROFILE_DEFAULT) or {})
+        log(f"{kind} quality profiles {PROFILE_DEFAULT}/{PROFILE_MAX} left to Recyclarr")
+    else:
+        try:
+            default_id = upsert_quality_profile(
+                base,
+                api_key,
+                PROFILE_DEFAULT,
+                template,
                 default_items,
-                ("Bluray-1080p", "WEBDL-1080p", "Bluray-720p"),
-                template.get("cutoff"),
-            ),
-            format_items_for(PROFILE_DEFAULT, formats),
-            True,
-            default_existing,
-        )
-    except RuntimeError as exc:
-        log(f"{kind} quality profile {PROFILE_DEFAULT}: {exc}", "WARNING")
-    try:
-        upsert_quality_profile(
-            base,
-            api_key,
-            PROFILE_MAX,
-            template,
-            max_items,
-            cutoff_id_from_items(
+                cutoff_id_from_items(
+                    default_items,
+                    ("Bluray-1080p", "WEBDL-1080p", "Bluray-720p"),
+                    template.get("cutoff"),
+                ),
+                format_items_for(PROFILE_DEFAULT, formats),
+                True,
+                default_existing,
+            )
+        except RuntimeError as exc:
+            log(f"{kind} quality profile {PROFILE_DEFAULT}: {exc}", "WARNING")
+        try:
+            upsert_quality_profile(
+                base,
+                api_key,
+                PROFILE_MAX,
+                template,
                 max_items,
-                ("Remux-2160p", "Remux-1080p", "Bluray-1080p"),
-                template.get("cutoff"),
-            ),
-            format_items_for(PROFILE_MAX, formats),
-            True,
-            by_name.get(PROFILE_MAX),
-        )
-    except RuntimeError as exc:
-        log(f"{kind} quality profile {PROFILE_MAX}: {exc}", "WARNING")
+                cutoff_id_from_items(
+                    max_items,
+                    ("Bluray-2160p", "WEBDL-2160p", "Bluray-1080p"),
+                    template.get("cutoff"),
+                ),
+                format_items_for(PROFILE_MAX, formats),
+                True,
+                by_name.get(PROFILE_MAX),
+            )
+        except RuntimeError as exc:
+            log(f"{kind} quality profile {PROFILE_MAX}: {exc}", "WARNING")
     try:
         upsert_quality_profile(
             base,
@@ -1662,8 +1744,9 @@ def apply_household_quality_profiles(base: str, api_key: str, kind: str):
     except RuntimeError as exc:
         log(f"{kind} quality profile {PROFILE_ANYTHING}: {exc}", "WARNING")
     drop_extra_quality_profiles(base, api_key)
-    sizes = QUALITY_SIZES_MOVIE if kind == "radarr" else QUALITY_SIZES_SERIES
-    apply_quality_sizes(base, api_key, sizes)
+    if not recyclarr_owns:
+        sizes = QUALITY_SIZES_MOVIE if kind == "radarr" else QUALITY_SIZES_SERIES
+        apply_quality_sizes(base, api_key, sizes)
     try:
         now = as_list(http("GET", f"{base}/qualityprofile", headers=arr_headers(api_key)))
     except RuntimeError:
@@ -1673,7 +1756,7 @@ def apply_household_quality_profiles(base: str, api_key: str, kind: str):
         default_id = profile_id_by_name(base, api_key, PROFILE_DEFAULT)
     if set(PROFILE_NAMES) <= have:
         log(
-            f"{kind} quality profiles: {PROFILE_MAX} (remux/4K), "
+            f"{kind} quality profiles: {PROFILE_MAX} (4K encode), "
             f"{PROFILE_DEFAULT} (1080p encode), {PROFILE_ANYTHING} (take anything)"
         )
     else:
@@ -3049,6 +3132,13 @@ def main() -> int:
     # leave Seerr on stock Any / HD-720p and hang the wait screen.
     sp = household_quality_profile(sonarr, sk, "sonarr")
     rp = household_quality_profile(radarr, rk, "radarr")
+    if run_recyclarr():
+        sid = profile_id_by_name(sonarr, sk, PROFILE_DEFAULT)
+        rid = profile_id_by_name(radarr, rk, PROFILE_DEFAULT)
+        if sid is not None:
+            sp = (sid, PROFILE_DEFAULT)
+        if rid is not None:
+            rp = (rid, PROFILE_DEFAULT)
     for kind, base, key in each_arr(radarr, rk, sonarr, sk):
         ensure_media_management(base, key, kind)
         ensure_download_client_handling(base, key, kind)
@@ -3131,6 +3221,7 @@ def housekeep() -> int:
     sonarr = f"{sonarr_url()}/api/v3"
     radarr = f"{radarr_url()}/api/v3"
     sk, rk = secrets["sonarr_api_key"], secrets["radarr_api_key"]
+    run_recyclarr()
     import_finished_downloads(radarr, rk, sonarr, sk)
     tickle_seerr_availability()
     return 0

@@ -32,6 +32,7 @@ def load(name: str, path: Path):
 
 
 ws = load("wire_stack", BIN / "wire-stack")
+recyclarr = load("recyclarr_sync", BIN / "recyclarr-sync")
 arrp = load("prowlarr_arr_proxy", BIN / "prowlarr-arr-proxy")
 rr = load("route_rating", BIN / "route-rating")
 wqc = load("wg_quick_contract", ROOT / "tests/lib/wg_quick_contract.py")
@@ -1115,12 +1116,16 @@ class Helpers(unittest.TestCase):
         self.assertNotIn("HOST=127.0.0.1", seerr)
         docker = (ROOT / "pompey/Dockerfile").read_text()
         self.assertNotIn("plex", docker.lower())
+        self.assertIn("\n    git \\\n", docker)
+        self.assertIn("\n    xz \\\n", docker)
         self.assertFalse((ROOT / "pompey/rootfs/usr/local/bin/pompey-ingress").exists())
         self.assertFalse((ROOT / "pompey/rootfs/etc/services.d/ingress-proxy").exists())
         self.assertFalse((ROOT / "tests/preview_seerr_ingress.py").exists())
         self.assertNotIn("keep_ingress_as_pompey", (BIN / "wire-stack").read_text())
         seerr_run = (ROOT / "pompey/rootfs/etc/services.d/seerr/run").read_text()
         fetch = (ROOT / "pompey/rootfs/usr/local/bin/fetch-engines").read_text()
+        self.assertIn("recyclarr-linux-musl-", fetch)
+        self.assertIn("POMPEY_SKIP_RECYCLARR", fetch)
         self.assertNotIn('touch "${POMPEY_CONFIG}/seerr/DOCKER"', seerr_run)
         self.assertNotIn('touch "${POMPEY_CONFIG}/seerr/DOCKER"', fetch)
         self.assertIn('rm -f "${POMPEY_CONFIG}/seerr/DOCKER"', seerr_run)
@@ -1653,13 +1658,15 @@ PersistentKeepalive = 25
         self.assertIn("WEBDL-2160p", blocked)
         self.assertIn("CAM", blocked)
 
-    def test_max_items_allow_remux_and_reject_cam(self):
+    def test_max_items_allow_4k_encode_not_remux(self):
         catalog = ws.quality_catalog(any_quality_bundle()["profile"])
         items = ws.rebuild_profile_items(catalog, ws.MAX_GROUPS)
         allowed, blocked = allowed_quality_names({"items": items})
-        self.assertIn("Remux-1080p", allowed)
-        self.assertIn("Remux-2160p", allowed)
+        self.assertIn("Bluray-2160p", allowed)
+        self.assertIn("WEBDL-2160p", allowed)
         self.assertIn("Bluray-1080p", allowed)
+        self.assertIn("Remux-1080p", blocked)
+        self.assertIn("Remux-2160p", blocked)
         self.assertIn("CAM", blocked)
         self.assertIn("BR-DISK", blocked)
 
@@ -1924,6 +1931,8 @@ class WireStack(unittest.TestCase):
                 "INGRESS_PORT": "8099",
             }
         )
+        os.environ.pop("POMPEY_RECYCLARR", None)
+        os.environ.pop("POMPEY_RECYCLARR_DATA", None)
         self.nginx = nginx
         self.ready = ready
         self._old_path = os.environ.get("PATH", "")
@@ -2153,8 +2162,10 @@ class WireStack(unittest.TestCase):
         self.assertIn("Remux-2160p", blocked)
         self.assertIn("CAM", blocked)
         max_allowed, max_blocked = allowed_quality_names(maximum)
-        self.assertIn("Remux-1080p", max_allowed)
-        self.assertIn("Remux-2160p", max_allowed)
+        self.assertIn("Bluray-2160p", max_allowed)
+        self.assertIn("WEBDL-2160p", max_allowed)
+        self.assertIn("Bluray-1080p", max_allowed)
+        self.assertIn("Remux-2160p", max_blocked)
         self.assertIn("CAM", max_blocked)
         any_allowed, _any_blocked = allowed_quality_names(anything)
         self.assertIn("CAM", any_allowed)
@@ -2164,13 +2175,13 @@ class WireStack(unittest.TestCase):
             for item in any_quality_bundle()["profile"]["items"]
             if item["quality"]["name"] == "Bluray-1080p"
         )
-        remux_4k_id = next(
+        bluray_4k_id = next(
             item["quality"]["id"]
             for item in any_quality_bundle()["profile"]["items"]
-            if item["quality"]["name"] == "Remux-2160p"
+            if item["quality"]["name"] == "Bluray-2160p"
         )
         self.assertEqual(default["cutoff"], bluray_id)
-        self.assertEqual(maximum["cutoff"], remux_4k_id)
+        self.assertEqual(maximum["cutoff"], bluray_4k_id)
         cf_names = {item["name"] for item in self.state.radarr_formats}
         self.assertIn("Pompey Prefer x265", cf_names)
         self.assertIn("Pompey Prefer Remux", cf_names)
@@ -2185,9 +2196,8 @@ class WireStack(unittest.TestCase):
         self.assertEqual(scores[ws.NOT_ORIGINAL_LANGUAGE], -10000)
         self.assertEqual(default.get("language"), {"id": -1, "name": "Any"})
         max_scores = {item["name"]: item["score"] for item in maximum.get("formatItems") or []}
-        self.assertEqual(max_scores["Pompey Prefer Remux"], 200)
-        self.assertEqual(max_scores["Pompey Prefer lossless audio"], 150)
-        self.assertEqual(max_scores.get("Pompey Reject Remux/DISK", 0), 0)
+        self.assertEqual(max_scores.get("Pompey Prefer Remux", 0), 0)
+        self.assertEqual(max_scores[ws.NOT_ORIGINAL_LANGUAGE], -10000)
         cf_item_names = {item["name"] for item in default.get("formatItems") or []}
         self.assertEqual(cf_item_names, cf_names)
         self.assertGreaterEqual(default.get("minUpgradeFormatScore") or 0, 1)
@@ -2267,6 +2277,65 @@ class WireStack(unittest.TestCase):
         anything = ws.household_format_scores("Anything")
         self.assertEqual(default[ws.NOT_ORIGINAL_LANGUAGE], -10000)
         self.assertEqual(anything.get(ws.NOT_ORIGINAL_LANGUAGE, 0), 0)
+
+    def test_recyclarr_yaml_names_default_max_and_keeps_1080p_fallback(self):
+        body = recyclarr.render_config(
+            "http://127.0.0.1:7878",
+            "radarr-secret-key",
+            "http://127.0.0.1:8989",
+            "sonarr-secret-key",
+        )
+        self.assertIn(recyclarr.TRASH_RADARR_HD, body)
+        self.assertIn(recyclarr.TRASH_RADARR_UHD, body)
+        self.assertIn(recyclarr.TRASH_SONARR_HD, body)
+        self.assertIn(recyclarr.TRASH_SONARR_UHD, body)
+        self.assertIn("name: Default", body)
+        self.assertIn("name: Max", body)
+        self.assertNotIn("name: Anything", body)
+        self.assertIn("until_quality: Bluray-2160p", body)
+        self.assertIn("until_quality: WEB 2160p", body)
+        self.assertIn("- name: Bluray-1080p", body)
+        self.assertIn("- name: WEB 1080p", body)
+        self.assertIn("- name: Remux-2160p", body)
+        self.assertIn("enabled: false", body)
+        self.assertIn("delete_old_custom_formats: false", body)
+        redacted = recyclarr.redact(body, {"radarr_api_key": "radarr-secret-key"})
+        self.assertNotIn("radarr-secret-key", redacted)
+        self.assertIn("***", redacted)
+
+    def test_recyclarr_success_skips_later_default_max_puts(self):
+        os.environ["INDEXER_URL"] = ""
+        os.environ["INDEXER_API_KEY"] = ""
+        fake = self.tmp / "recyclarr"
+        fake.write_text("#!/bin/sh\nexit 0\n")
+        fake.chmod(0o755)
+        os.environ["POMPEY_RECYCLARR"] = str(fake)
+        os.environ["POMPEY_RECYCLARR_DATA"] = str(self.tmp / "recyclarr-data")
+        rc = ws.main()
+        self.assertEqual(rc, 0)
+        self.assertTrue((self.ready / "recyclarr").exists())
+        yaml_path = self.tmp / "recyclarr-data" / "recyclarr.yml"
+        self.assertTrue(yaml_path.is_file())
+        self.assertEqual(oct(yaml_path.stat().st_mode & 0o777), "0o600")
+        default_id = profile_named(self.state.radarr_profiles, "Default")["id"]
+        puts = [
+            call
+            for call in self.state.calls
+            if call[0] == "radarr"
+            and call[1] == "PUT"
+            and str(call[2]) == f"/api/v3/qualityprofile/{default_id}"
+        ]
+        before = len(puts)
+        rc = ws.main()
+        self.assertEqual(rc, 0)
+        puts_after = [
+            call
+            for call in self.state.calls
+            if call[0] == "radarr"
+            and call[1] == "PUT"
+            and str(call[2]) == f"/api/v3/qualityprofile/{default_id}"
+        ]
+        self.assertEqual(len(puts_after), before)
 
     def test_share_to_ratio_leaves_torrent_until_ratio(self):
         os.environ["INDEXER_URL"] = ""
