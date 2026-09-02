@@ -1115,6 +1115,9 @@ class Helpers(unittest.TestCase):
         self.assertIn("Paste the Proton WireGuard file", html)
         self.assertIn("lastSig", html)
         self.assertIn("protonSubmitted", html)
+        self.assertIn("sawDashboard", html)
+        self.assertIn("is-ready", html)
+        self.assertIn("isDashboard", html)
         self.assertIn("vpn-bw", html)
         self.assertIn("renderVpn", html)
         self.assertIn("vpn-graph", html)
@@ -3849,6 +3852,117 @@ class ProtonSetup(unittest.TestCase):
         cleared = json.loads((ready / "status.json").read_text())
         self.assertFalse(cleared["need_proton"])
         self.assertEqual(cleared["label"], "Bringing up the Proton tunnel")
+
+    def test_status_ready_clears_need_proton_without_wired(self):
+        import tempfile
+        import subprocess
+
+        ready = Path(tempfile.mkdtemp())
+        env = os.environ.copy()
+        env["POMPEY_READY"] = str(ready)
+        env["POMPEY_STATUS_NEED_PROTON"] = "1"
+        subprocess.run(
+            [sys.executable, str(BIN / "pompey-status"), "vpn", "Paste the Proton WireGuard file you downloaded", "8"],
+            check=True,
+            env=env,
+        )
+        env.pop("POMPEY_STATUS_NEED_PROTON", None)
+        subprocess.run(
+            [sys.executable, str(BIN / "pompey-status"), "ready", "Ready", "100"],
+            check=True,
+            env=env,
+        )
+        data = json.loads((ready / "status.json").read_text())
+        self.assertFalse(data["need_proton"])
+        self.assertTrue(data["search"])
+        self.assertEqual(data["step"], "ready")
+        self.assertEqual(data["percent"], 100)
+        self.assertEqual({item["state"] for item in data["steps"]}, {"done"})
+
+    def test_status_wired_fetch_does_not_rewind(self):
+        import tempfile
+        import subprocess
+
+        ready = Path(tempfile.mkdtemp())
+        env = os.environ.copy()
+        env["POMPEY_READY"] = str(ready)
+        subprocess.run(
+            [sys.executable, str(BIN / "pompey-status"), "ready", "Ready", "100"],
+            check=True,
+            env=env,
+        )
+        (ready / "wired").write_text("")
+        subprocess.run(
+            [sys.executable, str(BIN / "pompey-status"), "fetch", "Downloading hidden engines", "30"],
+            check=True,
+            env=env,
+        )
+        data = json.loads((ready / "status.json").read_text())
+        self.assertTrue(data["search"])
+        self.assertFalse(data["need_proton"])
+        self.assertEqual(data["step"], "ready")
+        self.assertEqual(data["percent"], 100)
+        self.assertEqual(data["label"], "Ready")
+
+    def test_status_wired_heals_stale_paste_and_torn_json(self):
+        import tempfile
+        import subprocess
+
+        ready = Path(tempfile.mkdtemp())
+        env = os.environ.copy()
+        env["POMPEY_READY"] = str(ready)
+        env["POMPEY_STATUS_NEED_PROTON"] = "1"
+        subprocess.run(
+            [sys.executable, str(BIN / "pompey-status"), "vpn", "Paste the Proton WireGuard file you downloaded", "8"],
+            check=True,
+            env=env,
+        )
+        env.pop("POMPEY_STATUS_NEED_PROTON", None)
+        (ready / "wired").write_text("")
+        subprocess.run(
+            [sys.executable, str(BIN / "pompey-status"), "start", "Starting hidden engines", "70"],
+            check=True,
+            env=env,
+        )
+        healed = json.loads((ready / "status.json").read_text())
+        self.assertTrue(healed["search"])
+        self.assertFalse(healed["need_proton"])
+        self.assertEqual(healed["step"], "ready")
+
+        (ready / "status.json").write_text("{not json")
+        subprocess.run(
+            [sys.executable, str(BIN / "pompey-status"), "vpn", "Waiting for Proton handshake", "15"],
+            check=True,
+            env=env,
+        )
+        repaired = json.loads((ready / "status.json").read_text())
+        self.assertTrue(repaired["search"])
+        self.assertEqual(repaired["step"], "ready")
+        self.assertEqual(repaired["percent"], 100)
+
+    def test_status_need_proton_explicit_still_shows_paste_when_wired(self):
+        import tempfile
+        import subprocess
+
+        ready = Path(tempfile.mkdtemp())
+        env = os.environ.copy()
+        env["POMPEY_READY"] = str(ready)
+        subprocess.run(
+            [sys.executable, str(BIN / "pompey-status"), "ready", "Ready", "100"],
+            check=True,
+            env=env,
+        )
+        (ready / "wired").write_text("")
+        env["POMPEY_STATUS_NEED_PROTON"] = "1"
+        subprocess.run(
+            [sys.executable, str(BIN / "pompey-status"), "vpn", "Paste the Proton WireGuard file you downloaded", "8"],
+            check=True,
+            env=env,
+        )
+        data = json.loads((ready / "status.json").read_text())
+        self.assertTrue(data["need_proton"])
+        self.assertEqual(data["step"], "vpn")
+        self.assertIn("Paste", data["label"])
 
 
 class TestsNeverUseBitTorrent(unittest.TestCase):

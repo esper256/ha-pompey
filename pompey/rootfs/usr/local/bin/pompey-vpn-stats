@@ -1,20 +1,40 @@
 #!/usr/bin/env python3
 """Sample wg0 byte counters into status.json for the wait-screen graph.
 
-Reads /proc/net/dev (or the fake-VPN netns). Does not change boot step fields.
+Reads /proc/net/dev (or the fake-VPN netns). Does not change boot step fields
+unless search is already wired and a later writer rewound the installer bar —
+then restore the dashboard. Shares the status.json lock with pompey-status.
 """
 from __future__ import annotations
 
+import fcntl
 import json
 import os
 import subprocess
 import sys
 import time
 
+STEPS = (
+    ("vpn", "Proton tunnel"),
+    ("fetch", "Download household UI and engines"),
+    ("start", "Start hidden engines"),
+    ("wire", "Connect search to your library"),
+    ("ready", "Ready"),
+)
+
+
 def status_path() -> str:
     return os.environ.get("POMPEY_STATUS") or os.path.join(
         os.environ.get("POMPEY_READY", "/tmp/pompey"), "status.json"
     )
+
+
+def ready_dir() -> str:
+    return os.environ.get("POMPEY_READY", "/tmp/pompey")
+
+
+def is_wired() -> bool:
+    return os.path.isfile(os.path.join(ready_dir(), "wired"))
 
 
 def iface_name() -> str:
@@ -72,6 +92,31 @@ def read_iface_bytes(iface: str):
     return None
 
 
+def lock_status(path: str) -> int:
+    directory = os.path.dirname(path) or "."
+    os.makedirs(directory, exist_ok=True)
+    fd = os.open(path + ".lock", os.O_CREAT | os.O_RDWR, 0o600)
+    fcntl.flock(fd, fcntl.LOCK_EX)
+    return fd
+
+
+def dashboard_status() -> dict:
+    seerr = int(os.environ.get("SEERR_PORT", "5055"))
+    sources = int(os.environ.get("PROWLARR_PORT", "9696"))
+    return {
+        "updated": int(time.time()),
+        "step": "ready",
+        "label": "Ready",
+        "percent": 100,
+        "error": "",
+        "need_proton": False,
+        "search": True,
+        "search_port": seerr,
+        "sources_port": sources,
+        "steps": [{"id": i, "label": lab, "state": "done"} for i, lab in STEPS],
+    }
+
+
 def load_status() -> dict | None:
     path = status_path()
     if not os.path.isfile(path) or os.path.getsize(path) <= 0:
@@ -104,6 +149,22 @@ def save_status(data: dict) -> None:
         raise last
 
 
+def heal_dashboard(data: dict) -> dict:
+    """Once search is wired, do not keep an installer playhead on the sidebar."""
+    if not is_wired() or data.get("need_proton"):
+        return data
+    data["search"] = True
+    if data.get("step") != "ready":
+        data["step"] = "ready"
+        data["label"] = "Ready"
+        data["percent"] = 100
+        data["error"] = ""
+        for item in data.get("steps") or []:
+            if isinstance(item, dict):
+                item["state"] = "done"
+    return data
+
+
 def sample() -> dict:
     iface = iface_name()
     got = read_iface_bytes(iface)
@@ -127,15 +188,27 @@ def sample() -> dict:
 
 
 def write_once() -> int:
-    data = load_status()
-    if data is None:
-        return 0
-    data["vpn"] = sample()
+    path = status_path()
+    fd = lock_status(path)
     try:
-        save_status(data)
-    except OSError:
+        data = load_status()
+        if data is None:
+            if not is_wired():
+                return 0
+            data = dashboard_status()
+        else:
+            data = heal_dashboard(data)
+        data["vpn"] = sample()
+        try:
+            save_status(data)
+        except OSError:
+            return 0
         return 0
-    return 0
+    finally:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+        finally:
+            os.close(fd)
 
 
 def loop() -> int:

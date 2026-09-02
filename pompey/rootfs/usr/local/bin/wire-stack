@@ -3098,8 +3098,9 @@ def main() -> int:
     port = os.environ.get("SEERR_PORT", "5055")
     sources = os.environ.get("PROWLARR_PORT", "9696")
     log(f"search is on 0.0.0.0:{port}; sources on 0.0.0.0:{sources}; Ingress stays Pompey")
-    mark_status("ready", "Ready", 100)
+    # Marker first so a concurrent fetch/vpn writer cannot rewind the bar.
     open(os.path.join(ready_dir(), "wired"), "w").close()
+    mark_status("ready", "Ready", 100)
     log("done")
     return 0
 

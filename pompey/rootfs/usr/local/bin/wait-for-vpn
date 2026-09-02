@@ -1,6 +1,8 @@
 #!/command/with-contenv bashio
 # shellcheck shell=bash
 set -euo pipefail
+# shellcheck source=/dev/null
+source "$(command -v pompey-env)"
 
 if ! command -v ip >/dev/null 2>&1; then
   export PATH="/usr/sbin:/sbin:${PATH}"
@@ -61,10 +63,13 @@ until handshake_ok; do
     # do not duplicate the WireGuard service (with-contenv drops env flags).
     if [[ "${TRIES}" -gt 1 && "${quiet}" -ne 1 ]]; then
       bashio::log.error "WireGuard ${IFACE} has no fresh handshake"
-      if [[ "${POMPEY_FAKE_VPN:-}" == "1" ]]; then
-        pompey-status vpn "Waiting for fake wg0" 15 "POMPEY_FAKE_VPN is set but ${IFACE} is not up. Run pompey-dev-vpn up." || true
-      else
-        pompey-status vpn "Waiting for Proton handshake" 15 "The tunnel is not up yet. Paste the Proton WireGuard .conf on the wait screen." || true
+      # Search can already be up; do not rewind the sidebar to 15%.
+      if [[ ! -f "${POMPEY_READY}/wired" ]]; then
+        if [[ "${POMPEY_FAKE_VPN:-}" == "1" ]]; then
+          pompey-status vpn "Waiting for fake wg0" 15 "POMPEY_FAKE_VPN is set but ${IFACE} is not up. Run pompey-dev-vpn up." || true
+        else
+          pompey-status vpn "Waiting for Proton handshake" 15 "The tunnel is not up yet. Paste the Proton WireGuard .conf on the wait screen." || true
+        fi
       fi
     fi
     exit 1

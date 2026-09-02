@@ -447,6 +447,11 @@ grep -q 'HOST=0.0.0.0' "${ROOT}/pompey/rootfs/etc/services.d/seerr/run"
 grep -q '9696/tcp: 9696' "${ROOT}/pompey/config.yaml"
 
 echo "== status.json writer =="
+grep -q 'POMPEY_READY}/wired' "${ROOT}/pompey/rootfs/etc/services.d/engines/run"
+grep -q 'POMPEY_READY}/wired' "${ROOT}/pompey/rootfs/etc/services.d/wire/run"
+grep -q 'POMPEY_READY}/wired' "${ROOT}/pompey/rootfs/usr/local/bin/wait-for-vpn"
+grep -Fq '+ ".lock"' "${BIN}/pompey-status"
+grep -Fq '+ ".lock"' "${BIN}/pompey-vpn-stats"
 python3 "${BIN}/pompey-status" vpn "Waiting for Proton handshake" 15
 python3 "${BIN}/pompey-status" fetch "Downloading hidden engines" 35
 test "$(jq -r .step "${POMPEY_READY}/status.json")" = fetch
@@ -458,6 +463,15 @@ python3 "${BIN}/pompey-status" ready "Ready" 100
 test "$(jq -r .search "${POMPEY_READY}/status.json")" = true
 test "$(jq -r .search_port "${POMPEY_READY}/status.json")" = 5055
 test "$(jq -r .sources_port "${POMPEY_READY}/status.json")" = 9696
+touch "${POMPEY_READY}/wired"
+python3 "${BIN}/pompey-status" fetch "Downloading hidden engines" 35
+test "$(jq -r .step "${POMPEY_READY}/status.json")" = ready
+test "$(jq -r .search "${POMPEY_READY}/status.json")" = true
+test "$(jq -r .percent "${POMPEY_READY}/status.json")" = 100
+test "$(jq -r .need_proton "${POMPEY_READY}/status.json")" = false
+python3 "${BIN}/pompey-status" vpn "Waiting for Proton handshake" 15
+test "$(jq -r .step "${POMPEY_READY}/status.json")" = ready
+test "$(jq -r .search "${POMPEY_READY}/status.json")" = true
 rm -rf "${POMPEY_READY}"
 python3 "${BIN}/pompey-status" vpn "Starting" 5
 test -f "${POMPEY_READY}/status.json"
@@ -473,6 +487,32 @@ test "$(jq -r .vpn.tx_bytes "${POMPEY_READY}/status.json")" = 111000
 test "$(jq -r .search "${POMPEY_READY}/status.json")" = true
 test -x "${BIN}/pompey-vpn-stats"
 test -x "${ROOT}/pompey/rootfs/etc/services.d/vpn-stats/run"
+
+echo "== pompey-vpn-stats heals a rewound bar once search is wired =="
+python3 "${BIN}/pompey-status" fetch "Downloading hidden engines" 30
+# fetch after ready would rewind only because wired is missing in this dir
+python3 "${BIN}/pompey-status" ready "Ready" 100
+touch "${POMPEY_READY}/wired"
+python3 - "${POMPEY_READY}/status.json" <<'PY'
+import json, sys
+from pathlib import Path
+path = Path(sys.argv[1])
+data = json.loads(path.read_text())
+data.update({"step": "fetch", "label": "Downloading hidden engines", "percent": 30, "search": False})
+for item in data.get("steps") or []:
+    item["state"] = "pending"
+path.write_text(json.dumps(data))
+PY
+POMPEY_NET_DEV="${netdev}" python3 "${BIN}/pompey-vpn-stats"
+test "$(jq -r .step "${POMPEY_READY}/status.json")" = ready
+test "$(jq -r .search "${POMPEY_READY}/status.json")" = true
+test "$(jq -r .percent "${POMPEY_READY}/status.json")" = 100
+test "$(jq -r .vpn.up "${POMPEY_READY}/status.json")" = true
+printf '%s\n' '{not json' >"${POMPEY_READY}/status.json"
+POMPEY_NET_DEV="${netdev}" python3 "${BIN}/pompey-vpn-stats"
+test "$(jq -r .step "${POMPEY_READY}/status.json")" = ready
+test "$(jq -r .search "${POMPEY_READY}/status.json")" = true
+test "$(jq -r .vpn.rx_bytes "${POMPEY_READY}/status.json")" = 9000000
 
 echo "== fetch URL construction (range GET, not a full download) =="
 urls="$(run "${BIN}/fetch-engines" --print-urls)"

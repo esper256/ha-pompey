@@ -3,10 +3,11 @@
 
   python3 tests/preview.py
 
-Then open http://127.0.0.1:8099/ — the bar moves through the same steps the
-addon reports. This is the Pompey sidebar (wait/status). Search is Seerr on
+Then open http://127.0.0.1:8099/ — the bar moves through first-boot steps, then
+hides. This is the Pompey sidebar (wait, then dashboard). Search is Seerr on
 host port 5055 and sources are Prowlarr on 9696, not this page (`status.json`
-has `"search": true` plus `"search_port"` and `"sources_port"`).
+has `"search": true` plus `"search_port"` and `"sources_port"`). Opening the
+page only reads status; it does not re-run setup.
 """
 from __future__ import annotations
 
@@ -91,8 +92,11 @@ def demo(env: dict, hold_ready: bool, delay: float) -> None:
     for step in sequence:
         status(env, *step)
         time.sleep(delay)
+    Path(env["POMPEY_READY"]).joinpath("wired").touch()
     if hold_ready:
+        # Same chatter engines/wire emit on restart. Must not rewind the bar.
         while True:
+            status(env, "fetch", "Downloading hidden engines", "30")
             time.sleep(30)
 
 
