@@ -57,6 +57,14 @@ grep -q 'POMPEY_SKIP_PROWLARR' "${BIN}/fetch-engines"
 grep -q 'POMPEY_SKIP_SONARR' "${BIN}/fetch-engines"
 grep -q 'POMPEY_SKIP_RADARR' "${BIN}/fetch-engines"
 grep -q 'POMPEY_SKIP_RECYCLARR' "${BIN}/fetch-engines"
+grep -q 'identity_current' "${BIN}/fetch-engines"
+grep -q 'engines-checked' "${BIN}/fetch-engines"
+grep -q 'POMPEY_HOLD_QBIT' "${BIN}/fetch-engines"
+grep -q 'note_changed' "${BIN}/fetch-engines"
+if grep -q 'already present' "${BIN}/fetch-engines"; then
+  echo "fetch-engines still skips on presence instead of identity" >&2
+  exit 1
+fi
 # Staging is under POMPEY_ENGINES (/data/engines), not mktemp in /tmp.
 if grep -nE 'tmp="\$\(mktemp -d\)"' "${BIN}/fetch-engines"; then
   echo "fetch-engines still extracts via mktemp (HAOS /tmp denies chmod)" >&2
@@ -121,6 +129,95 @@ if [[ -d "${POMPEY_ENGINES}/.partial-Prowlarr" ]]; then
   echo "partial staging left behind" >&2
   exit 1
 fi
+test -f "${POMPEY_READY}/engines-checked"
+test -f "${POMPEY_ENGINES}/.stamps/Prowlarr"
+grep -qx 'Prowlarr' "${POMPEY_READY}/engines-changed"
+
+echo "== second fetch of the same artifact is skipped =="
+touch "${POMPEY_READY}/wired"
+log="$(
+  POMPEY_PROWLARR_URL="${BASE}/Prowlarr.master.linux-musl-core-x64.tar.gz" \
+    run "${BIN}/fetch-engines" 2>&1
+)"
+printf '%s\n' "${log}"
+grep -q 'Prowlarr current' <<<"${log}"
+if grep -q 'Prowlarr ready (ELF)' <<<"${log}"; then
+  echo "current Prowlarr was re-unpacked" >&2
+  exit 1
+fi
+if grep -qx 'Prowlarr' "${POMPEY_READY}/engines-changed"; then
+  echo "current Prowlarr was listed as replaced" >&2
+  exit 1
+fi
+
+echo "== different filename replaces the on-disk copy =="
+python3 "${LIB}" make-linux "${WORK}/www/Prowlarr.master.linux-musl-core-x64.2.tar.gz" Prowlarr
+old_stamp="$(cat "${POMPEY_ENGINES}/.stamps/Prowlarr")"
+log="$(
+  POMPEY_PROWLARR_URL="${BASE}/Prowlarr.master.linux-musl-core-x64.2.tar.gz" \
+    run "${BIN}/fetch-engines" 2>&1
+)"
+printf '%s\n' "${log}"
+grep -q 'Prowlarr ready (ELF)' <<<"${log}"
+grep -qx 'Prowlarr' "${POMPEY_READY}/engines-changed"
+test "$(cat "${POMPEY_ENGINES}/.stamps/Prowlarr")" != "${old_stamp}"
+python3 "${LIB}" assert-elf "${POMPEY_ENGINES}/Prowlarr/Prowlarr"
+
+echo "== failed update keeps the installed copy =="
+log="$(
+  POMPEY_PROWLARR_URL="${BASE}/missing-prowlarr.tar.gz" \
+    run "${BIN}/fetch-engines" 2>&1
+)" || {
+  printf '%s\n' "${log}"
+  echo "missing artifact must not fail fetch when a copy is installed" >&2
+  exit 1
+}
+printf '%s\n' "${log}"
+grep -qi 'keeping the installed copy' <<<"${log}"
+test -x "${POMPEY_ENGINES}/Prowlarr/Prowlarr"
+python3 "${LIB}" assert-elf "${POMPEY_ENGINES}/Prowlarr/Prowlarr"
+
+echo "== Windows zip on update keeps the Linux copy =="
+log="$(
+  POMPEY_PROWLARR_URL="${BASE}/Prowlarr.master.windows-core-x64.zip" \
+    run "${BIN}/fetch-engines" 2>&1
+)" || {
+  printf '%s\n' "${log}"
+  echo "Windows zip must not abort an update when a Linux copy is installed" >&2
+  exit 1
+}
+printf '%s\n' "${log}"
+grep -qiE 'windows|zip' <<<"${log}"
+python3 "${LIB}" assert-elf "${POMPEY_ENGINES}/Prowlarr/Prowlarr"
+
+echo "== qBittorrent-nox hold skips replace during an active write =="
+python3 - "${WORK}/www/x86_64-qbittorrent-nox" <<'PY'
+from pathlib import Path
+import sys
+Path(sys.argv[1]).write_bytes(b"\x7fELF" + bytes(64))
+PY
+cp "${WORK}/www/x86_64-qbittorrent-nox" "${WORK}/www/x86_64-qbittorrent-nox-new"
+rm -f "${POMPEY_ENGINES}/qbittorrent-nox"
+log="$(
+  POMPEY_SKIP_PROWLARR=1 POMPEY_SKIP_QBIT=0 \
+    POMPEY_QBIT_URL="${BASE}/x86_64-qbittorrent-nox" \
+    run "${BIN}/fetch-engines" 2>&1
+)"
+printf '%s\n' "${log}"
+grep -q 'qBittorrent-nox ready (ELF)' <<<"${log}"
+test -x "${POMPEY_ENGINES}/qbittorrent-nox"
+log="$(
+  POMPEY_SKIP_PROWLARR=1 POMPEY_SKIP_QBIT=0 POMPEY_HOLD_QBIT=1 \
+    POMPEY_QBIT_URL="${BASE}/x86_64-qbittorrent-nox-new" \
+    run "${BIN}/fetch-engines" 2>&1
+)"
+printf '%s\n' "${log}"
+grep -q 'not replacing the binary' <<<"${log}"
+if grep -qx 'qbittorrent-nox' "${POMPEY_READY}/engines-changed"; then
+  echo "held qBittorrent-nox was listed as replaced" >&2
+  exit 1
+fi
+export POMPEY_SKIP_QBIT=1
 
 echo "== Sonarr + Radarr fixtures use the same unpack path =="
 rm -rf "${POMPEY_ENGINES}/Sonarr" "${POMPEY_ENGINES}/Radarr"

@@ -77,6 +77,232 @@ print(name)
 PY
 }
 
+identity_from_headers() {
+  python3 - "$1" "${2:-}" <<'PY'
+import re, sys
+path, effective = sys.argv[1], sys.argv[2]
+try:
+    text = open(path, encoding="latin-1", errors="replace").read()
+except OSError:
+    print("")
+    raise SystemExit(0)
+hops = re.split(r"\r?\n\r?\n", text)
+filename = ""
+etag = ""
+for hop in hops:
+    for raw in hop.splitlines():
+        low = raw.lower()
+        if low.startswith("etag:"):
+            etag = raw.split(":", 1)[1].strip().strip('"')
+        elif low.startswith("content-disposition:"):
+            m = re.search(r"filename\*=(?:UTF-8'')?([^;]+)", raw, re.I)
+            if not m:
+                m = re.search(r'filename="([^"]+)"', raw, re.I)
+            if not m:
+                m = re.search(r"filename=([^;]+)", raw, re.I)
+            if m:
+                filename = m.group(1).strip().strip('"')
+print(f"{etag}|{filename}|{effective}")
+PY
+}
+
+stamp_dir() {
+  printf '%s/.stamps' "${POMPEY_ENGINES}"
+}
+
+stamp_path() {
+  printf '%s/%s' "$(stamp_dir)" "$1"
+}
+
+read_stamp() {
+  local path
+  path="$(stamp_path "$1")"
+  if [[ -f "${path}" ]]; then
+    cat "${path}"
+  fi
+}
+
+write_stamp() {
+  mkdir -p "$(stamp_dir)"
+  printf '%s\n' "$2" > "$(stamp_path "$1")"
+}
+
+changed_path() {
+  printf '%s/engines-changed' "${POMPEY_READY}"
+}
+
+note_changed() {
+  mkdir -p "${POMPEY_READY}"
+  printf '%s\n' "$1" >> "$(changed_path)"
+}
+
+fetch_status() {
+  if [[ -f "${POMPEY_READY}/wired" ]]; then
+    return 0
+  fi
+  pompey-status "$@" || true
+}
+
+probe_identity() {
+  local url="$1"
+  local headers effective identity
+  headers="${TMPDIR}/probe-headers.$$"
+  effective="$(
+    curl -fsSI -L --retry 2 --retry-delay 1 \
+      -D "${headers}" -o /dev/null -w '%{url_effective}' \
+      "${url}" 2>/dev/null || true
+  )"
+  identity="$(identity_from_headers "${headers}" "${effective}")"
+  if [[ -z "${identity}" || "${identity}" == "||" ]]; then
+    effective="$(
+      curl -fsSL -L --retry 2 --retry-delay 1 \
+        -D "${headers}" -o /dev/null -r 0-255 -w '%{url_effective}' \
+        "${url}" 2>/dev/null || true
+    )"
+    identity="$(identity_from_headers "${headers}" "${effective}")"
+  fi
+  printf '%s\n' "${identity}"
+  rm -f "${headers}"
+}
+
+identity_current() {
+  local name="$1"
+  local dest="$2"
+  local identity="$3"
+  if [[ ! -e "${dest}" ]]; then
+    return 1
+  fi
+  if [[ -z "${identity}" || "${identity}" == "||" ]]; then
+    return 1
+  fi
+  [[ "${identity}" == "$(read_stamp "${name}")" ]]
+}
+
+s6_service_dir() {
+  local svc="$1"
+  local root
+  for root in /run/s6/legacy-services /run/service /var/run/s6/services /run/s6-rc/servicedirs; do
+    if [[ -d "${root}/${svc}" ]]; then
+      printf '%s\n' "${root}/${svc}"
+      return 0
+    fi
+  done
+  return 1
+}
+
+engine_down() {
+  local svc="$1"
+  local dir
+  if ! command -v s6-svc >/dev/null 2>&1; then
+    return 0
+  fi
+  dir="$(s6_service_dir "${svc}" || true)"
+  if [[ -z "${dir}" ]]; then
+    return 0
+  fi
+  s6-svc -d "${dir}" || true
+  local n=0
+  while [[ "${n}" -lt 20 ]]; do
+    if s6-svstat "${dir}" 2>/dev/null | grep -q ' down '; then
+      return 0
+    fi
+    sleep 1
+    n=$((n + 1))
+  done
+}
+
+engine_up() {
+  local svc="$1"
+  local dir
+  if ! command -v s6-svc >/dev/null 2>&1; then
+    return 0
+  fi
+  dir="$(s6_service_dir "${svc}" || true)"
+  if [[ -z "${dir}" ]]; then
+    return 0
+  fi
+  s6-svc -u "${dir}" || true
+}
+
+# Map artifact name to s6 service(s) that must be down before swapping files.
+engine_services() {
+  case "$1" in
+    Radarr) printf '%s\n' radarr ;;
+    Sonarr) printf '%s\n' sonarr ;;
+    Prowlarr) printf '%s\n' prowlarr ;;
+    qbittorrent-nox) printf '%s\n' qbittorrent ;;
+    seerr) printf '%s\n' seerr ;;
+  esac
+}
+
+swap_engine() {
+  local name="$1"
+  local dest="$2"
+  local staged="$3"
+  local live=0
+  local svc
+  if [[ -f "${POMPEY_READY}/engines-ready" && -e "${dest}" ]]; then
+    live=1
+  fi
+  if [[ "${live}" -eq 1 ]]; then
+    while IFS= read -r svc; do
+      [[ -n "${svc}" ]] || continue
+      engine_down "${svc}"
+    done < <(engine_services "${name}")
+  fi
+  local previous=""
+  if [[ -e "${dest}" ]]; then
+    previous="${dest}.prev"
+    rm -rf "${previous}"
+    if ! mv "${dest}" "${previous}"; then
+      bashio::log.warning "could not move ${dest} aside"
+      return 1
+    fi
+  fi
+  if ! mv "${staged}" "${dest}"; then
+    bashio::log.warning "could not install ${name} into ${dest}"
+    if [[ -n "${previous}" && -e "${previous}" ]]; then
+      mv "${previous}" "${dest}" || true
+    fi
+    return 1
+  fi
+  rm -rf "${previous}"
+  if [[ "${live}" -eq 1 ]]; then
+    while IFS= read -r svc; do
+      [[ -n "${svc}" ]] || continue
+      engine_up "${svc}"
+    done < <(engine_services "${name}")
+  fi
+}
+
+install_staged() {
+  local name="$1"
+  local dest="$2"
+  local staged="$3"
+  local identity="$4"
+  local required="$5"
+  if ! swap_engine "${name}" "${dest}" "${staged}"; then
+    if [[ "${required}" == "1" ]]; then
+      bashio::exit.nok "Failed to install ${name}"
+    fi
+    bashio::log.warning "Failed to replace ${name}; keeping the installed copy"
+    return 1
+  fi
+  write_stamp "${name}" "${identity}"
+  note_changed "${name}"
+  return 0
+}
+
+refuse_or_keep() {
+  local name="$1"
+  local required="$2"
+  local msg="$3"
+  if [[ "${required}" == "1" ]]; then
+    bashio::exit.nok "${msg}"
+  fi
+  bashio::log.warning "${msg}; keeping the installed copy"
+}
+
 reject_windows_archive() {
   local name="$1"
   local archive="$2"
@@ -87,16 +313,20 @@ reject_windows_archive() {
   local blob="${filename} ${effective}"
   blob="$(printf '%s' "${blob}" | tr 'A-Z' 'a-z')"
   if [[ "${blob}" == *windows* || "${filename}" == *.zip || "${filename}" == *.ZIP ]]; then
-    bashio::exit.nok "${name} resolved to a Windows artifact (${filename:-${effective}}). HAOS needs os=${servarr_os} linux tarball."
+    bashio::log.error "${name} resolved to a Windows artifact (${filename:-${effective}}). HAOS needs os=${servarr_os} linux tarball."
+    return 1
   fi
   if [[ "${magic}" == 504b* ]]; then
-    bashio::exit.nok "${name} is a zip (Windows Servarr build), not a Linux .tar.gz (magic ${magic})"
+    bashio::log.error "${name} is a zip (Windows Servarr build), not a Linux .tar.gz (magic ${magic})"
+    return 1
   fi
   if [[ "${magic}" != 1f8b* ]]; then
-    bashio::exit.nok "${name} is not gzip (magic ${magic}; ${filename:-${effective}}). Refusing to untar."
+    bashio::log.error "${name} is not gzip (magic ${magic}; ${filename:-${effective}}). Refusing to untar."
+    return 1
   fi
   if [[ "${servarr_os}" == "linuxmusl" && -n "${filename}" && "${filename}" != *musl* ]]; then
-    bashio::exit.nok "${name} filename ${filename} is not a musl build (HAOS is Alpine)"
+    bashio::log.error "${name} filename ${filename} is not a musl build (HAOS is Alpine)"
+    return 1
   fi
 }
 
@@ -105,10 +335,12 @@ assert_elf_launcher() {
   local magic
   magic="$(file_magic "${bin}")"
   if [[ "${magic}" == 4d5a* ]]; then
-    bashio::exit.nok "${bin} is a Windows PE launcher (MZ). Linux Servarr uses an ELF host; .dll sidecars can still be MZ."
+    bashio::log.error "${bin} is a Windows PE launcher (MZ). Linux Servarr uses an ELF host; .dll sidecars can still be MZ."
+    return 1
   fi
   if [[ "${magic}" != 7f454c46 ]]; then
-    bashio::exit.nok "${bin} is not an ELF executable (magic ${magic})"
+    bashio::log.error "${bin} is not an ELF executable (magic ${magic})"
+    return 1
   fi
 }
 
@@ -138,15 +370,25 @@ fetch_tarball() {
   local name="$1"
   local url="$2"
   local dest="${POMPEY_ENGINES}/${name}"
+  local required=1
   if [[ -x "${dest}/${name}" ]]; then
-    bashio::log.info "${name} already present"
-    return 0
+    required=0
+    local identity
+    identity="$(probe_identity "${url}")"
+    if identity_current "${name}" "${dest}" "${identity}"; then
+      bashio::log.info "${name} current"
+      return 0
+    fi
+    if [[ -z "${identity}" || "${identity}" == "||" ]]; then
+      bashio::log.warning "${name} could not check upstream; keeping the installed copy"
+      return 0
+    fi
   fi
 
   bashio::log.info "Downloading ${name} (${servarr_os}/${servarr_arch})"
-  pompey-status fetch "Downloading hidden engines" 35 || true
+  fetch_status fetch "Downloading hidden engines" 35
 
-  local staging unpack archive headers effective filename
+  local staging unpack archive headers effective filename identity
   staging="${POMPEY_ENGINES}/.partial-${name}"
   rm -rf "${staging}"
   unpack="${staging}/unpack"
@@ -154,16 +396,38 @@ fetch_tarball() {
   archive="${staging}/app.tar.gz"
   headers="${staging}/headers.txt"
 
-  effective="$(
+  if ! effective="$(
     curl -fsSL --retry 3 --retry-delay 2 \
       -D "${headers}" -o "${archive}" -w '%{url_effective}' \
       "${url}"
-  )"
+  )"; then
+    rm -rf "${staging}"
+    if [[ "${required}" -eq 1 ]]; then
+      bashio::exit.nok "Failed to download ${name}"
+    fi
+    bashio::log.warning "Failed to download ${name}; keeping the installed copy"
+    return 0
+  fi
   filename="$(header_filename "${headers}")"
+  identity="$(identity_from_headers "${headers}" "${effective}")"
   bashio::log.info "${name} artifact ${filename:-unknown} (${effective})"
 
-  reject_windows_archive "${name}" "${archive}" "${filename}" "${effective}"
-  tar_extract "${archive}" "${unpack}"
+  if [[ "${required}" -eq 0 ]] && identity_current "${name}" "${dest}" "${identity}"; then
+    rm -rf "${staging}"
+    bashio::log.info "${name} current"
+    return 0
+  fi
+
+  if ! reject_windows_archive "${name}" "${archive}" "${filename}" "${effective}"; then
+    rm -rf "${staging}"
+    refuse_or_keep "${name}" "${required}" "Refused ${name} artifact (${filename:-${effective}})"
+    return 0
+  fi
+  if ! tar_extract "${archive}" "${unpack}"; then
+    rm -rf "${staging}"
+    refuse_or_keep "${name}" "${required}" "Failed to unpack ${name}"
+    return 0
+  fi
 
   local inner=""
   if [[ -e "${unpack}/${name}/${name}" ]]; then
@@ -179,18 +443,26 @@ fetch_tarball() {
   fi
   if [[ -z "${inner}" || ! -e "${inner}/${name}" ]]; then
     rm -rf "${staging}"
-    bashio::exit.nok "Failed to unpack ${name} (no ${name}/${name} under ${filename:-archive})"
+    if [[ "${required}" -eq 1 ]]; then
+      bashio::exit.nok "Failed to unpack ${name} (no ${name}/${name} under ${filename:-archive})"
+    fi
+    bashio::log.warning "Failed to unpack ${name}; keeping the installed copy"
+    return 0
   fi
 
-  assert_elf_launcher "${inner}/${name}"
+  if ! assert_elf_launcher "${inner}/${name}"; then
+    rm -rf "${staging}"
+    refuse_or_keep "${name}" "${required}" "${inner}/${name} is not a Linux ELF launcher"
+    return 0
+  fi
   make_elfs_executable "${inner}"
   chmod -R a+rX "${inner}"
   chmod a+x "${inner}/${name}"
 
-  rm -rf "${dest}"
-  mv "${inner}" "${dest}"
+  if install_staged "${name}" "${dest}" "${inner}" "${identity}" "${required}"; then
+    bashio::log.info "${name} ready (ELF) under ${dest}"
+  fi
   rm -rf "${staging}"
-  bashio::log.info "${name} ready (ELF) under ${dest}"
 }
 
 fetch_recyclarr() {
@@ -199,31 +471,58 @@ fetch_recyclarr() {
     return 0
   fi
   local dest="${POMPEY_ENGINES}/recyclarr"
+  local required=1
   if [[ -x "${dest}" ]]; then
-    bashio::log.info "Recyclarr already present"
-    return 0
+    required=0
+    local identity
+    identity="$(probe_identity "${recyclarr_url}")"
+    if identity_current recyclarr "${dest}" "${identity}"; then
+      bashio::log.info "Recyclarr current"
+      return 0
+    fi
+    if [[ -z "${identity}" || "${identity}" == "||" ]]; then
+      bashio::log.warning "Recyclarr could not check upstream; keeping the installed copy"
+      return 0
+    fi
   fi
   bashio::log.info "Downloading Recyclarr (linux-musl/${servarr_arch})"
-  pompey-status fetch "Downloading Recyclarr" 50 || true
-  local staging unpack archive headers effective filename magic
+  fetch_status fetch "Downloading Recyclarr" 50
+  local staging unpack archive headers effective filename magic identity
   staging="${POMPEY_ENGINES}/.partial-recyclarr"
   rm -rf "${staging}"
   unpack="${staging}/unpack"
   mkdir -p "${unpack}"
   archive="${staging}/recyclarr.tar.xz"
   headers="${staging}/headers.txt"
-  effective="$(
+  if ! effective="$(
     curl -fsSL --retry 3 --retry-delay 2 \
       -D "${headers}" -o "${archive}" -w '%{url_effective}' \
       "${recyclarr_url}"
-  )"
+  )"; then
+    rm -rf "${staging}"
+    if [[ "${required}" -eq 1 ]]; then
+      bashio::exit.nok "Failed to download Recyclarr"
+    fi
+    bashio::log.warning "Failed to download Recyclarr; keeping the installed copy"
+    return 0
+  fi
   filename="$(header_filename "${headers}")"
+  identity="$(identity_from_headers "${headers}" "${effective}")"
   bashio::log.info "Recyclarr artifact ${filename:-unknown} (${effective})"
+  if [[ "${required}" -eq 0 ]] && identity_current recyclarr "${dest}" "${identity}"; then
+    rm -rf "${staging}"
+    bashio::log.info "Recyclarr current"
+    return 0
+  fi
   magic="$(file_magic "${archive}")"
   # xz signature fd 37 7a 58
   if [[ "${magic}" != fd377a* ]]; then
     rm -rf "${staging}"
-    bashio::exit.nok "Recyclarr is not xz (magic ${magic}; ${filename:-${effective}})"
+    if [[ "${required}" -eq 1 ]]; then
+      bashio::exit.nok "Recyclarr is not xz (magic ${magic}; ${filename:-${effective}})"
+    fi
+    bashio::log.warning "Recyclarr upstream was not xz; keeping the installed copy"
+    return 0
   fi
   tar --no-same-owner --no-same-permissions -xJf "${archive}" -C "${unpack}"
   local bin=""
@@ -240,13 +539,22 @@ fetch_recyclarr() {
   fi
   if [[ -z "${bin}" ]]; then
     rm -rf "${staging}"
-    bashio::exit.nok "Failed to unpack Recyclarr (no recyclarr binary)"
+    if [[ "${required}" -eq 1 ]]; then
+      bashio::exit.nok "Failed to unpack Recyclarr (no recyclarr binary)"
+    fi
+    bashio::log.warning "Failed to unpack Recyclarr; keeping the installed copy"
+    return 0
   fi
-  assert_elf_launcher "${bin}"
+  if ! assert_elf_launcher "${bin}"; then
+    rm -rf "${staging}"
+    refuse_or_keep recyclarr "${required}" "${bin} is not a Linux ELF launcher"
+    return 0
+  fi
   chmod 755 "${bin}"
-  mv "${bin}" "${dest}"
+  if install_staged recyclarr "${dest}" "${bin}" "${identity}" "${required}"; then
+    bashio::log.info "Recyclarr ready (ELF) under ${dest}"
+  fi
   rm -rf "${staging}"
-  bashio::log.info "Recyclarr ready (ELF) under ${dest}"
 }
 
 fetch_qbit() {
@@ -255,21 +563,70 @@ fetch_qbit() {
     return 0
   fi
   local dest="${POMPEY_ENGINES}/qbittorrent-nox"
+  local required=1
   if [[ -x "${dest}" ]]; then
-    bashio::log.info "qBittorrent-nox already present"
-    return 0
+    required=0
+    if [[ "${POMPEY_HOLD_QBIT:-}" == "1" ]]; then
+      bashio::log.info "qBittorrent-nox has an active transfer; not replacing the binary"
+      return 0
+    fi
+    local identity
+    identity="$(probe_identity "${qbit_url}")"
+    if identity_current qbittorrent-nox "${dest}" "${identity}"; then
+      bashio::log.info "qBittorrent-nox current"
+      return 0
+    fi
+    if [[ -z "${identity}" || "${identity}" == "||" ]]; then
+      bashio::log.warning "qBittorrent-nox could not check upstream; keeping the installed copy"
+      return 0
+    fi
   fi
   bashio::log.info "Downloading the download engine (${qbit_arch})"
-  pompey-status fetch "Downloading the download engine" 45 || true
+  fetch_status fetch "Downloading the download engine" 45
   local staging="${POMPEY_ENGINES}/.partial-qbittorrent-nox"
   rm -rf "${staging}"
   mkdir -p "${staging}"
   local bin="${staging}/qbittorrent-nox"
-  curl -fsSL --retry 3 --retry-delay 2 -o "${bin}" "${qbit_url}"
-  assert_elf_launcher "${bin}"
+  local headers="${staging}/headers.txt"
+  local effective identity
+  if ! effective="$(
+    curl -fsSL --retry 3 --retry-delay 2 \
+      -D "${headers}" -o "${bin}" -w '%{url_effective}' \
+      "${qbit_url}"
+  )"; then
+    rm -rf "${staging}"
+    if [[ "${required}" -eq 1 ]]; then
+      bashio::exit.nok "Failed to download qBittorrent-nox"
+    fi
+    bashio::log.warning "Failed to download qBittorrent-nox; keeping the installed copy"
+    return 0
+  fi
+  identity="$(identity_from_headers "${headers}" "${effective}")"
+  if [[ "${required}" -eq 0 ]] && identity_current qbittorrent-nox "${dest}" "${identity}"; then
+    rm -rf "${staging}"
+    bashio::log.info "qBittorrent-nox current"
+    return 0
+  fi
+  if ! assert_elf_launcher "${bin}"; then
+    rm -rf "${staging}"
+    refuse_or_keep qbittorrent-nox "${required}" "${bin} is not a Linux ELF launcher"
+    return 0
+  fi
   chmod 755 "${bin}"
-  mv "${bin}" "${dest}"
+  if install_staged qbittorrent-nox "${dest}" "${bin}" "${identity}" "${required}"; then
+    bashio::log.info "qBittorrent-nox ready (ELF) under ${dest}"
+  fi
   rm -rf "${staging}"
+}
+
+link_seerr_config() {
+  local dest="$1"
+  mkdir -p "${POMPEY_CONFIG}/seerr"
+  # Do not plant Seerr's DOCKER sentinel — that is how it detects a missing
+  # bind-mount. /config/seerr is persisted by Home Assistant addon_config.
+  rm -f "${POMPEY_CONFIG}/seerr/DOCKER"
+  rm -rf "${dest}/app/config"
+  ln -sfn "${POMPEY_CONFIG}/seerr" "${dest}/app/config"
 }
 
 fetch_seerr() {
@@ -278,36 +635,62 @@ fetch_seerr() {
     return 0
   fi
   local dest="${POMPEY_ENGINES}/seerr"
+  local required=1
   if [[ -f "${dest}/app/dist/index.js" ]]; then
-    bashio::log.info "Seerr already present"
-    return 0
+    required=0
   fi
   if ! command -v crane >/dev/null 2>&1; then
+    if [[ "${required}" -eq 0 ]]; then
+      bashio::log.warning "crane not on PATH; keeping the installed Seerr"
+      return 0
+    fi
     bashio::log.warning "crane not on PATH; skip Seerr unpack (HAOS image has crane; agents can install it)"
     return 0
   fi
+  local digest=""
+  digest="$(crane digest --platform "${crane_platform}" ghcr.io/seerr-team/seerr:latest 2>/dev/null || true)"
+  if [[ "${required}" -eq 0 ]]; then
+    if [[ -n "${digest}" ]] && identity_current seerr "${dest}" "${digest}"; then
+      bashio::log.info "Seerr current"
+      return 0
+    fi
+    if [[ -z "${digest}" ]]; then
+      bashio::log.warning "Seerr could not check upstream digest; keeping the installed copy"
+      return 0
+    fi
+  fi
   bashio::log.info "Unpacking the household UI"
-  pompey-status fetch "Downloading the household UI" 55 || true
+  fetch_status fetch "Downloading the household UI" 55
   local staging="${POMPEY_ENGINES}/.partial-seerr"
   rm -rf "${staging}"
   mkdir -p "${staging}"
   # Same class of bug as Servarr: do not tar into /tmp under AppArmor.
-  crane export --platform "${crane_platform}" ghcr.io/seerr-team/seerr:latest \
-    | tar --no-same-owner --no-same-permissions -x -C "${staging}"
+  if ! crane export --platform "${crane_platform}" ghcr.io/seerr-team/seerr:latest \
+    | tar --no-same-owner --no-same-permissions -x -C "${staging}"; then
+    rm -rf "${staging}"
+    if [[ "${required}" -eq 1 ]]; then
+      bashio::exit.nok "Failed to unpack Seerr"
+    fi
+    bashio::log.warning "Failed to unpack Seerr; keeping the installed copy"
+    return 0
+  fi
   if [[ ! -f "${staging}/app/dist/index.js" ]]; then
     rm -rf "${staging}"
-    bashio::exit.nok "Seerr image did not contain /app/dist/index.js"
+    if [[ "${required}" -eq 1 ]]; then
+      bashio::exit.nok "Seerr image did not contain /app/dist/index.js"
+    fi
+    bashio::log.warning "Seerr image missing index.js; keeping the installed copy"
+    return 0
   fi
   chmod -R a+rX "${staging}"
-  rm -rf "${dest}"
-  mv "${staging}" "${dest}"
-  mkdir -p "${POMPEY_CONFIG}/seerr"
-  # Do not plant Seerr's DOCKER sentinel — that is how it detects a missing
-  # bind-mount. /config/seerr is persisted by Home Assistant addon_config.
-  rm -f "${POMPEY_CONFIG}/seerr/DOCKER"
-  rm -rf "${dest}/app/config"
-  ln -sfn "${POMPEY_CONFIG}/seerr" "${dest}/app/config"
+  if install_staged seerr "${dest}" "${staging}" "${digest:-unknown}" "${required}"; then
+    link_seerr_config "${dest}"
+    bashio::log.info "Seerr ready under ${dest}"
+  fi
 }
+
+mkdir -p "${POMPEY_READY}"
+: > "$(changed_path)"
 
 if [[ "${POMPEY_SKIP_PROWLARR:-}" != "1" ]]; then
   fetch_tarball "Prowlarr" "${prowlarr_url}"
@@ -322,4 +705,5 @@ fetch_qbit
 fetch_recyclarr
 fetch_seerr
 
+date +%s > "${POMPEY_READY}/engines-checked"
 bashio::log.info "Engines ready under ${POMPEY_ENGINES}"

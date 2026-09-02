@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.39
+
+- Hidden engines no longer freeze at first download. After the Proton tunnel is up, Pompey checks the official Prowlarr / Radarr / Sonarr / qBittorrent / Recyclarr / Seerr channels and replaces an on-disk copy only when upstream has moved. That check runs on add-on start and about daily after that. Arr’s in-app updater stays off (Pompey is the updater, the way Docker compose pulls images). A failed check keeps the previous binary and search stays up. qBittorrent is not swapped while a file is still landing in `incomplete/`. Rebuild so the banner says **0.2.39**.
+
 ## 0.2.38
 
 - Home Assistant no longer has preferred language / anime audio / subtitles options. Those scored release *names* and did not match how Arr or Seerr actually pick audio. Default and Max now use Arr’s original-language custom format (same mechanism as TRaSH Language: Not Original): a French dub of an English title loses; a French film still matches French. Anything still takes whatever exists. Dual-audio stays a small tie-break. Playback language stays in Plex. Leftover “Pompey English dub/subs” custom formats from 0.2.28 stay at score 0.

@@ -149,10 +149,23 @@ def route_library(
             log(f"{label} skip {item.get('title')}: {exc}")
 
 
+def arr_api_root(base: str, api_key: str) -> str:
+    """Prefer /api/v3; use /api/v4 when v3 is gone."""
+    host = base.rstrip("/")
+    for ver in ("v3", "v4"):
+        root = f"{host}/api/{ver}"
+        try:
+            http_json("GET", f"{root}/qualityprofile", headers=headers(api_key))
+            return root
+        except Exception:
+            continue
+    return f"{host}/api/v3"
+
+
 def route_movies(key: str) -> None:
     route_library(
         key,
-        f"{radarr_url()}/api/v3/movie",
+        f"{arr_api_root(radarr_url(), key)}/movie",
         movies_kid_dir(),
         movies_dir(),
         KID_MOVIE,
@@ -163,7 +176,7 @@ def route_movies(key: str) -> None:
 def route_series(key: str) -> None:
     route_library(
         key,
-        f"{sonarr_url()}/api/v3/series",
+        f"{arr_api_root(sonarr_url(), key)}/series",
         tv_kid_dir(),
         tv_dir(),
         KID_TV,

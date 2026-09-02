@@ -231,6 +231,9 @@ class FakeState:
         }
         self.strict_quality_profiles = True
         self.fail_quality_profiles = False
+        self.arr_drop_v3 = False
+        self.reject_command_names: set[str] = set()
+        self.seerr_missing_jobs: set[str] = set()
         self.reject_profile_names: set[str] = set()
         self.quality_post_empty_body = False
         self.fail_media_management = False
@@ -435,6 +438,8 @@ def handler_for(state: FakeState):
                     return self._send(text="Ok.")
                 return self._send(404, {"error": path})
             if role in {"sonarr", "radarr"}:
+                if state.arr_drop_v3 and "/api/v3/" in path:
+                    return self._send(404, {"error": path})
                 folders = state.sonarr_folders if role == "sonarr" else state.radarr_folders
                 profiles = state.radarr_profiles if role == "radarr" else state.sonarr_profiles
                 defs = state.radarr_defs if role == "radarr" else state.sonarr_defs
@@ -670,6 +675,9 @@ def handler_for(state: FakeState):
                     )
                     return self._send(body=queued)
                 if path.endswith("/command") and method == "POST":
+                    name = (body or {}).get("name") if isinstance(body, dict) else None
+                    if name in state.reject_command_names:
+                        return self._send(400, {"message": f"unknown command {name}"})
                     state.arr_commands.append(body or {})
                     return self._send(201, body or {})
                 if path.endswith("/indexer") and method == "GET":
@@ -876,7 +884,10 @@ def handler_for(state: FakeState):
                     state.initialized = True
                     return self._send(body={"initialized": True})
                 if path.startswith("/api/v1/settings/jobs/") and path.endswith("/run"):
-                    state.seerr_jobs.append(path.rsplit("/", 2)[-2])
+                    job = path.rsplit("/", 2)[-2]
+                    if job in state.seerr_missing_jobs:
+                        return self._send(404, {"error": path})
+                    state.seerr_jobs.append(job)
                     return self._send(body={"ok": True})
                 return self._send(404, {"error": path})
             return self._send(500, {"error": "no role"})
@@ -1126,6 +1137,10 @@ class Helpers(unittest.TestCase):
         fetch = (ROOT / "pompey/rootfs/usr/local/bin/fetch-engines").read_text()
         self.assertIn("recyclarr-linux-musl-", fetch)
         self.assertIn("POMPEY_SKIP_RECYCLARR", fetch)
+        self.assertIn("identity_current", fetch)
+        self.assertIn("engines-checked", fetch)
+        self.assertIn("POMPEY_HOLD_QBIT", fetch)
+        self.assertNotIn("already present", fetch)
         self.assertNotIn('touch "${POMPEY_CONFIG}/seerr/DOCKER"', seerr_run)
         self.assertNotIn('touch "${POMPEY_CONFIG}/seerr/DOCKER"', fetch)
         self.assertIn('rm -f "${POMPEY_CONFIG}/seerr/DOCKER"', seerr_run)
@@ -1913,6 +1928,10 @@ class WireStack(unittest.TestCase):
         )
         os.environ.pop("POMPEY_RECYCLARR", None)
         os.environ.pop("POMPEY_RECYCLARR_DATA", None)
+        os.environ.pop("POMPEY_FETCH_ENGINES", None)
+        os.environ.pop("POMPEY_ENGINE_REFRESH_AGE", None)
+        os.environ.pop("POMPEY_HOLD_QBIT", None)
+        os.environ.pop("POMPEY_WIRE_TIMEOUT", None)
         self.nginx = nginx
         self.ready = ready
         self._old_path = os.environ.get("PATH", "")
@@ -1958,7 +1977,12 @@ class WireStack(unittest.TestCase):
         self.assertNotIn("RefreshMonitoredDownloads", cmd_names)
         self.assertEqual(
             self.state.seerr_jobs,
-            ["plex-recently-added-scan", "radarr-scan", "sonarr-scan"],
+            [
+                "plex-recently-added-scan",
+                "plex-recently-added",
+                "radarr-scan",
+                "sonarr-scan",
+            ],
         )
         self.assertEqual(self.state.qbit_removed, [])
         self.assertEqual({a["name"] for a in self.state.apps}, {"Sonarr", "Radarr"})
@@ -2962,8 +2986,128 @@ class WireStack(unittest.TestCase):
         self.assertEqual(rc, 0)
         self.assertEqual(
             self.state.seerr_jobs,
-            ["plex-recently-added-scan", "radarr-scan", "sonarr-scan"],
+            [
+                "plex-recently-added-scan",
+                "plex-recently-added",
+                "radarr-scan",
+                "sonarr-scan",
+            ],
         )
+
+    def test_seerr_tickle_falls_back_when_job_name_404s(self):
+        os.environ["INDEXER_URL"] = ""
+        os.environ["INDEXER_API_KEY"] = ""
+        self.state.seerr_has_admin = True
+        self.state.seerr_missing_jobs = {"plex-recently-added-scan"}
+        rc = ws.housekeep()
+        self.assertEqual(rc, 0)
+        self.assertEqual(
+            self.state.seerr_jobs,
+            ["plex-recently-added", "radarr-scan", "sonarr-scan"],
+        )
+
+    def test_arr_api_root_prefers_v3(self):
+        os.environ["INDEXER_URL"] = ""
+        os.environ["INDEXER_API_KEY"] = ""
+        root = ws.arr_api_root(os.environ["RADARR_URL"], "radarr-key")
+        self.assertTrue(root.endswith("/api/v3"))
+
+    def test_arr_api_root_uses_v4_when_v3_is_gone(self):
+        os.environ["INDEXER_URL"] = ""
+        os.environ["INDEXER_API_KEY"] = ""
+        self.state.arr_drop_v3 = True
+        root = ws.arr_api_root(os.environ["RADARR_URL"], "radarr-key")
+        self.assertTrue(root.endswith("/api/v4"))
+        rc = ws.main()
+        self.assertEqual(rc, 0)
+        v4 = [
+            path
+            for role, method, path, _body in self.state.calls
+            if role == "radarr" and "/api/v4/" in str(path)
+        ]
+        self.assertTrue(v4, self.state.calls[-8:])
+        v3 = [
+            path
+            for role, method, path, _body in self.state.calls
+            if role == "radarr" and "/api/v3/" in str(path) and "qualityprofile" not in str(path)
+        ]
+        self.assertEqual(v3, [])
+
+    def test_housekeep_tries_download_scan_alias(self):
+        os.environ["INDEXER_URL"] = ""
+        os.environ["INDEXER_API_KEY"] = ""
+        os.environ["MEDIA_ROOT"] = str(self.tmp)
+        complete = self.tmp / "downloads" / "complete"
+        complete.mkdir(parents=True, exist_ok=True)
+        (complete / "stuck-title.mkv").write_bytes(b"x" * 50)
+        self.state.reject_command_names = {"DownloadedMoviesScan", "DownloadedEpisodesScan"}
+        rc = ws.housekeep()
+        self.assertEqual(rc, 0)
+        names = {item.get("name") for item in self.state.arr_commands}
+        self.assertIn("DownloadedMovieScan", names)
+        self.assertIn("DownloadedEpisodeScan", names)
+        self.assertNotIn("DownloadedMoviesScan", names)
+
+    def test_housekeep_skips_engine_refresh_without_checked_marker(self):
+        os.environ["INDEXER_URL"] = ""
+        os.environ["INDEXER_API_KEY"] = ""
+        called = self.tmp / "fetch-called"
+        fake = self.tmp / "fake-fetch-engines"
+        fake.write_text(f"#!/bin/sh\necho ran >{called}\nexit 0\n")
+        fake.chmod(0o755)
+        os.environ["POMPEY_FETCH_ENGINES"] = str(fake)
+        self.assertFalse(ws.engines_refresh_due())
+        rc = ws.housekeep()
+        self.assertEqual(rc, 0)
+        self.assertFalse(called.exists())
+
+    def test_housekeep_refreshes_stale_engines_and_holds_qbit(self):
+        os.environ["INDEXER_URL"] = ""
+        os.environ["INDEXER_API_KEY"] = ""
+        marker = self.ready / "engines-checked"
+        marker.write_text("1\n")
+        os.utime(marker, (0, 0))
+        hold = self.tmp / "fetch-env"
+        fake = self.tmp / "fake-fetch-engines"
+        fake.write_text(
+            "#!/bin/sh\n"
+            f"printf 'HOLD=%s\\n' \"${{POMPEY_HOLD_QBIT:-}}\" >{hold}\n"
+            f": >{self.ready / 'engines-changed'}\n"
+            "exit 0\n"
+        )
+        fake.chmod(0o755)
+        os.environ["POMPEY_FETCH_ENGINES"] = str(fake)
+        os.environ["POMPEY_ENGINE_REFRESH_AGE"] = "1"
+        self.state.qbit_torrents = [
+            {
+                "hash": "aa" * 20,
+                "name": "writing",
+                "state": "downloading",
+                "progress": 0.4,
+                "amount_left": 100,
+                "content_path": str(self.tmp / "incomplete.bin"),
+            }
+        ]
+        self.assertTrue(ws.engines_refresh_due())
+        self.assertTrue(ws.qbit_has_active_transfers())
+        rc = ws.housekeep()
+        self.assertEqual(rc, 0)
+        self.assertEqual(hold.read_text().strip(), "HOLD=1")
+
+    def test_qbit_has_active_transfers_ignores_finished_seed(self):
+        os.environ["INDEXER_URL"] = ""
+        os.environ["INDEXER_API_KEY"] = ""
+        self.state.qbit_torrents = [
+            {
+                "hash": "bb" * 20,
+                "name": "done",
+                "state": "uploading",
+                "progress": 1,
+                "amount_left": 0,
+                "content_path": str(self.tmp / "done.mkv"),
+            }
+        ]
+        self.assertFalse(ws.qbit_has_active_transfers())
 
     def test_updates_existing_download_client_remove_flag(self):
         os.environ["INDEXER_URL"] = ""
@@ -3632,6 +3776,14 @@ class RouteRating(unittest.TestCase):
         self.assertNotIn("Unknown", dests)
         self.assertNotIn("Already Kid", dests)
         self.assertNotIn("Adult Show", dests)
+
+    def test_arr_v4_still_routes_kid_titles(self):
+        self.state.arr_drop_v3 = True
+        rr.route_movies("radarr-key")
+        rr.route_series("sonarr-key")
+        dests = {m.get("title"): m.get("rootFolderPath") for m in self.state.moved}
+        self.assertEqual(dests["Kid Flick"], "/media/Movies/Kid Friendly")
+        self.assertEqual(dests["Kid Show"], "/media/TV/Kid Friendly")
 
 
 class ProtonSetup(unittest.TestCase):

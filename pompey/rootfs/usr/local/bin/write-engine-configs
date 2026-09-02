@@ -90,12 +90,31 @@ def force_info_logs(path):
             fh.write(new)
 
 
+def pin_arr_docker_updates(path):
+    """Arr must not self-replace inside this container. Re-stamp every boot.
+
+    Prowlarr's UI can flip BuiltIn on; an Arr rewrite can drop our tags.
+    Pompey is the updater (fetch-engines), same as Docker compose pull.
+    """
+    if not os.path.isfile(path):
+        return
+    body = open(path, encoding="utf-8").read()
+    new = set_tag(body, "UpdateAutomatically", "False")
+    new = set_tag(new, "UpdateMechanism", "Docker")
+    if new != body:
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(new)
+
+
 config = os.environ.get("POMPEY_CONFIG", "/config")
 write_xml(f"{config}/sonarr/config.xml", 8989, secrets["sonarr_api_key"], "Sonarr")
 write_xml(f"{config}/radarr/config.xml", 7878, secrets["radarr_api_key"], "Radarr")
 force_info_logs(f"{config}/sonarr/config.xml")
 force_info_logs(f"{config}/radarr/config.xml")
 publish_prowlarr(f"{config}/prowlarr/config.xml", secrets["prowlarr_api_key"])
+pin_arr_docker_updates(f"{config}/sonarr/config.xml")
+pin_arr_docker_updates(f"{config}/radarr/config.xml")
+pin_arr_docker_updates(f"{config}/prowlarr/config.xml")
 
 pbk = secrets["qbit_pbkdf2"]
 user = secrets["qbit_user"]
@@ -179,10 +198,32 @@ def patch_qbit_paths(text: str) -> str:
         (r"Downloads\TempPath", incomplete),
         (r"FileLogger\Path", log_dir),
         (r"FileLogger\Enabled", "true"),
+        (r"Session\Interface", "wg0"),
+        (r"Session\InterfaceName", "wg0"),
+        (r"Connection\Interface", "wg0"),
+        (r"Connection\InterfaceName", "wg0"),
     ):
         pat = rf"(?m)^{re.escape(key)}=.*$"
         if re.search(pat, text):
             text = re.sub(pat, lambda _m, k=key, v=value: f"{k}={v}", text, count=1)
+    for key, value, section in (
+        (r"Session\Interface", "wg0", r"[BitTorrent]"),
+        (r"Session\InterfaceName", "wg0", r"[BitTorrent]"),
+        (r"Connection\Interface", "wg0", r"[Preferences]"),
+        (r"Connection\InterfaceName", "wg0", r"[Preferences]"),
+    ):
+        if re.search(rf"(?m)^{re.escape(key)}=", text):
+            continue
+        heading = rf"(?m)^({re.escape(section)})\s*$"
+        if re.search(heading, text):
+            text = re.sub(
+                heading,
+                lambda m, k=key, v=value: f"{m.group(1)}\n{k}={v}",
+                text,
+                count=1,
+            )
+        else:
+            text += f"\n{section}\n{key}={value}\n"
     if not re.search(rf"(?m)^{re.escape(r'FileLogger\Path')}=", text):
         if re.search(rf"(?m)^{re.escape(r'FileLogger\Enabled')}=", text):
             text = re.sub(

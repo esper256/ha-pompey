@@ -2,7 +2,7 @@
 
 Pompey ships other teams’ programs (Seerr, Prowlarr, Radarr, Sonarr, qBittorrent-nox, Recyclarr) inside one Home Assistant add-on. Those programs move. Indexers and trackers move faster. If the hidden engines freeze at first boot, search eventually finds nothing. If every engine release also requires a Pompey store bump, the household is stuck in a rebuild treadmill that has nothing to do with Proton or the wait screen.
 
-This note is the update **plan** (why, what we are doing, what we refused) plus the **brittleness map** for that plan. It is not the feature itself. Today the add-on still freezes binaries on first fetch. README roadmap item 2 is the work that implements the decision here.
+This note is the update **plan** (why, what we are doing, what we refused) plus the **brittleness map** for that plan. **0.2.39** implements it: skip-if-present is gone. README roadmap item 2 is the shipped orchestrator.
 
 ## Why this is a product problem
 
@@ -50,7 +50,7 @@ We already fetch from the same official channels a first boot uses:
 - Recyclarr: GitHub `latest` musl tarball (their Docker world floats a major tag; we are on the binary path)
 - Seerr: `crane export ghcr.io/seerr-team/seerr:latest`
 
-First boot already takes `latest`. The freeze is only **skip if the file exists**. Two households that installed a month apart already run different engines. Auto-update is making later boots as current as a new install, on a timer, without a Pompey version bump.
+First boot already takes `latest`. Auto-update is making later boots as current as a new install, on a timer, without a Pompey version bump. Presence is not a skip; identity (ETag / filename / digest) is.
 
 ## Options we considered
 
@@ -76,7 +76,7 @@ Re-running **wire** after a binary replace *is* part of the plan (idempotent fir
 
 ### D. Pompey is the updater (chosen)
 
-Keep `UpdateMechanism=Docker` / `UpdateAutomatically=False` so the apps never self-replace. Pompey fetches from the official channels above, **skips when the on-disk version is already current**, replaces atomically (we already stage under `.partial-*`), restarts that s6 service, then runs `wire-stack` again so download clients, quality names, and Seerr connections re-assert.
+Keep `UpdateMechanism=Docker` / `UpdateAutomatically=False` so the apps never self-replace. Pompey fetches from the official channels above, **skips when the on-disk identity is already current**, replaces atomically (we already stage under `.partial-*`), restarts that s6 service, then runs `wire-stack` again so download clients, quality names, and Seerr connections re-assert.
 
 Check on add-on start **and** on a slow timer (days, through the tunnel, same as Recyclarr’s TRaSH sync). Failures keep the previous binary and log. Search stays up.
 
@@ -99,19 +99,20 @@ Prowlarr/Radarr/Sonarr need indexer defs; Seerr and qbit have been the glue-brea
 - Do not enable Arr BuiltIn / `UpdateAutomatically`.
 - Do not require a Pompey add-on bump for an upstream engine release.
 - Do not treat “file already exists” as “we are done forever.”
-- Do re-apply `UpdateMechanism=Docker` on every start so a curious Prowlarr click cannot turn BuiltIn back on (today that XML is first-write-only).
+- Do re-apply `UpdateMechanism=Docker` on every start so a curious Prowlarr click cannot turn BuiltIn back on.
 - Do re-run wire after a replace (the first-setup path is the migrate path).
 - Do keep TRaSH JSON on its existing timer; fold the Recyclarr *binary* into the same fetch policy as the others.
 
-## What implementing this looks like (not done)
+## What 0.2.39 shipped
 
-1. `fetch-engines` grows a version/ETag compare. Presence is not a skip. Staging and ELF checks stay.
-2. A timer (housekeep or a sibling service), after the tunnel is up, calls that fetch. Not every five minutes.
-3. If a binary actually changed: restart that engine, then `wire-stack` (not a distinct “update mode” — the existing idempotent wire).
-4. `write-engine-configs` stops being first-write-only for the update flags. Re-stamp `UpdateAutomatically=False` / `UpdateMechanism=Docker` every boot.
-5. Tests: `tests/integration.sh` against **whatever** fetch just pulled, on a schedule, not only the tarball cached on the agent VM.
+1. `fetch-engines` compares ETag / Content-Disposition filename / effective URL (Seerr: crane digest). Presence is not a skip. Staging and ELF checks stay. A failed download, a Windows zip, or a non-ELF launcher keeps the installed copy when one exists.
+2. Housekeep (every five minutes) calls that fetch only when `engines-checked` is a day old. Boot fetch writes the marker. Missing marker means “boot has not fetched yet” — unit tests must not hit Servarr.
+3. If a binary actually changed: restart that s6 service (when `engines-ready` is already up), then `wire-stack` (not a distinct “update mode” — the existing idempotent wire). Re-wire after a swap does not flip the wait screen off search.
+4. `write-engine-configs` re-stamps `UpdateAutomatically=False` / `UpdateMechanism=Docker` every boot, and re-inserts qBittorrent `Session\Interface=wg0` if a new build dropped the key.
+5. Arr HTTP is probed (`/api/v3` then `/api/v4` via `qualityprofile`). Scan commands try `DownloadedMoviesScan` then `DownloadedMovieScan` (TV: Episodes then Episode). Seerr jobs try `plex-recently-added-scan` then `plex-recently-added`. qBittorrent is not replaced while a transfer is still writing `incomplete/`.
+6. Tests: fixture second-fetch skip / replace / keep-old; restamp BuiltIn→Docker and missing wg0; housekeep refresh gate and HOLD_QBIT. `tests/integration.sh` probes Arr API v3/v4 against **whatever** fetch just pulled.
 
-Until that ships, skip-if-present remains the freeze. The tables below are what we encoded as string literals and will feel first when binaries start moving.
+The tables below are the shape assumptions we still encode as strings. They will feel first when binaries start moving.
 
 ## Why not a second BitTorrent node in tests
 
@@ -121,7 +122,7 @@ The fake WebUI in `tests/lib/fake_source.py` is the realistic seam: receive the 
 
 ## Risks in this plan
 
-Unattended `latest` can break the house overnight. Mitigations: keep the previous binary on fetch failure; wait screen / app log when wire fails; integration against live latest. Remaining risks are shape assumptions we already encoded. They do not argue for pinning forever; they argue for contract tests before we flip skip-if-present.
+Unattended `latest` can break the house overnight. Mitigations: keep the previous binary on fetch failure; wait screen / app log when *first* wire fails (re-wire after a swap does not un-ready search); integration against live latest. Remaining risks are shape assumptions we already encoded. They do not argue for pinning forever.
 
 **Operational (not API strings)**
 
@@ -148,8 +149,8 @@ Unattended `latest` can break the house overnight. Mitigations: keep the previou
 
 | Assumption | Where | If it moves |
 | --- | --- | --- |
-| `/api/v3` | every Arr URL in `wire-stack` | v4 would 404 the whole wire. |
-| Command names `ManualImport`, `DownloadedMoviesScan`, `DownloadedEpisodesScan`, `RefreshMonitoredDownloads`, `MoviesSearch` / `EpisodeSearch` | housekeep | Silent no-op: files sit in `complete/`. This is the path that already took the most household back-and-forth. |
+| `/api/v3` then `/api/v4` | `arr_api_root` in `wire-stack` and `route-rating` | A prefix that is neither v3 nor v4 still falls back to v3 and 404s the wire. |
+| Command names `ManualImport`, `DownloadedMoviesScan` / `DownloadedMovieScan`, `DownloadedEpisodesScan` / `DownloadedEpisodeScan`, `RefreshMonitoredDownloads`, `MoviesSearch` / `EpisodeSearch` | housekeep | Both scan names 400/404: files sit in `complete/`. This is the path that already took the most household back-and-forth. |
 | ManualImport body: `movieId` vs `seriesId`+`episodeIds`, `importMode: Move`, `quality` + `languages` objects | `manual_import_file` | 400s. We log and the video stays in `complete/`. |
 | `GET /manualimport?folder=&filterExistingFiles=` | `import_matched_drop` | List shape change (no `movie` nested object, no `rejections`, no `hasFile`) either re-imports (deletes the library copy) or never matches. |
 | `enableCompletedDownloadHandling` and `skipFreeSpaceCheckWhenImporting` on media management | `ensure_media_management` | NAS that reports 0 bytes free skips import again. |
@@ -158,7 +159,7 @@ Unattended `latest` can break the house overnight. Mitigations: keep the previou
 | Language CF: `LanguageSpecification` with value `-2` (Original), negate | `not_original_language_format` | Original-audio scoring stops; dubs win on Default/Max. Recyclarr’s TRaSH Original is the preferred owner — this CF is the fallback when Recyclarr is missing. |
 | Custom format `fields: [{name, value}]` | `ensure_custom_formats` | Arr has flipped between `{name,value}` and a dict more than once. |
 | Root-folder POST `{path}` | `ensure_root_folder` | Kid vs Not Kid folders fail to register; Seerr routes into the wrong library. |
-| `UpdateAutomatically=False` only on **first** XML write | `write-engine-configs` | A Prowlarr UI change or an Arr rewrite can turn BuiltIn back on. Re-stamp Docker/False every start as part of this plan. |
+| `UpdateAutomatically=False` restamped every boot | `write-engine-configs` `pin_arr_docker_updates` | A Prowlarr UI change or an Arr rewrite can turn BuiltIn back on between boots. Re-stamp is the mitigation. |
 
 ### Prowlarr
 
@@ -174,7 +175,7 @@ Unattended `latest` can break the house overnight. Mitigations: keep the previou
 | --- | --- | --- |
 | `/api/v1/settings/public` means the process is up | wire required check | Next.js route rename keeps the wait screen up forever. |
 | `/settings/radarr` POST/PUT body (server ids, root folders, quality profile **names** Default/Max/Anything) | Seerr→Arr | Profile rename or PUT-vs-POST (already burned once) disconnects requests. |
-| Jobs `plex-recently-added-scan`, `radarr-scan`, `sonarr-scan` | `tickle_seerr_availability` | Requests stay “requested” after the file is in Plex. |
+| Jobs `plex-recently-added-scan` / `plex-recently-added`, `radarr-scan`, `sonarr-scan` | `tickle_seerr_availability` | Both Plex job names 404: requests stay “requested” after the file is in Plex. |
 | API key impersonates user id 1; 403 until the Plex wizard | wire retry | A Seerr auth change marks search ready with a hollow UI, or never marks ready. |
 | Image layout `/app/dist/index.js`, no `DOCKER` sentinel | `fetch-engines` | Unpack “succeeds” and the UI is empty. |
 
@@ -187,16 +188,16 @@ Unattended `latest` can break the house overnight. Mitigations: keep the previou
 | Recyclarr YAML `name: Default` / `Max` with `reset_unmatched_scores` | generated `recyclarr.yml` | Reset is correct for Default/Max (TRaSH owns scores). A YAML that named Anything would wipe CAM-allowed scores. |
 | `delete_old_custom_formats: false` | YAML | `true` would delete Anything’s formats or leftover household CFs. |
 | Anything is **not** Recyclarr-managed | `apply_household_quality_profiles` | A third TRaSH profile named similarly would fight CAM-allowed. |
-| Daily sync of TRaSH JSON while the Recyclarr **binary** stays frozen | housekeep `run_recyclarr` | Guide-side quality sizes / Original language scores can still move under a frozen binary. That is already “auto-update” for scoring, just not for the Arr apps. |
+| Daily sync of TRaSH JSON; Recyclarr **binary** uses the same fetch identity as the Arr apps | housekeep `run_recyclarr` + `fetch-engines` | Guide-side quality sizes / Original language scores can still move under an older binary until the next successful binary replace. A Recyclarr major CLI break still leaves Default/Max as stubs until we can sync. |
 
 ### Fetch / unpack
 
 | Assumption | Where | If it moves |
 | --- | --- | --- |
-| Skip if `Radarr/Radarr` (etc.) is already executable | `fetch-engines` | This skip **is** the freeze. The plan replaces it with a version compare. |
+| Identity stamp (ETag / filename / digest), not “file exists” | `fetch-engines` | A silent HEAD that returns no ETag/filename looks like “could not check”; we keep the installed copy instead of blindly re-downloading. A filename that does not change when the bits do would skip a real update. |
 | Servarr linux-musl tarball layout `Name/Name` ELF | unpack | A distro change (single binary, different folder) fails `assert_elf_launcher`. |
-| qBittorrent from `userdocs/qbittorrent-nox-static` `latest` | URL | `latest` already floats when the file is **missing**. Once present, it never refreshes — first-boot vs later-boot divergence. |
-| Seerr `ghcr.io/seerr-team/seerr:latest` via crane | unpack | Same first-fetch pin. Tag `latest` is not a version. |
+| qBittorrent from `userdocs/qbittorrent-nox-static` `latest` | URL | `latest` floats. Identity compare refreshes it; `POMPEY_HOLD_QBIT` skips replace while `incomplete/` is being written. |
+| Seerr `ghcr.io/seerr-team/seerr:latest` via crane | unpack | Tag `latest` is not a version; crane digest is the identity. |
 
 ## Product assumptions that are not API strings
 
@@ -206,12 +207,12 @@ Unattended `latest` can break the house overnight. Mitigations: keep the previou
 - **Plex is outside Pompey.** Seerr’s library scan is the only “is it on Plex?” signal. Arr `hasFile` can be true while Plex has not scanned yet — we already tickle Seerr; job names are the fragile bit.
 - **Quality names in Seerr** are Default / Max / Anything. Recyclarr overwrites Default/Max in place (same name). Renaming TRaSH profiles would desync the Seerr dropdown from Arr.
 
-## What to do before flipping skip-if-present
+## What still needs watching
 
 1. Keep `tests/integration.sh` green against **whatever binary fetch-engines just pulled** (a nightly job, not only the cached tarball on the agent VM).
-2. Re-stamp `UpdateAutomatically=False` / `UpdateMechanism=Docker` on every start so Prowlarr’s UI cannot enable BuiltIn.
+2. Re-stamp `UpdateAutomatically=False` / `UpdateMechanism=Docker` stays every start so Prowlarr’s UI cannot enable BuiltIn.
 3. Treat Recyclarr trash_ids and qbit stop/pause as **contract tests** (HTTP fixture + one real-Arr import), not comments.
 4. Do not let Recyclarr YAML name Anything. Re-assert Pompey CFs on Anything after Recyclarr. Default/Max scores are Recyclarr's.
-5. When Arr ships `/api/v4`, gate with a probed capability list rather than a big-bang string replace.
+5. Arr `/api/v4` is probed via `qualityprofile`. A prefix that is neither v3 nor v4 still needs a new probe.
 
-Until skip-if-present is replaced, freeze-on-first-fetch is still what ships. The decision is the contract; the feature is not a toggle on `UpdateAutomatically`.
+Skip-if-present is gone as of **0.2.39**. The decision is the contract; the feature is not a toggle on `UpdateAutomatically`.

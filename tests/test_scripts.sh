@@ -192,6 +192,62 @@ if grep -qi "<LogLevel>debug</LogLevel>" "${POMPEY_CONFIG}/sonarr/config.xml"; t
   exit 1
 fi
 
+echo "== write-engine-configs restamps Arr BuiltIn to Docker every boot =="
+python3 - "${POMPEY_CONFIG}/sonarr/config.xml" "${POMPEY_CONFIG}/prowlarr/config.xml" <<'PY'
+from pathlib import Path
+import sys
+Path(sys.argv[1]).write_text(
+    """<Config>
+  <BindAddress>127.0.0.1</BindAddress>
+  <Port>8989</Port>
+  <ApiKey>keep-sonarr</ApiKey>
+  <LogLevel>info</LogLevel>
+  <InstanceName>Sonarr</InstanceName>
+  <UpdateAutomatically>True</UpdateAutomatically>
+  <UpdateMechanism>BuiltIn</UpdateMechanism>
+</Config>
+"""
+)
+Path(sys.argv[2]).write_text(
+    """<Config>
+  <BindAddress>*</BindAddress>
+  <Port>9696</Port>
+  <ApiKey>keep-me</ApiKey>
+  <InstanceName>Prowlarr</InstanceName>
+</Config>
+"""
+)
+PY
+run "${BIN}/write-engine-configs"
+grep -q "<UpdateAutomatically>False</UpdateAutomatically>" "${POMPEY_CONFIG}/sonarr/config.xml"
+grep -q "<UpdateMechanism>Docker</UpdateMechanism>" "${POMPEY_CONFIG}/sonarr/config.xml"
+grep -q "keep-sonarr" "${POMPEY_CONFIG}/sonarr/config.xml"
+if grep -qi "BuiltIn" "${POMPEY_CONFIG}/sonarr/config.xml"; then
+  echo "Arr BuiltIn updater must be restamped to Docker" >&2
+  cat "${POMPEY_CONFIG}/sonarr/config.xml" >&2
+  exit 1
+fi
+grep -q "<UpdateAutomatically>False</UpdateAutomatically>" "${POMPEY_CONFIG}/prowlarr/config.xml"
+grep -q "<UpdateMechanism>Docker</UpdateMechanism>" "${POMPEY_CONFIG}/prowlarr/config.xml"
+
+echo "== write-engine-configs inserts missing qbit wg0 bind =="
+python3 - "${POMPEY_CONFIG}/qBittorrent/qBittorrent.conf" <<'PY'
+from pathlib import Path
+import sys
+Path(sys.argv[1]).write_text(
+    "[BitTorrent]\n"
+    "Session\\DefaultSavePath=/old/complete\n"
+    "\n"
+    "[Preferences]\n"
+    "WebUI\\Port=8080\n"
+)
+PY
+run "${BIN}/write-engine-configs"
+grep -Fq "Session\\Interface=wg0" "${POMPEY_CONFIG}/qBittorrent/qBittorrent.conf"
+grep -Fq "Session\\InterfaceName=wg0" "${POMPEY_CONFIG}/qBittorrent/qBittorrent.conf"
+grep -Fq "Connection\\Interface=wg0" "${POMPEY_CONFIG}/qBittorrent/qBittorrent.conf"
+grep -Fq "Connection\\InterfaceName=wg0" "${POMPEY_CONFIG}/qBittorrent/qBittorrent.conf"
+
 echo "== write-engine-configs patches qbit save path when media folder changes =="
 export MEDIA_ROOT="${WORK}/media-nas"
 export MEDIA_MOVIES="Movies/Not Kid Friendly"
@@ -370,6 +426,10 @@ grep -q 'vpn-up' "${ROOT}/pompey/rootfs/etc/services.d/natpmp/run"
 grep -q -- '--quiet' "${ROOT}/pompey/rootfs/usr/local/bin/wait-for-vpn"
 grep -q '%H:%M:%S' "${ROOT}/pompey/rootfs/usr/local/bin/pompey-setup"
 grep -q '%H:%M:%S' "${ROOT}/pompey/rootfs/usr/local/bin/wire-stack"
+grep -q 'def arr_api_root' "${ROOT}/pompey/rootfs/usr/local/bin/wire-stack"
+grep -q 'def engines_refresh_due' "${ROOT}/pompey/rootfs/usr/local/bin/wire-stack"
+grep -q 'POMPEY_HOLD_QBIT' "${ROOT}/pompey/rootfs/usr/local/bin/wire-stack"
+grep -q 'pin_arr_docker_updates' "${ROOT}/pompey/rootfs/usr/local/bin/write-engine-configs"
 test -f "${ROOT}/pompey/rootfs/etc/services.d/setup/run"
 test ! -e "${ROOT}/pompey/rootfs/usr/local/bin/pompey-ingress"
 test ! -e "${ROOT}/pompey/rootfs/etc/services.d/ingress-proxy"

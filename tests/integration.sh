@@ -125,6 +125,18 @@ arr() {
   ns curl -fsS --max-time 60 -X "${method}" -H "X-Api-Key: ${key}" "${extra[@]}" "${base}${path}"
 }
 
+arr_api() {
+  local base="$1" key="$2" ver
+  for ver in v3 v4; do
+    if ns curl -fsS -o /dev/null --max-time 15 -H "X-Api-Key: ${key}" \
+      "${base}/api/${ver}/qualityprofile"; then
+      printf '/api/%s' "${ver}"
+      return 0
+    fi
+  done
+  printf '/api/%s' v3
+}
+
 log "fake wg0"
 bash "${BIN}/pompey-dev-vpn" up
 ns ip -o addr show wg0 | grep -q '10.2.0.2'
@@ -251,14 +263,17 @@ SONARR_KEY="$(jq -r .sonarr_api_key "${POMPEY_SECRETS}")"
 SONARR=http://127.0.0.1:8989
 RADARR_KEY="$(jq -r .radarr_api_key "${POMPEY_SECRETS}")"
 RADARR=http://127.0.0.1:7878
+RADARR_API="$(arr_api "${RADARR}" "${RADARR_KEY}")"
+SONARR_API="$(arr_api "${SONARR}" "${SONARR_KEY}")"
+log "Arr HTTP API ${RADARR_API} / ${SONARR_API}"
 
 log "wait for Prowlarr to sync the source into Radarr/Sonarr"
 radarr_indexers="[]"
 sonarr_indexers="[]"
 synced=""
 for _ in $(seq 1 20); do
-  radarr_indexers="$(arr "${RADARR}" "${RADARR_KEY}" GET "/api/v3/indexer" || echo '[]')"
-  sonarr_indexers="$(arr "${SONARR}" "${SONARR_KEY}" GET "/api/v3/indexer" || echo '[]')"
+  radarr_indexers="$(arr "${RADARR}" "${RADARR_KEY}" GET "${RADARR_API}/indexer" || echo '[]')"
+  sonarr_indexers="$(arr "${SONARR}" "${SONARR_KEY}" GET "${SONARR_API}/indexer" || echo '[]')"
   if echo "${radarr_indexers}" | jq -e 'length >= 1' >/dev/null \
      && echo "${sonarr_indexers}" | jq -e 'length >= 1' >/dev/null; then
     synced=1
@@ -282,7 +297,7 @@ log "Radarr indexer: $(echo "${radarr_indexers}" | jq -r '.[0].name')"
 log "Sonarr indexer: $(echo "${sonarr_indexers}" | jq -r '.[0].name')"
 
 log "lookup ${MOVIE}"
-lookup="$(arr "${RADARR}" "${RADARR_KEY}" GET "/api/v3/movie/lookup?term=$(python3 -c 'import urllib.parse,os; print(urllib.parse.quote(os.environ["MOVIE"]))')" )"
+lookup="$(arr "${RADARR}" "${RADARR_KEY}" GET "${RADARR_API}/movie/lookup?term=$(python3 -c 'import urllib.parse,os; print(urllib.parse.quote(os.environ["MOVIE"]))')" )"
 export MOVIE TMDB
 movie="$(python3 - "${lookup}" <<'PY'
 import json, os, sys
@@ -306,7 +321,7 @@ title="$(echo "${movie}" | jq -r .title)"
 year="$(echo "${movie}" | jq -r .year)"
 log "matched ${title} (${year}) tmdb=$(echo "${movie}" | jq -r .tmdbId)"
 
-profile="$(arr "${RADARR}" "${RADARR_KEY}" GET "/api/v3/qualityprofile" \
+profile="$(arr "${RADARR}" "${RADARR_KEY}" GET "${RADARR_API}/qualityprofile" \
   | jq '[.[] | select(.name=="Default")][0].id // .[0].id')"
 root="${MEDIA_ROOT}/Movies/Not Kid Friendly"
 add="$(python3 - "${movie}" "${profile}" "${root}" <<'PY'
@@ -331,7 +346,7 @@ PY
 log "add movie (library only — no search, no download)"
 add_resp="$(ns curl -sS -w '\n%{http_code}' --max-time 60 -X POST \
   -H "X-Api-Key: ${RADARR_KEY}" -H "Content-Type: application/json" \
-  -d "${add}" "${RADARR}/api/v3/movie")"
+  -d "${add}" "${RADARR}${RADARR_API}/movie")"
 add_code="$(echo "${add_resp}" | tail -n1)"
 add_body="$(echo "${add_resp}" | sed '$d')"
 if [[ "${add_code}" != "200" && "${add_code}" != "201" ]]; then
@@ -345,7 +360,7 @@ fi
 found=""
 movies="[]"
 for _ in $(seq 1 15); do
-  movies="$(arr "${RADARR}" "${RADARR_KEY}" GET "/api/v3/movie")"
+  movies="$(arr "${RADARR}" "${RADARR_KEY}" GET "${RADARR_API}/movie")"
   found="$(echo "${movies}" | jq -r --argjson t "${TMDB}" '[.[] | select(.tmdbId==$t)][0].title // empty')"
   if [[ -n "${found}" ]]; then
     break
@@ -487,7 +502,7 @@ done
 if [[ -z "${library_video}" ]]; then
   echo "finished download never reached ${library_root}" >&2
   dump_import_debug
-  movie_row="$(arr "${RADARR}" "${RADARR_KEY}" GET "/api/v3/movie" \
+  movie_row="$(arr "${RADARR}" "${RADARR_KEY}" GET "${RADARR_API}/movie" \
     | jq --argjson t "${TMDB}" '[.[] | select(.tmdbId==$t)][0]')"
   echo "radarr movie: ${movie_row}" >&2
   exit 1
@@ -504,7 +519,7 @@ if [[ ! -f "${library_video}" ]]; then
   exit 1
 fi
 
-movie_row="$(arr "${RADARR}" "${RADARR_KEY}" GET "/api/v3/movie" \
+movie_row="$(arr "${RADARR}" "${RADARR_KEY}" GET "${RADARR_API}/movie" \
   | jq --argjson t "${TMDB}" '[.[] | select(.tmdbId==$t)][0] | {title, tmdbId, hasFile, path}')"
 echo "${movie_row}"
 movie_path="$(echo "${movie_row}" | jq -r .path)"

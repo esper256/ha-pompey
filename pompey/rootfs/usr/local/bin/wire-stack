@@ -237,6 +237,25 @@ def radarr_url() -> str:
     return env("RADARR_URL", "http://127.0.0.1:7878").rstrip("/")
 
 
+def arr_api_root(base: str, api_key: str) -> str:
+    """Prefer /api/v3; use /api/v4 when v3 is gone. Do not hard-fail the wire."""
+    host = base.rstrip("/")
+    for ver in ("v3", "v4"):
+        root = f"{host}/api/{ver}"
+        try:
+            http("GET", f"{root}/qualityprofile", headers=arr_headers(api_key))
+            return root
+        except RuntimeError as exc:
+            msg = str(exc)
+            if "-> 404" in msg:
+                continue
+            if "-> 400" in msg or "-> 401" in msg:
+                return root
+            continue
+    log(f"Arr API v3/v4 missing at {host}; using /api/v3", "WARNING")
+    return f"{host}/api/v3"
+
+
 def prowlarr_url() -> str:
     return env("PROWLARR_URL", "http://127.0.0.1:9696").rstrip("/")
 
@@ -627,11 +646,19 @@ def tickle_seerr_availability() -> None:
     s = Seerr()
     s.api_key = key
     ran: list[str] = []
-    for job in ("plex-recently-added-scan", "radarr-scan", "sonarr-scan"):
+    jobs = (
+        "plex-recently-added-scan",
+        "plex-recently-added",
+        "radarr-scan",
+        "sonarr-scan",
+    )
+    for job in jobs:
         try:
             s.call("POST", f"/api/v1/settings/jobs/{job}/run")
             ran.append(job)
         except RuntimeError as exc:
+            if "404" in str(exc):
+                continue
             if "403" in str(exc):
                 return
             log(f"seerr {job}: {exc}", "WARNING")
@@ -2289,15 +2316,32 @@ def scan_download_drop(base: str, api_key: str, kind: str) -> None:
     Destination is the movie/series path on Arr, not a guess from the filename.
     Kid vs Not Kid was stored when Seerr added the title.
     """
-    name = "DownloadedMoviesScan" if kind == "radarr" else "DownloadedEpisodesScan"
+    names = (
+        ("DownloadedMoviesScan", "DownloadedMovieScan")
+        if kind == "radarr"
+        else ("DownloadedEpisodesScan", "DownloadedEpisodeScan")
+    )
+    last: RuntimeError | None = None
     for path in existing_download_scan_paths(kind):
-        try:
-            http(
-                "POST",
-                f"{base}/command",
-                {"name": name, "path": path, "importMode": "Move"},
-                headers=arr_headers(api_key),
-            )
+        posted = False
+        for name in names:
+            try:
+                http(
+                    "POST",
+                    f"{base}/command",
+                    {"name": name, "path": path, "importMode": "Move"},
+                    headers=arr_headers(api_key),
+                )
+                posted = True
+                last = None
+                break
+            except RuntimeError as exc:
+                last = exc
+                if "-> 400" not in str(exc) and "-> 404" not in str(exc):
+                    log(f"{kind} download scan: {exc}", "WARNING")
+                    posted = True
+                    break
+        if posted:
             scan_key = f"scan:{kind}:{path}"
             if count_complete_videos() == 0:
                 forget_quiet(scan_key)
@@ -2306,8 +2350,8 @@ def scan_download_drop(base: str, api_key: str, kind: str) -> None:
                     scan_key,
                     f"{kind} scanning {path} for files that already have an Arr library folder",
                 )
-        except RuntimeError as exc:
-            log(f"{kind} complete-folder scan {path}: {exc}", "WARNING")
+        elif last is not None:
+            log(f"{kind} download scan: {last}", "WARNING")
 
 
 def import_rejection_text(item: dict) -> str:
@@ -3012,10 +3056,10 @@ def main() -> int:
     wait_http(f"{sonarr_url()}/ping")
     wait_http(f"{radarr_url()}/ping")
 
-    sonarr = f"{sonarr_url()}/api/v3"
-    radarr = f"{radarr_url()}/api/v3"
-    prowlarr = prowlarr_url()
     sk, rk, pk = secrets["sonarr_api_key"], secrets["radarr_api_key"], secrets["prowlarr_api_key"]
+    sonarr = arr_api_root(sonarr_url(), sk)
+    radarr = arr_api_root(radarr_url(), rk)
+    prowlarr = prowlarr_url()
 
     complete = downloads_complete()
     qbit_category("sonarr", complete)
@@ -3106,18 +3150,126 @@ def import_finished_downloads(radarr: str, rk: str, sonarr: str, sk: str) -> Non
     retry_unfilled_titles(radarr, rk, sonarr, sk)
 
 
+def engines_checked_path() -> str:
+    return os.path.join(ready_dir(), "engines-checked")
+
+
+def engines_refresh_due() -> bool:
+    """True when fetch-engines last succeeded more than a day ago.
+
+    Missing marker means boot has not fetched yet (or unit tests). Do not
+    hit Servarr from housekeep in that case.
+    """
+    path = engines_checked_path()
+    if not os.path.isfile(path):
+        return False
+    try:
+        max_age = float(env("POMPEY_ENGINE_REFRESH_AGE", "86400") or "86400")
+    except ValueError:
+        max_age = 86400.0
+    try:
+        return (time.time() - os.path.getmtime(path)) >= max_age
+    except OSError:
+        return False
+
+
+def qbit_has_active_transfers() -> bool:
+    """True when replacing qBittorrent-nox would interrupt a write to incomplete/."""
+    try:
+        payload = http("GET", qbit_torrents_url())
+    except RuntimeError:
+        return False
+    rows = payload if isinstance(payload, list) else []
+    for item in rows:
+        if not isinstance(item, dict):
+            continue
+        state = str(item.get("state") or "")
+        if state in QBIT_TRANSIENT:
+            return True
+        try:
+            progress = float(item.get("progress") or 0)
+        except (TypeError, ValueError):
+            progress = 0.0
+        if progress < 1 and state not in QBIT_STOPPED:
+            return True
+    return False
+
+
+def fetch_engines_bin() -> str:
+    override = env("POMPEY_FETCH_ENGINES")
+    if override:
+        return override
+    found = shutil.which("fetch-engines")
+    if found:
+        return found
+    here = os.path.dirname(os.path.abspath(__file__))
+    sibling = os.path.join(here, "fetch-engines")
+    if os.path.isfile(sibling):
+        return sibling
+    return "/usr/local/bin/fetch-engines"
+
+
+def refresh_engines() -> list[str]:
+    """Replace on-disk engines when upstream moved. Pompey is the orchestrator."""
+    if not engines_refresh_due():
+        return []
+    script = fetch_engines_bin()
+    if not os.path.isfile(script):
+        return []
+    envp = os.environ.copy()
+    if qbit_has_active_transfers():
+        envp["POMPEY_HOLD_QBIT"] = "1"
+        log("engine refresh: qBittorrent is writing; not replacing that binary")
+    try:
+        proc = subprocess.run(
+            [script],
+            check=False,
+            timeout=int(env("POMPEY_FETCH_TIMEOUT", "900") or "900"),
+            env=envp,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        log(f"engine refresh: {exc}", "WARNING")
+        return []
+    if proc.returncode != 0:
+        log("engine refresh failed; search stays on the installed copies", "WARNING")
+        return []
+    changed_path = os.path.join(ready_dir(), "engines-changed")
+    try:
+        with open(changed_path, encoding="utf-8") as fh:
+            names = [line.strip() for line in fh if line.strip()]
+    except OSError:
+        names = []
+    if names:
+        log(f"engines replaced: {', '.join(names)}")
+    return names
+
+
 def housekeep() -> int:
     """Stop finished torrents, rename into the library, forget rows whose files left."""
     secrets = load_secrets()
     wait_http(f"{qbit_url()}/api/v2/app/version")
     wait_http(f"{sonarr_url()}/ping")
     wait_http(f"{radarr_url()}/ping")
-    sonarr = f"{sonarr_url()}/api/v3"
-    radarr = f"{radarr_url()}/api/v3"
+    replaced = refresh_engines()
+    if replaced:
+        wait_http(f"{qbit_url()}/api/v2/app/version")
+        wait_http(f"{sonarr_url()}/ping")
+        wait_http(f"{radarr_url()}/ping")
     sk, rk = secrets["sonarr_api_key"], secrets["radarr_api_key"]
+    sonarr = arr_api_root(sonarr_url(), sk)
+    radarr = arr_api_root(radarr_url(), rk)
     run_recyclarr()
     import_finished_downloads(radarr, rk, sonarr, sk)
     tickle_seerr_availability()
+    if replaced:
+        try:
+            subprocess.run(
+                [sys.executable, os.path.abspath(__file__)],
+                check=False,
+                timeout=int(env("POMPEY_WIRE_TIMEOUT", "300") or "300"),
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            log(f"wire after engine refresh: {exc}", "WARNING")
     return 0
 
 
@@ -3128,10 +3280,12 @@ if __name__ == "__main__":
         raise SystemExit(main())
     except Exception as exc:  # noqa: BLE001
         log(str(exc), "ERROR")
-        mark_status(
-            "wire",
-            "Could not finish connecting search",
-            80,
-            str(exc)[:240],
-        )
+        # Re-wire after an engine swap must not flip the wait screen off search.
+        if not os.path.isfile(os.path.join(ready_dir(), "wired")):
+            mark_status(
+                "wire",
+                "Could not finish connecting search",
+                80,
+                str(exc)[:240],
+            )
         raise SystemExit(1)
