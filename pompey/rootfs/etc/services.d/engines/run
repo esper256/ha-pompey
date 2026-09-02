@@ -11,12 +11,18 @@ until [[ -f "${POMPEY_READY}/vpn-up" ]]; do
   sleep 2
 done
 pompey-log start "engine fetch"
-pompey-status fetch "Downloading hidden engines" 30 || true
+# Opening Ingress only reads status.json. Do not rewind the installer bar
+# because this service restarted after search was already wired.
+if [[ ! -f "${POMPEY_READY}/wired" ]]; then
+  pompey-status fetch "Downloading hidden engines" 30 || true
+fi
 n=0
 until fetch-engines; do
   n=$((n + 1))
   if [[ "${n}" -ge 5 ]]; then
-    pompey-status fetch "Download failed" 30 "Could not download the household UI or hidden engines. The tunnel may be down." || true
+    if [[ ! -f "${POMPEY_READY}/wired" ]]; then
+      pompey-status fetch "Download failed" 30 "Could not download the household UI or hidden engines. The tunnel may be down." || true
+    fi
     exit 1
   fi
   bashio::log.warning "Engine download failed; retry ${n}/5"
@@ -25,6 +31,8 @@ done
 write-engine-configs
 # Only after configs exist so the other services do not start empty.
 touch "${POMPEY_READY}/engines-ready"
-pompey-status start "Starting hidden engines" 70 || true
+if [[ ! -f "${POMPEY_READY}/wired" ]]; then
+  pompey-status start "Starting hidden engines" 70 || true
+fi
 bashio::log.info "Engine fetch complete"
 exec sleep infinity

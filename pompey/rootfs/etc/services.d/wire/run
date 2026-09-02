@@ -9,7 +9,9 @@ until [[ -f "${POMPEY_READY}/engines-ready" ]]; do
 done
 
 pompey-log start "search wiring"
-pompey-status wire "Connecting search to your library" 80 || true
+if [[ ! -f "${POMPEY_READY}/wired" ]]; then
+  pompey-status wire "Connecting search to your library" 80 || true
+fi
 
 wait-for-http http://127.0.0.1:8080/api/v2/app/version 90 || true
 wait-for-http http://127.0.0.1:9696/ping 90
@@ -27,7 +29,9 @@ until python3 /usr/local/bin/wire-stack; do
   i=$((i + 1))
   if [[ "${i}" -ge 30 ]]; then
     bashio::log.error "Wiring failed; household UI may stay on the wait screen"
-    pompey-status wire "Could not finish connecting search" 80 "Engines started but wiring failed. Check the app log." || true
+    if [[ ! -f "${POMPEY_READY}/wired" ]]; then
+      pompey-status wire "Could not finish connecting search" 80 "Engines started but wiring failed. Check the app log." || true
+    fi
     exec sleep infinity
   fi
   if [[ "${i}" -eq 1 || $((i % 5)) -eq 0 ]]; then

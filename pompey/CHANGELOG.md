@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.40
+
+- The sidebar is a **report**, not an installer that re-runs because you opened it. Opening Ingress only reads `status.json`. After search is wired, engine fetch, WireGuard handshake retries, and the Proton graph sampler cannot rewind the progress bar to 30% or leave Paste Proton up for days while search already works. The bar and step list hide once search is ready; Open search and the Proton graph stay. Rebuild so the banner says **0.2.40**.
+
 ## 0.2.39
 
 - Hidden engines no longer freeze at first download. After the Proton tunnel is up, Pompey checks the official Prowlarr / Radarr / Sonarr / qBittorrent / Recyclarr / Seerr channels and replaces an on-disk copy only when upstream has moved. That check runs on add-on start and about daily after that. Arr’s in-app updater stays off (Pompey is the updater, the way Docker compose pulls images). A failed check keeps the previous binary and search stays up. qBittorrent is not swapped while a file is still landing in `incomplete/`. Rebuild so the banner says **0.2.39**.

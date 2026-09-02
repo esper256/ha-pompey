@@ -1,7 +1,15 @@
 #!/usr/bin/env python3
-"""Write household-facing boot status for the wait screen."""
+"""Write household-facing status for the wait screen.
+
+This is a report, not an installer playhead. Opening Ingress only reads
+status.json — it must not look like boot is still running because a later
+service called pompey-status fetch/start/wire. Once search is wired, keep
+the dashboard (Open search + Proton graph) unless Proton is explicitly needed
+again.
+"""
 from __future__ import annotations
 
+import fcntl
 import json
 import os
 import sys
@@ -21,21 +29,84 @@ STEPS = (
 )
 
 
-def load() -> dict:
-    if os.path.isfile(STATUS_PATH) and os.path.getsize(STATUS_PATH) > 0:
-        try:
-            with open(STATUS_PATH, encoding="utf-8") as fh:
-                return json.load(fh)
-        except json.JSONDecodeError:
-            pass
+def wired_path() -> str:
+    return os.path.join(READY, "wired")
+
+
+def search_is_up() -> bool:
+    return os.path.isfile(wired_path())
+
+
+def ports() -> tuple[int, int]:
+    return (
+        int(os.environ.get("SEERR_PORT", "5055")),
+        int(os.environ.get("PROWLARR_PORT", "9696")),
+    )
+
+
+def default_status(*, search: bool) -> dict:
+    seerr, sources = ports()
+    if search:
+        return {
+            "updated": 0,
+            "step": "ready",
+            "label": "Ready",
+            "percent": 100,
+            "error": "",
+            "need_proton": False,
+            "search": True,
+            "search_port": seerr,
+            "sources_port": sources,
+            "steps": [{"id": i, "label": lab, "state": "done"} for i, lab in STEPS],
+        }
     return {
         "updated": 0,
         "step": "vpn",
         "label": "Starting",
         "percent": 5,
         "error": "",
+        "search": False,
+        "search_port": seerr,
+        "sources_port": sources,
         "steps": [{"id": i, "label": lab, "state": "pending"} for i, lab in STEPS],
     }
+
+
+def lock_status():
+    directory = os.path.dirname(STATUS_PATH) or "."
+    os.makedirs(directory, exist_ok=True)
+    fd = os.open(STATUS_PATH + ".lock", os.O_CREAT | os.O_RDWR, 0o600)
+    fcntl.flock(fd, fcntl.LOCK_EX)
+    return fd
+
+
+def load() -> tuple[dict, bool]:
+    """Return (status, dirty). dirty means the file was missing or unreadable."""
+    search = search_is_up()
+    if os.path.isfile(STATUS_PATH) and os.path.getsize(STATUS_PATH) > 0:
+        try:
+            with open(STATUS_PATH, encoding="utf-8") as fh:
+                data = json.load(fh)
+            if isinstance(data, dict):
+                if search:
+                    data["search"] = True
+                return data, False
+        except (OSError, json.JSONDecodeError, TypeError):
+            pass
+    return default_status(search=search), True
+
+
+def is_dashboard(data: dict) -> bool:
+    try:
+        percent = int(data.get("percent") or 0)
+    except (TypeError, ValueError):
+        percent = 0
+    return (
+        data.get("step") == "ready"
+        and bool(data.get("search"))
+        and not data.get("need_proton")
+        and percent == 100
+    )
 
 
 def save(data: dict) -> None:
@@ -48,7 +119,6 @@ def save(data: dict) -> None:
             os.makedirs(directory, exist_ok=True)
             with open(tmp, "w", encoding="utf-8") as fh:
                 fh.write(payload)
-            os.makedirs(directory, exist_ok=True)
             os.replace(tmp, STATUS_PATH)
             return
         except OSError as exc:
@@ -68,6 +138,12 @@ def _need_proton_flag(current: bool) -> tuple[bool, str]:
     return current, ""
 
 
+def mark_steps_done(data: dict) -> None:
+    for item in data.get("steps") or []:
+        if isinstance(item, dict):
+            item["state"] = "done"
+
+
 def main(argv: list[str]) -> int:
     if len(argv) < 3:
         print("usage: pompey-status STEP LABEL [PERCENT] [error message]", file=sys.stderr)
@@ -83,47 +159,90 @@ def main(argv: list[str]) -> int:
         error = " ".join(rest)
 
     order = [s[0] for s in STEPS]
-    data = load()
-    need, explicit = _need_proton_flag(bool(data.get("need_proton")))
-    # Other boot services (engines/wire) write status on a timer. While we still
-    # need a Proton paste, those writes must not steal the wait screen or mark
-    # later steps done — that flickers the textarea and the step list.
-    if need and explicit == "":
-        return 0
-    data["need_proton"] = need
-    data["updated"] = int(time.time())
-    data["step"] = step
-    data["label"] = label
-    data["error"] = error
-    ready = bool(step == "ready" and not error)
-    data["search"] = ready
-    data["search_port"] = int(os.environ.get("SEERR_PORT", "5055"))
-    data["sources_port"] = int(os.environ.get("PROWLARR_PORT", "9696"))
-    if percent is not None:
-        data["percent"] = max(0, min(100, percent))
-    elif step in order:
-        data["percent"] = int((order.index(step) / (len(order) - 1)) * 100)
-
-    seen = False
-    for item in data.get("steps") or []:
-        sid = item.get("id")
-        if sid == step:
-            item["state"] = "error" if error else ("done" if step == "ready" else "active")
-            seen = True
-        elif not error and step in order and sid in order and order.index(sid) < order.index(step):
-            item["state"] = "done"
-        elif step in order and sid in order and order.index(sid) > order.index(step):
-            item["state"] = "pending"
-    if not seen:
-        data.setdefault("steps", []).append(
-            {"id": step, "label": label, "state": "error" if error else "active"}
-        )
+    fd = lock_status()
     try:
-        save(data)
-    except OSError as exc:
-        stamp = time.strftime("%H:%M:%S")
-        print(f"[{stamp}] WARNING: pompey-status: could not write {STATUS_PATH}: {exc}", file=sys.stderr)
-    return 0
+        data, dirty = load()
+        need, explicit = _need_proton_flag(bool(data.get("need_proton")))
+        wired = search_is_up()
+        vpn = data.get("vpn") if isinstance(data.get("vpn"), dict) else None
+
+        def persist_dashboard() -> None:
+            healed = default_status(search=True)
+            healed["updated"] = int(time.time())
+            if vpn:
+                healed["vpn"] = vpn
+            try:
+                save(healed)
+            except OSError as exc:
+                stamp = time.strftime("%H:%M:%S")
+                print(f"[{stamp}] WARNING: pompey-status: could not write {STATUS_PATH}: {exc}", file=sys.stderr)
+
+        # While Proton is missing, ignore engine/wire chatter so the paste
+        # textarea does not flicker. Ready must still land: search can be up
+        # after a paste, and the dashboard must not stay on the installer.
+        if (
+            need
+            and explicit == ""
+            and step != "ready"
+            and not wired
+            and not data.get("search")
+        ):
+            return 0
+        # Search is already wired. Boot-step writers (engines/wire restart,
+        # handshake monitor) must not rewind the dashboard to 30%. If the
+        # file was torn or left on paste, repair it — do not keep candy.
+        if wired and step != "ready" and explicit != "on":
+            if dirty or not is_dashboard(data):
+                persist_dashboard()
+            return 0
+        if explicit == "on":
+            data["need_proton"] = True
+        elif explicit == "off" or step == "ready" or wired:
+            data["need_proton"] = False
+        else:
+            data["need_proton"] = need
+        data["updated"] = int(time.time())
+        data["step"] = step
+        data["label"] = label
+        data["error"] = error
+        ready = bool(step == "ready" and not error) or wired
+        data["search"] = ready
+        seerr, sources = ports()
+        data["search_port"] = seerr
+        data["sources_port"] = sources
+        if percent is not None:
+            data["percent"] = max(0, min(100, percent))
+        elif step in order:
+            data["percent"] = int((order.index(step) / (len(order) - 1)) * 100)
+        if ready:
+            data["percent"] = 100
+            mark_steps_done(data)
+        else:
+            seen = False
+            for item in data.get("steps") or []:
+                sid = item.get("id")
+                if sid == step:
+                    item["state"] = "error" if error else ("done" if step == "ready" else "active")
+                    seen = True
+                elif not error and step in order and sid in order and order.index(sid) < order.index(step):
+                    item["state"] = "done"
+                elif step in order and sid in order and order.index(sid) > order.index(step):
+                    item["state"] = "pending"
+            if not seen:
+                data.setdefault("steps", []).append(
+                    {"id": step, "label": label, "state": "error" if error else "active"}
+                )
+        try:
+            save(data)
+        except OSError as exc:
+            stamp = time.strftime("%H:%M:%S")
+            print(f"[{stamp}] WARNING: pompey-status: could not write {STATUS_PATH}: {exc}", file=sys.stderr)
+        return 0
+    finally:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+        finally:
+            os.close(fd)
 
 
 if __name__ == "__main__":

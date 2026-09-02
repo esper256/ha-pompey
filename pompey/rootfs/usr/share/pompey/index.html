@@ -55,6 +55,13 @@
       color: var(--muted);
     }
 
+    /* Installer chrome is first-boot only. Once search is up, this page is
+       a dashboard (Open search / Proton graph), not a fake progress playhead. */
+    body.is-ready .bar,
+    body.is-ready #steps {
+      display: none;
+    }
+
     .bar {
       height: 0.35rem;
       background: var(--line);
@@ -318,6 +325,17 @@
     const vpnHist = [];
     const VPN_KEEP_MS = 120000;
     let vpnLast = null;
+    let sawDashboard = false;
+    let lastPorts = { search: 5055, sources: 9696 };
+
+    function isDashboard(data) {
+      if (data.need_proton) return false;
+      if (data.search) {
+        sawDashboard = true;
+        return true;
+      }
+      return sawDashboard;
+    }
 
     function fmtBytes(n) {
       const x = Number(n);
@@ -405,6 +423,8 @@
     }
 
     function render(data) {
+      const dashboard = isDashboard(data);
+      document.body.classList.toggle("is-ready", dashboard);
       const showForm = !protonSubmitted && (
         Boolean(data.need_proton) || document.activeElement === wg
       );
@@ -418,6 +438,7 @@
         data.search_port,
         data.sources_port,
         data.steps,
+        dashboard,
       ]);
       if (sig === lastSig) {
         return;
@@ -425,7 +446,7 @@
       lastSig = sig;
       fill.style.width = Math.max(0, Math.min(100, data.percent || 0)) + "%";
       now.textContent = data.label || "Bringing the fleet to heel…";
-      if (data.error) {
+      if (data.error && !dashboard) {
         err.hidden = false;
         err.textContent = data.error;
       } else if (!showForm) {
@@ -444,9 +465,11 @@
         li.append(mark, lab);
         stepsEl.append(li);
       });
-      if (data.search && !data.need_proton && !showForm) {
-        const port = Number(data.search_port) || 5055;
-        const sourcesPort = Number(data.sources_port) || 9696;
+      if (Number(data.search_port)) lastPorts.search = Number(data.search_port);
+      if (Number(data.sources_port)) lastPorts.sources = Number(data.sources_port);
+      if (dashboard && !showForm) {
+        const port = lastPorts.search;
+        const sourcesPort = lastPorts.sources;
         const url = "http://" + location.hostname + ":" + port + "/";
         const sourcesUrl = "http://" + location.hostname + ":" + sourcesPort + "/";
         now.textContent = "Search is ready. This sidebar stays Pompey; open search on port " + port + ".";
@@ -495,7 +518,11 @@
         render(data);
         renderVpn(data);
       } catch (_exc) {
-        now.textContent = "Waiting for the box to start…";
+        // Polling is read-only. A torn status.json must not look like boot
+        // started over just because someone opened the sidebar.
+        if (!document.body.classList.contains("is-ready")) {
+          now.textContent = "Waiting for the box to start…";
+        }
       }
     }
 
