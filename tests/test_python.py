@@ -1042,9 +1042,13 @@ class Helpers(unittest.TestCase):
     def test_kid_cert(self):
         self.assertTrue(rr.kid_cert("PG-13", rr.KID_MOVIE))
         self.assertTrue(rr.kid_cert("tv-pg", rr.KID_TV))
+        self.assertTrue(rr.kid_cert("TV-Y", rr.KID_TV))
+        self.assertTrue(rr.kid_cert("TV-Y7", rr.KID_TV))
+        self.assertTrue(rr.kid_cert("TV-G", rr.KID_TV))
         self.assertFalse(rr.kid_cert("R", rr.KID_MOVIE))
         self.assertFalse(rr.kid_cert("", rr.KID_MOVIE))
         self.assertFalse(rr.kid_cert("TV-MA", rr.KID_TV))
+        self.assertFalse(rr.kid_cert("TV-14", rr.KID_TV))
 
     def test_title_cert_from_nested_ratings(self):
         self.assertEqual(rr.title_cert({"certification": "PG"}), "PG")
@@ -4228,6 +4232,36 @@ class RouteRating(unittest.TestCase):
         dests = {m.get("title"): m.get("rootFolderPath") for m in self.state.moved}
         self.assertEqual(dests["Kid Flick"], "/media/Movies/Kid Friendly")
         self.assertEqual(dests["Kid Show"], "/media/TV/Kid Friendly")
+
+    def test_world_trigger_tv14_stays_general_bluey_moves_to_kid(self):
+        """Seerr has no Kid vs Not Kid picker. TMDB cert is the only input.
+
+        World Trigger is TV-14 on TMDB — not in KID_TV — so it must stay in
+        Not Kid Friendly. A TV-Y show added to the default (general) root
+        must move to Kid Friendly.
+        """
+        self.state.series = [
+            {
+                "id": 20,
+                "title": "World Trigger",
+                "certification": "TV-14",
+                "path": "/media/TV/Not Kid Friendly/World Trigger",
+            },
+            {
+                "id": 21,
+                "title": "Bluey",
+                "certification": "TV-Y",
+                "path": "/media/TV/Not Kid Friendly/Bluey",
+            },
+        ]
+        self.state.moved = []
+        rr.route_series("sonarr-key")
+        dests = {item.get("title"): item.get("rootFolderPath") for item in self.state.moved}
+        self.assertNotIn("World Trigger", dests)
+        self.assertEqual(dests["Bluey"], "/media/TV/Kid Friendly")
+        left = next(item for item in self.state.series if item["title"] == "World Trigger")
+        self.assertTrue(rr.in_root(left["path"], "/media/TV/Not Kid Friendly"))
+        self.assertFalse(rr.kid_cert("TV-14", rr.KID_TV))
 
     def test_retarget_path_replaces_known_root(self):
         dest = rr.retarget_path(

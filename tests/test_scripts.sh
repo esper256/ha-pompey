@@ -689,6 +689,18 @@ if ! grep -q 'Movies/Not Kid Friendly' "${ROOT}/tests/integration.sh"; then
   echo "integration.sh must add the movie under Movies/Not Kid Friendly" >&2
   exit 1
 fi
+if ! grep -q 'World Trigger' "${ROOT}/tests/integration.sh"; then
+  echo "integration.sh must prove World Trigger (TV-14) stays Not Kid Friendly" >&2
+  exit 1
+fi
+if ! grep -q 'Bluey' "${ROOT}/tests/integration.sh"; then
+  echo "integration.sh must prove a kid TV cert routes to Kid Friendly" >&2
+  exit 1
+fi
+if ! grep -q -- '--once' "${BIN}/route-rating"; then
+  echo "route-rating must support --once for one-shot routing" >&2
+  exit 1
+fi
 if ! grep -q 'incomplete download leaked into the library' "${ROOT}/tests/integration.sh"; then
   echo "integration.sh must fail if an incomplete file reaches the library" >&2
   exit 1
