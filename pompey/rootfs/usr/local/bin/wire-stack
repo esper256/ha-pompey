@@ -40,7 +40,7 @@ SPECIAL_NAME_RE = re.compile(
 NOT_SPECIAL_RE = re.compile(r"(?i)special[.\s_-]+(?:features?|editions?)")
 SAMPLE_NAME_RE = re.compile(r"(?i)(?:^|[.\s_\-/])samples?(?:[.\s_\-/]|$)")
 EXTRA_SUFFIX_RE = re.compile(
-    r"(?i)[-_. ](behindthescenes|deleted|featurette|interview|scene|short|trailer|other)$"
+    r"(?i)[-_.](behindthescenes|deleted|featurette|interview|scene|short|trailer|other)$"
 )
 QUALITY_TAIL_RE = re.compile(
     r"(?i)[.\s_-]+(?:\d{3,4}p|4k|uhd|web-?dl|webrip|bluray|blu-?ray|hdtv|"
@@ -3324,6 +3324,12 @@ def specials_dest_dir(show_path: str) -> str:
 
 
 def extras_dest_dir(show_path: str, extra_folder: str, season: int | None) -> str:
+    if season == 0:
+        for name in ("Season 00", "Season 0"):
+            candidate = os.path.join(show_path, name)
+            if os.path.isdir(candidate):
+                return os.path.join(candidate, extra_folder)
+        return os.path.join(show_path, extra_folder)
     if season and season > 0:
         season_dir = os.path.join(show_path, f"Season {season:02d}")
         if os.path.isdir(season_dir):
