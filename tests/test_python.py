@@ -4440,6 +4440,9 @@ class DebugIngress(unittest.TestCase):
         self.assertIn("/debug/sonarr/", on)
         self.assertIn("/debug/qbittorrent/", on)
         self.assertIn("$http_x_ingress_path", on)
+        self.assertIn('src="./', on)
+        self.assertIn('src="/', on)
+        self.assertNotIn("__pompey_debug__", on)
         self.assertIn("Accept-Encoding", on)
         self.assertNotIn("return 404", on)
 
@@ -4484,12 +4487,14 @@ class DebugIngress(unittest.TestCase):
             def do_GET(self):
                 if self.path in {"/", "/index.html"}:
                     body = (
-                        b"<html><head><title>Radarr</title></head>"
-                        b'<body><script src="/Content/app.js"></script></body></html>'
+                        b"<html><head><title>Radarr</title>"
+                        b'<script type="module" src="/index-02e24635035ed28fd7d3.js"></script>'
+                        b'<script src="/Content/app.js"></script></head>'
+                        b"<body></body></html>"
                     )
                     ctype = "text/html"
-                elif self.path.startswith("/Content/"):
-                    body = b"asset-ok"
+                elif self.path.startswith("/index-") or self.path.startswith("/Content/"):
+                    body = b'import("/api/v3/system/status");'
                     ctype = "application/javascript"
                 elif self.path.startswith("/api/"):
                     body = b'{"instanceName":"Radarr"}'
@@ -4556,15 +4561,29 @@ class DebugIngress(unittest.TestCase):
                     time.sleep(0.05)
             else:
                 self.fail("nginx did not accept connections")
-            self.assertIn('src="/debug/radarr/Content/app.js"', html)
+            self.assertIn('src="./index-02e24635035ed28fd7d3.js"', html)
+            self.assertIn('src="./Content/app.js"', html)
+            self.assertNotIn('src="/index-', html)
+            self.assertNotIn("__pompey_debug__", html)
             self.assertIn('src="/debug/shim.js"', html)
+            self.assertIn('href="/debug/radarr/"', html)
             req = Request(
                 f"http://127.0.0.1:{listen}/debug/radarr/",
                 headers={"X-Ingress-Path": "/api/hassio_ingress/tok"},
             )
             ingress_html = urlopen(req, timeout=5).read().decode()
-            self.assertIn('src="/api/hassio_ingress/tok/debug/radarr/Content/app.js"', ingress_html)
+            self.assertIn('src="./index-02e24635035ed28fd7d3.js"', ingress_html)
+            self.assertIn('src="./Content/app.js"', ingress_html)
+            self.assertIn(
+                'href="/api/hassio_ingress/tok/debug/radarr/"',
+                ingress_html,
+            )
             self.assertIn('src="/api/hassio_ingress/tok/debug/shim.js"', ingress_html)
+            js = urlopen(
+                f"http://127.0.0.1:{listen}/debug/radarr/index-02e24635035ed28fd7d3.js",
+                timeout=5,
+            ).read().decode()
+            self.assertIn('import("./api/v3/system/status")', js)
             api = urlopen(
                 f"http://127.0.0.1:{listen}/debug/radarr/api/v3/system/status",
                 timeout=5,

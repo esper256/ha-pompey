@@ -3,9 +3,14 @@
 
 When POMPEY_DEBUG is on, /debug/radarr/ /debug/sonarr/ /debug/qbittorrent/
 proxy to the localhost engines. UrlBase stays empty so wire-stack and
-housekeeping keep talking to /api/v3. HTML/JS root paths are rewritten
-with X-Ingress-Path (empty outside Home Assistant) plus a small shim that
-fixes fetch/XHR/WebSocket after the page loads.
+housekeeping keep talking to /api/v3.
+
+Modern Arr serves Vite bundles at the site root (/index-<hash>.js). A
+root-absolute src="/index-….js" would leave Ingress and hit Home Assistant
+as text/plain. nginx sub_filter does not rescan its own replacements, so
+we cannot stage through a sentinel. Turning those paths into ./ relative
+URLs does not rematch (the replacement is quote-dot-slash, not quote-slash)
+and they resolve under this location plus <base href>.
 
 When debug is off, /debug/ is 404 so the wait-screen fallback cannot be
 used as a back door onto those consoles.
@@ -16,13 +21,28 @@ import os
 import sys
 
 ENGINES = (
-    ("radarr", "127.0.0.1:7878", ("Content", "api", "signalr", "initialize.json", "login")),
-    ("sonarr", "127.0.0.1:8989", ("Content", "api", "signalr", "initialize.json", "login")),
-    (
-        "qbittorrent",
-        "127.0.0.1:8080",
-        ("api", "css", "js", "images", "public", "icons", "scripts"),
-    ),
+    ("radarr", "127.0.0.1:7878"),
+    ("sonarr", "127.0.0.1:8989"),
+    ("qbittorrent", "127.0.0.1:8080"),
+)
+
+# JS/CSS string prefixes that modern Arr and qBittorrent emit at the site
+# root. src="/ and href="/ already catch HTML tags, including hashed
+# /index-<hash>.js. These catch the same paths inside bundles and JSON.
+ROOT_TOKENS = (
+    "index-",
+    "Content/",
+    "api/",
+    "signalr/",
+    "assets/",
+    "initialize.json",
+    "login/",
+    "css/",
+    "js/",
+    "images/",
+    "public/",
+    "icons/",
+    "scripts/",
 )
 
 
@@ -42,27 +62,36 @@ location ^~ /debug/ {
 """
 
 
-def _filters(mount: str, extras: tuple[str, ...]) -> str:
+def _filters(mount: str) -> str:
+    # $http_x_ingress_path is empty in preview, /api/hassio_ingress/<token>
+    # on the sidebar. Replacing "/" with that path rematches because the
+    # replacement still starts with /. ./ does not rematch.
     prefix = f"$http_x_ingress_path/debug/{mount}"
     lines = [
         "    sub_filter_once off;",
         "    sub_filter_types text/html text/css application/javascript "
         "application/json text/javascript application/xhtml+xml;",
-        '    sub_filter \'<head>\' \'<head><script src="$http_x_ingress_path/debug/shim.js"></script>\';',
-        '    sub_filter \'<HEAD>\' \'<HEAD><script src="$http_x_ingress_path/debug/shim.js"></script>\';',
+        """    sub_filter 'src="/' 'src="./';""",
+        """    sub_filter 'href="/' 'href="./';""",
+        """    sub_filter "src='/" "src='./";""",
+        """    sub_filter "href='/" "href='./";""",
+        """    sub_filter 'url(/' 'url(./';""",
+        """    sub_filter 'import("/' 'import("./';""",
+        """    sub_filter "import('/" "import('./";""",
     ]
-    for extra in extras:
-        token = extra if extra.startswith("/") else f"/{extra}"
-        if not token.endswith("/") and not token.endswith(".json"):
-            token = token + "/"
-        lines.append(f"    sub_filter 'src=\"{token}' 'src=\"{prefix}{token}';")
-        lines.append(f"    sub_filter 'href=\"{token}' 'href=\"{prefix}{token}';")
-        lines.append(f"    sub_filter \"src='{token}\" \"src='{prefix}{token}\";")
-        lines.append(f"    sub_filter \"href='{token}\" \"href='{prefix}{token}\";")
-        lines.append(f"    sub_filter '\"{token}' '\"{prefix}{token}';")
-        lines.append(f"    sub_filter \"'{token}\" \"'{prefix}{token}\";")
-        if token.endswith("/"):
-            lines.append(f"    sub_filter 'url({token}' 'url({prefix}{token}';")
+    for token in ROOT_TOKENS:
+        lines.append(f"""    sub_filter '"/{token}' '"./{token}';""")
+        lines.append(f"""    sub_filter "'/{token}" "'./{token}";""")
+    lines.extend(
+        [
+            "    sub_filter '<head>' "
+            f"""'<head><base href="{prefix}/">"""
+            """<script src="$http_x_ingress_path/debug/shim.js"></script>';""",
+            "    sub_filter '<HEAD>' "
+            f"""'<HEAD><base href="{prefix}/">"""
+            """<script src="$http_x_ingress_path/debug/shim.js"></script>';""",
+        ]
+    )
     return "\n".join(lines)
 
 
@@ -78,15 +107,14 @@ location = /debug/shim.js {{
 }}
 """
     ]
-    for name, upstream, extras in ENGINES:
-        mount = name
-        filters = _filters(mount, extras)
+    for name, upstream in ENGINES:
+        filters = _filters(name)
         blocks.append(
-            f"""location = /debug/{mount} {{
+            f"""location = /debug/{name} {{
     absolute_redirect off;
-    return 302 $http_x_ingress_path/debug/{mount}/;
+    return 302 $http_x_ingress_path/debug/{name}/;
 }}
-location /debug/{mount}/ {{
+location /debug/{name}/ {{
     proxy_pass http://{upstream}/;
     proxy_http_version 1.1;
     proxy_set_header Host {upstream};
@@ -100,9 +128,9 @@ location /debug/{mount}/ {{
     proxy_hide_header Content-Security-Policy;
     proxy_read_timeout 86400s;
     proxy_buffering off;
-    proxy_redirect / $http_x_ingress_path/debug/{mount}/;
-    proxy_redirect http://{upstream}/ $http_x_ingress_path/debug/{mount}/;
-    proxy_cookie_path / $http_x_ingress_path/debug/{mount}/;
+    proxy_redirect / $http_x_ingress_path/debug/{name}/;
+    proxy_redirect http://{upstream}/ $http_x_ingress_path/debug/{name}/;
+    proxy_cookie_path / $http_x_ingress_path/debug/{name}/;
 {filters}
 }}
 """

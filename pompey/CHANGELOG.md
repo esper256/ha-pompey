@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.47
+
+- Debug Radarr/Sonarr were blank: their current UI loads `/index-<hash>.js` from the site root, so the browser asked Home Assistant for that file (404, `text/plain`) instead of Ingress. Rewrite every root-absolute asset/API path (not only `/Content/`). qBittorrent was already fine. Rebuild so the banner says **0.2.47**, then hard-refresh the debug tab.
+
 ## 0.2.46
 
 - Home Assistant **Simultaneous downloads** option (default **8**, range 1–20). qBittorrent’s own default of 3 active downloads counted stalled / seedless torrents against that cap, which froze the rest of the queue. Stalled torrents stay in the client (still worth trying if seeds appear) but no longer occupy a slot: after three minutes below 2 KiB/s they do not count toward the simultaneous-download limit. A higher total-active cap leaves room for those waiting titles. Rebuild so the banner says **0.2.46**, then restart after changing the option.
