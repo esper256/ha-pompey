@@ -32,11 +32,43 @@ STACK_RE = re.compile(
     re.I,
 )
 SEERR_DEBUG_RE = re.compile(r"\[debug\]", re.I)
-DUMP_BODY_RE = re.compile(r'^\s*[{}\[\],]*$' r'|^\s*"[^"]+"\s*:' r"|^\s*<error\b", re.I)
+DUMP_BODY_RE = re.compile(
+    r'^\s*[{}\[\],]*$'
+    r'|^\s*"[^"]+"\s*:'
+    r"|^\s*<error\b"
+    r"|^\s*<\?xml\b",
+    re.I,
+)
 ARR_CATEGORY_NOTE_RE = re.compile(
     r"^\s*-- : Query successful, but no results in the configured categories",
     re.I,
 )
+# Indexer sites 429 / CloudFlare / empty-category tests. Prowlarr's UI already
+# shows source health. These are not disk or wiring failures.
+INDEXER_FLAKE_RE = re.compile(
+    r"HttpClient:\s*HTTP Error"
+    r"|HTTP request failed:\s*\[(?:400|403|429|502|503|504)"
+    r"|TooManyRequestsException"
+    r"|CloudFlareProtection"
+    r"|Cloudflare protection"
+    r"|No Results in configured categories"
+    r"|RadarrV3Proxy:\s*Invalid Request"
+    r"|SonarrV3Proxy:\s*Invalid Request"
+    r"|Unable to connect to indexer"
+    r"|API Request Limit reached"
+    r"|Error Parsing Rows Selector"
+    r"|IndexerException"
+    r"|Flaresolverr may be required"
+    r"|RequestUri:"
+    r"|FeedUrl:"
+    r"|ReleaseSearchService:\s*Searching indexer"
+    r"|Cardigann:"
+    r"|ErrorPipeline:\s*Invalid request Validation failed"
+    r"|^\s*-- : Unable to connect to indexer"
+    r"|^\s*\]\s*$",
+    re.I,
+)
+PROXY_ACCESS_RE = re.compile(r'^\s*\[prowlarr-arr\]\s+"[A-Z]+ /')
 APIKEY_RE = re.compile(r"(apikey=)[^&\s\"']+", re.I)
 JWT_RE = re.compile(
     r"(?:token:\s*)?eyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+",
@@ -66,6 +98,10 @@ def drop(name: str, line: str) -> bool:
     if DUMP_BODY_RE.search(stripped):
         return True
     if ARR_CATEGORY_NOTE_RE.search(stripped):
+        return True
+    if INDEXER_FLAKE_RE.search(stripped):
+        return True
+    if name.lower() in {"prowlarr-arr", "prowlarr"} and PROXY_ACCESS_RE.search(stripped):
         return True
     if name.lower() == "seerr" and SEERR_DEBUG_RE.search(stripped):
         return True

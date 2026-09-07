@@ -38,7 +38,7 @@ def write_xml(path, port, api_key, instance, bind="127.0.0.1"):
   <ApiKey>{api_key}</ApiKey>
   <AuthenticationMethod>None</AuthenticationMethod>
   <AuthenticationRequired>DisabledForLocalAddresses</AuthenticationRequired>
-  <LogLevel>info</LogLevel>
+  <LogLevel>warn</LogLevel>
   <LaunchBrowser>False</LaunchBrowser>
   <Branch>master</Branch>
   <UrlBase></UrlBase>
@@ -74,17 +74,18 @@ def publish_prowlarr(path, api_key):
         write_xml(path, 9696, api_key, "Prowlarr", bind="*")
     body = open(path, encoding="utf-8").read()
     body = set_tag(body, "BindAddress", "*")
-    body = set_tag(body, "LogLevel", "info")
+    body = set_tag(body, "LogLevel", "warn")
     body = drop_auth_none(body)
     with open(path, "w", encoding="utf-8") as fh:
         fh.write(body)
 
 
-def force_info_logs(path):
+def pin_arr_log_level(path):
+    """Warn, not info. Info is every indexer search; Prowlarr's UI already shows flakes."""
     if not os.path.isfile(path):
         return
     body = open(path, encoding="utf-8").read()
-    new = set_tag(body, "LogLevel", "info")
+    new = set_tag(body, "LogLevel", "warn")
     if new != body:
         with open(path, "w", encoding="utf-8") as fh:
             fh.write(new)
@@ -109,8 +110,8 @@ def pin_arr_docker_updates(path):
 config = os.environ.get("POMPEY_CONFIG", "/config")
 write_xml(f"{config}/sonarr/config.xml", 8989, secrets["sonarr_api_key"], "Sonarr")
 write_xml(f"{config}/radarr/config.xml", 7878, secrets["radarr_api_key"], "Radarr")
-force_info_logs(f"{config}/sonarr/config.xml")
-force_info_logs(f"{config}/radarr/config.xml")
+pin_arr_log_level(f"{config}/sonarr/config.xml")
+pin_arr_log_level(f"{config}/radarr/config.xml")
 publish_prowlarr(f"{config}/prowlarr/config.xml", secrets["prowlarr_api_key"])
 pin_arr_docker_updates(f"{config}/sonarr/config.xml")
 pin_arr_docker_updates(f"{config}/radarr/config.xml")

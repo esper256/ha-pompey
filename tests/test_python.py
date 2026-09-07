@@ -321,6 +321,7 @@ class FakeState:
                 "path": "/media/Movies/Not Kid Friendly/Nested Kid",
             },
         ]
+        self.import_lists: list[dict] = []
         self.series = [
             {"id": 10, "title": "Adult Show", "certification": "TV-MA", "path": "/media/TV/Not Kid Friendly/Adult Show"},
             {
@@ -343,6 +344,31 @@ def handler_for(state: FakeState):
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *_args, **_kwargs):
             return
+
+        def _editor(self, items, ids, body):
+            id_set = {int(i) for i in ids if i is not None}
+            payload = body if isinstance(body, dict) else {}
+            for i, item in enumerate(items):
+                try:
+                    current = int(item.get("id"))
+                except (TypeError, ValueError):
+                    continue
+                if current not in id_set:
+                    continue
+                saved = dict(item)
+                if payload.get("qualityProfileId") is not None:
+                    saved["qualityProfileId"] = payload["qualityProfileId"]
+                root = payload.get("rootFolderPath")
+                if root:
+                    root = str(root).rstrip("/")
+                    path = str(item.get("path") or item.get("rootFolderPath") or "").rstrip("/")
+                    name = path.rsplit("/", 1)[-1] if path else ""
+                    saved["rootFolderPath"] = root
+                    if name:
+                        saved["path"] = f"{root}/{name}"
+                items[i] = saved
+                state.moved.append(saved)
+            return self._send(body=payload)
 
         def _read(self):
             n = int(self.headers.get("Content-Length") or 0)
@@ -574,6 +600,11 @@ def handler_for(state: FakeState):
                             400,
                             {"message": f"Profile {idx} is in use by existing titles"},
                         )
+                    if any(item.get("qualityProfileId") == idx for item in state.import_lists):
+                        return self._send(
+                            400,
+                            {"message": f"Profile {idx} is in use by an import list"},
+                        )
                     for i, item in enumerate(profiles):
                         if item.get("id") == idx:
                             profiles.pop(i)
@@ -629,6 +660,25 @@ def handler_for(state: FakeState):
                     return self._send(404, {"error": path})
                 if path.endswith("/languageprofile"):
                     return self._send(body=[])
+                if path.endswith("/importlist") and method == "GET":
+                    return self._send(body=state.import_lists)
+                if "/importlist/" in path and method == "PUT":
+                    try:
+                        idx = int(path.rsplit("/", 1)[-1])
+                    except ValueError:
+                        return self._send(404, {"error": path})
+                    for i, item in enumerate(state.import_lists):
+                        if item.get("id") == idx:
+                            saved = dict(item)
+                            saved.update(body or {})
+                            saved["id"] = idx
+                            state.import_lists[i] = saved
+                            return self._send(body=saved)
+                    return self._send(404, {"error": path})
+                if path.endswith("/movie/editor") and method == "PUT":
+                    return self._editor(state.movies, (body or {}).get("movieIds") or [], body)
+                if path.endswith("/series/editor") and method == "PUT":
+                    return self._editor(state.series, (body or {}).get("seriesIds") or [], body)
                 if path.endswith("/movie") and method == "GET":
                     return self._send(body=state.movies)
                 if "/movie/" in path and method == "GET":
@@ -1815,14 +1865,14 @@ class LogEmit(unittest.TestCase):
             [
                 "   at NzbDrone.Core.Indexers.HttpIndexerBase`1.FetchPage(IndexerRequest request)",
                 "   at System.Runtime.CompilerServices.TaskAwaiter.HandleNonSuccessAndDebuggerNotification",
-                "NzbDrone.Common.Http.TooManyRequestsException: HTTP request failed: [429:TooManyRequests]",
+                "NzbDrone.Common.Disk.DiskException: Unable to write to folder",
             ],
         )
         combined = out + err
         self.assertNotIn("at NzbDrone", combined)
         self.assertNotIn("at System.", combined)
         self.assertNotIn("at Arr.", combined)
-        self.assertIn("Arr.Common.Http.TooManyRequestsException", err)
+        self.assertIn("Arr.Common.Disk.DiskException", err)
         self.assertIn("WARNING", err)
         self.assertNotIn("NzbDrone", combined)
 
@@ -1850,7 +1900,7 @@ class LogEmit(unittest.TestCase):
         out, err = self.captured(
             "Prowlarr",
             [
-                "[Warn] HttpClient: HTTP Error - Res: [GET] http://127.0.0.1:9698/4/api?apikey=supersecretkey&t=tvsearch",
+                "[Warn] DiskScanService: Folder is empty apikey=supersecretkey",
                 '    "errorMessage": "Unable to connect to indexer"',
                 '    "severity": "error"',
                 "<error code=\"429\" description=\"Indexer is disabled\" />",
@@ -1866,15 +1916,35 @@ class LogEmit(unittest.TestCase):
         self.assertNotIn(jwt, combined)
         self.assertIn("token:(redacted)", err)
 
-    def test_drops_consecutive_duplicate_lines(self):
-        _, err = self.captured(
+    def test_drops_indexer_http_flakes(self):
+        out, err = self.captured(
             "Prowlarr",
             [
+                "[Info] ReleaseSearchService: Searching indexer(s): [LimeTorrents] for Term: []",
+                "[Warn] HttpClient: HTTP Error - Res: HTTP/1.1 [POST] http://127.0.0.1:7878/api/v3/indexer: 400.BadRequest",
                 "[Warn] RadarrV3Proxy: No Results in configured categories",
-                "[Warn] RadarrV3Proxy: No Results in configured categories",
+                "[Error] Cardigann: Cloudflare protection detected for [Torrent Downloads]",
+                "HTTP request failed: [429:TooManyRequests] [GET] at [http://127.0.0.1:9698/4/api]",
+                "<?xml version=\"1.0\" encoding=\"UTF-8\"?>",
             ],
         )
-        self.assertEqual(err.count("No Results in configured categories"), 1)
+        combined = out + err
+        self.assertNotIn("ReleaseSearchService", combined)
+        self.assertNotIn("HTTP Error", combined)
+        self.assertNotIn("No Results in configured categories", combined)
+        self.assertNotIn("Cloudflare", combined)
+        self.assertNotIn("TooManyRequests", combined)
+        self.assertNotIn("<?xml", combined)
+
+    def test_drops_consecutive_duplicate_lines(self):
+        _, err = self.captured(
+            "Radarr",
+            [
+                "[Warn] DiskScanService: Folder is empty",
+                "[Warn] DiskScanService: Folder is empty",
+            ],
+        )
+        self.assertEqual(err.count("Folder is empty"), 1)
 
 
 class VpnStats(unittest.TestCase):
@@ -2308,6 +2378,7 @@ class WireStack(unittest.TestCase):
         self.state.sonarr_profiles.append(sonarr_leftover)
         self.state.movies[0]["qualityProfileId"] = 2
         self.state.series[0]["qualityProfileId"] = 2
+        self.state.import_lists = [{"id": 9, "name": "TMDB", "qualityProfileId": 2}]
         rc = ws.main()
         self.assertEqual(rc, 0)
         self.assertEqual(
@@ -2322,7 +2393,15 @@ class WireStack(unittest.TestCase):
         self.assertEqual(self.state.movies[0]["qualityProfileId"], default_id)
         sonarr_default = profile_named(self.state.sonarr_profiles, "Default")["id"]
         self.assertEqual(self.state.series[0]["qualityProfileId"], sonarr_default)
+        self.assertEqual(self.state.import_lists[0]["qualityProfileId"], default_id)
         self.assertNotEqual(default_id, 2)
+        editor = [
+            call
+            for call in self.state.calls
+            if call[0] == "radarr" and call[1] == "PUT" and str(call[2]).endswith("/movie/editor")
+        ]
+        self.assertTrue(editor)
+        self.assertIn("qualityProfileId", editor[0][3] or {})
 
     def test_grants_advanced_requests_to_existing_seerr_user(self):
         os.environ["INDEXER_URL"] = ""
@@ -2331,6 +2410,13 @@ class WireStack(unittest.TestCase):
         rc = ws.main()
         self.assertEqual(rc, 0)
         self.assertTrue(self.state.seerr_users[0]["permissions"] & ws.SEERR_REQUEST_ADVANCED)
+        user_puts = [
+            call
+            for call in self.state.calls
+            if call[0] == "seerr" and call[1] == "PUT" and "/user/" in str(call[2])
+        ]
+        self.assertTrue(user_puts)
+        self.assertNotIn("id", user_puts[0][3] or {})
 
     def test_not_original_language_cf_uses_arr_language_id(self):
         spec = ws.not_original_language_format()["specifications"][0]
@@ -2412,6 +2498,17 @@ class WireStack(unittest.TestCase):
         rc = ws.main()
         self.assertEqual(rc, 0)
         self.assertEqual(self._radarr_default_puts(default_id), [])
+
+    def test_recyclarr_bin_uses_nested_launcher(self):
+        engines = self.tmp / "engines-nested"
+        (engines / "recyclarr").mkdir(parents=True)
+        launcher = engines / "recyclarr" / "recyclarr"
+        launcher.write_text("#!/bin/sh\n")
+        launcher.chmod(0o755)
+        os.environ["POMPEY_ENGINES"] = str(engines)
+        os.environ.pop("POMPEY_RECYCLARR", None)
+        self.assertEqual(recyclarr.recyclarr_bin(), str(launcher))
+        self.assertEqual(ws.recyclarr_binary(), str(launcher))
 
     def test_existing_default_items_are_not_rewritten(self):
         os.environ["INDEXER_URL"] = ""
@@ -4018,6 +4115,23 @@ class RouteRating(unittest.TestCase):
         self.assertNotIn("Unknown", dests)
         self.assertNotIn("Already Kid", dests)
         self.assertNotIn("Adult Show", dests)
+        kid = next(m for m in self.state.moved if m.get("title") == "Kid Flick")
+        self.assertEqual(kid.get("path"), "/media/Movies/Kid Friendly/Kid Flick")
+        self.assertNotEqual(
+            kid.get("path"),
+            "/media/Movies/Not Kid Friendly/Kid Flick",
+        )
+        editor = [
+            call
+            for call in self.state.calls
+            if call[1] == "PUT" and str(call[2]).endswith("/movie/editor")
+        ]
+        self.assertTrue(editor)
+        self.assertTrue(editor[0][3].get("moveFiles"))
+        self.assertNotIn(
+            "path",
+            editor[0][3],
+        )
 
     def test_arr_v4_still_routes_kid_titles(self):
         self.state.arr_drop_v3 = True
@@ -4026,6 +4140,20 @@ class RouteRating(unittest.TestCase):
         dests = {m.get("title"): m.get("rootFolderPath") for m in self.state.moved}
         self.assertEqual(dests["Kid Flick"], "/media/Movies/Kid Friendly")
         self.assertEqual(dests["Kid Show"], "/media/TV/Kid Friendly")
+
+    def test_retarget_path_replaces_known_root(self):
+        dest = rr.retarget_path(
+            "/media/Movies/Not Kid Friendly/Fletch (1985)",
+            "/media/Movies/Kid Friendly",
+            ["/media/Movies/Kid Friendly", "/media/Movies/Not Kid Friendly"],
+        )
+        self.assertEqual(dest, "/media/Movies/Kid Friendly/Fletch (1985)")
+        same = rr.retarget_path(
+            "/media/Movies/Kid Friendly/Already",
+            "/media/Movies/Kid Friendly",
+            ["/media/Movies/Kid Friendly", "/media/Movies/Not Kid Friendly"],
+        )
+        self.assertEqual(same, "/media/Movies/Kid Friendly/Already")
 
 
 class ProtonSetup(unittest.TestCase):

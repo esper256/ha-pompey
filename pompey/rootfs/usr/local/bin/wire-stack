@@ -1483,6 +1483,8 @@ def rehome_titles_off_profile(
     Seerr cannot change quality on an approved request. The profile lives on
     the Arr title. Default is the household 1080p encode; leftovers (HD-1080p)
     stay in the Seerr dropdown until every title is off them.
+
+    Use the editor so a full title PUT cannot also queue a same-path move.
     """
     if leftover_id == default_id:
         return 0
@@ -1491,6 +1493,39 @@ def rehome_titles_off_profile(
         rows = as_list(http("GET", f"{base}/{path}", headers=arr_headers(api_key)))
     except RuntimeError as exc:
         log(f"{kind} titles on leftover profile {leftover_id}: {exc}", "WARNING")
+        return 0
+    ids = []
+    for item in rows:
+        if title_quality_profile_id(item) != leftover_id:
+            continue
+        tid = title_id_of(item)
+        if tid is not None:
+            ids.append(tid)
+    if not ids:
+        return 0
+    id_key = "movieIds" if kind == "radarr" else "seriesIds"
+    try:
+        http(
+            "PUT",
+            f"{base}/{path}/editor",
+            {id_key: ids, "qualityProfileId": default_id},
+            headers=arr_headers(api_key),
+        )
+        return len(ids)
+    except RuntimeError as exc:
+        log(f"{kind} could not move {len(ids)} title(s) onto Default: {exc}", "WARNING")
+        return 0
+
+
+def rehome_import_lists_off_profile(
+    base: str, api_key: str, kind: str, leftover_id: int, default_id: int
+) -> int:
+    """Import lists also pin a leftover profile and block DELETE."""
+    if leftover_id == default_id:
+        return 0
+    try:
+        rows = as_list(http("GET", f"{base}/importlist", headers=arr_headers(api_key)))
+    except RuntimeError:
         return 0
     moved = 0
     for item in rows:
@@ -1504,13 +1539,13 @@ def rehome_titles_off_profile(
         try:
             http(
                 "PUT",
-                f"{base}/{path}/{tid}",
+                f"{base}/importlist/{tid}",
                 payload,
                 headers=arr_headers(api_key),
             )
             moved += 1
         except RuntimeError as exc:
-            log(f"{kind} could not move title {tid} onto Default: {exc}", "WARNING")
+            log(f"{kind} could not move import list {tid} onto Default: {exc}", "WARNING")
     return moved
 
 
@@ -1543,11 +1578,16 @@ def drop_extra_quality_profiles(
             moved = rehome_titles_off_profile(
                 base, api_key, kind, leftover_id, int(default_id)
             )
+            lists = rehome_import_lists_off_profile(
+                base, api_key, kind, leftover_id, int(default_id)
+            )
             if moved:
                 log(
                     f"{kind} moved {moved} title(s) from {name} onto Default "
                     "so the leftover profile can be removed"
                 )
+            if lists:
+                log(f"{kind} moved {lists} import list(s) from {name} onto Default")
         try:
             http(
                 "DELETE",
@@ -1593,7 +1633,11 @@ def recyclarr_binary() -> str:
     override = env("POMPEY_RECYCLARR")
     if override:
         return override
-    return os.path.join(env("POMPEY_ENGINES", "/data/engines"), "recyclarr")
+    root = os.path.join(env("POMPEY_ENGINES", "/data/engines"), "recyclarr")
+    nested = os.path.join(root, "recyclarr")
+    if os.path.isfile(nested) and os.access(nested, os.X_OK):
+        return nested
+    return root
 
 
 def run_recyclarr(*, force: bool = False) -> bool:
@@ -3373,6 +3417,7 @@ def configure_seerr(secrets: dict, radarr_profile, sonarr_profile, sonarr_lang) 
             if perms & SEERR_REQUEST_ADVANCED:
                 continue
             update = dict(user)
+            update.pop("id", None)
             update["permissions"] = perms | SEERR_REQUEST_ADVANCED
             try:
                 s.call("PUT", f"/api/v1/user/{uid}", update)

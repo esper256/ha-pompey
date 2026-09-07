@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.44
+
+- Kid-rated titles were logged as moving into Kid Friendly every minute, but Radarr was given the current Not Kid Friendly path, so the files never moved. Routing now uses Arr’s editor (`rootFolderPath` + `moveFiles`).
+- Arr/Prowlarr console logs are **warn**, not info. Indexer HTTP flakes (429, CloudFlare, empty category tests) stay in the Prowlarr UI and out of the Home Assistant app log. qBittorrent’s file log is followed from the end so a restart does not replay weeks of history.
+- Recyclarr’s .NET apphost needs its sibling files. The previous single-file copy looked for `/data/engines/recyclarr.dll` and exited 154, so TRaSH never applied.
+- Leftover **HD-1080p**: rehome titles through the editor and import lists before DELETE. Rebuild so the banner says **0.2.44**.
+
 ## 0.2.43
 
 - After a source is added (or on the first pass of this cut), Pompey asks Arr to search **already-available** Default/Max titles that are still below cutoff — so a Dual-Audio copy on the new source can replace the file that already landed. RSS still picks up later announcements. **Anything** still does not upgrade.
