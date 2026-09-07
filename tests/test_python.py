@@ -1239,6 +1239,8 @@ class Helpers(unittest.TestCase):
         self.assertIn("9696/tcp: 9696", cfg)
         self.assertIn("debug: false", cfg)
         self.assertIn("debug: bool", cfg)
+        self.assertIn("simultaneous_downloads: 8", cfg)
+        self.assertIn("simultaneous_downloads: int(1,20)", cfg)
         self.assertNotIn("7878/tcp", cfg)
         self.assertNotIn("8989/tcp", cfg)
         self.assertNotIn("8080/tcp", cfg)
@@ -1339,6 +1341,8 @@ PersistentKeepalive = 25
         src = (ROOT / "pompey/rootfs/usr/local/bin/wire-stack").read_text()
         self.assertIn('"deleteFiles": "false"', src)
         self.assertNotIn('"deleteFiles": "true"', src)
+        self.assertIn("apply_qbit_queue", src)
+        self.assertIn("dont_count_slow_torrents", src)
 
     def test_download_scan_paths_include_legacy_category_folders(self):
         os.environ["MEDIA_ROOT"] = "/media/dlna"
@@ -1445,6 +1449,32 @@ PersistentKeepalive = 25
         os.environ["AFTER_DOWNLOAD"] = "share-one-day"
         self.assertEqual(ws.after_download(), "share_one_day")
         os.environ.pop("AFTER_DOWNLOAD", None)
+
+    def test_simultaneous_downloads_clamps_and_defaults(self):
+        os.environ.pop("SIMULTANEOUS_DOWNLOADS", None)
+        self.assertEqual(ws.simultaneous_downloads(), 8)
+        os.environ["SIMULTANEOUS_DOWNLOADS"] = "3"
+        self.assertEqual(ws.simultaneous_downloads(), 3)
+        os.environ["SIMULTANEOUS_DOWNLOADS"] = "99"
+        self.assertEqual(ws.simultaneous_downloads(), 20)
+        os.environ["SIMULTANEOUS_DOWNLOADS"] = "0"
+        self.assertEqual(ws.simultaneous_downloads(), 1)
+        os.environ["SIMULTANEOUS_DOWNLOADS"] = "nope"
+        self.assertEqual(ws.simultaneous_downloads(), 8)
+        os.environ.pop("SIMULTANEOUS_DOWNLOADS", None)
+
+    def test_qbit_queue_preferences_ignore_slow_and_total_cap(self):
+        prefs = ws.qbit_queue_preferences(3)
+        self.assertTrue(prefs["queueing_enabled"])
+        self.assertEqual(prefs["max_active_downloads"], 3)
+        self.assertEqual(prefs["max_active_uploads"], 3)
+        self.assertEqual(prefs["max_active_torrents"], 20)
+        self.assertTrue(prefs["dont_count_slow_torrents"])
+        self.assertEqual(prefs["slow_torrent_dl_rate_threshold"], 2)
+        self.assertEqual(prefs["slow_torrent_ul_rate_threshold"], 2)
+        self.assertEqual(prefs["slow_torrent_inactive_timer"], 180)
+        prefs = ws.qbit_queue_preferences(8)
+        self.assertEqual(prefs["max_active_torrents"], 24)
 
     def test_qbit_forgets_missing_files_not_active_downloads(self):
         self.assertTrue(
@@ -2080,6 +2110,7 @@ class WireStack(unittest.TestCase):
         os.environ.pop("POMPEY_ENGINE_REFRESH_AGE", None)
         os.environ.pop("POMPEY_HOLD_QBIT", None)
         os.environ.pop("POMPEY_WIRE_TIMEOUT", None)
+        os.environ.pop("SIMULTANEOUS_DOWNLOADS", None)
         self.nginx = nginx
         self.ready = ready
         self._old_path = os.environ.get("PATH", "")
@@ -2110,6 +2141,17 @@ class WireStack(unittest.TestCase):
             self.assertIn(fields.get("movieCategory") or fields.get("tvCategory"), {"radarr", "sonarr"})
         self.assertEqual(self.state.qbit_categories.get("radarr"), "/media/downloads/complete")
         self.assertEqual(self.state.qbit_categories.get("sonarr"), "/media/downloads/complete")
+        prefs_body = self.state.qbit_prefs
+        self.assertIsInstance(prefs_body, dict)
+        raw = prefs_body.get("json")
+        if isinstance(raw, list):
+            raw = raw[0]
+        queue = json.loads(raw) if isinstance(raw, str) else prefs_body
+        self.assertEqual(queue.get("max_active_downloads"), 8)
+        self.assertEqual(queue.get("max_active_torrents"), 24)
+        self.assertTrue(queue.get("dont_count_slow_torrents"))
+        self.assertTrue(queue.get("queueing_enabled"))
+        self.assertEqual(queue.get("slow_torrent_inactive_timer"), 180)
         self.assertTrue(self.state.radarr_media.get("skipFreeSpaceCheckWhenImporting"))
         self.assertTrue(self.state.sonarr_media.get("enableCompletedDownloadHandling"))
         self.assertEqual(self.state.radarr_media.get("minimumFreeSpaceWhenImporting"), 100)
@@ -2174,6 +2216,19 @@ class WireStack(unittest.TestCase):
             if call[0] == "seerr" and call[1] == "POST" and call[2] == "/api/v1/auth/local"
         ]
         self.assertEqual(local_posts, [])
+
+    def test_wire_applies_custom_simultaneous_downloads(self):
+        os.environ["SIMULTANEOUS_DOWNLOADS"] = "12"
+        rc = ws.main()
+        self.assertEqual(rc, 0)
+        raw = self.state.qbit_prefs.get("json")
+        if isinstance(raw, list):
+            raw = raw[0]
+        queue = json.loads(raw)
+        self.assertEqual(queue.get("max_active_downloads"), 12)
+        self.assertEqual(queue.get("max_active_uploads"), 12)
+        self.assertEqual(queue.get("max_active_torrents"), 28)
+        self.assertTrue(queue.get("dont_count_slow_torrents"))
 
     def test_wires_when_seerr_returns_objects(self):
         # Plex login creates user id 1; GET /settings/radarr can still be an object.

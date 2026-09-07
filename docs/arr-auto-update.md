@@ -143,6 +143,7 @@ Unattended `latest` can break the house overnight. Mitigations: keep the previou
 | `deleteFiles=false` on `POST /torrents/delete` | `qbit_forget_torrents` | A default-true or a new field that deletes on omit would wipe the library if it is a hardlink. |
 | Category `savePath` = `downloads/complete` | `qbit_category` | AutoTMM or a new default save path drops files into `incomplete/` forever, or into a library folder. |
 | Bind `Session\Interface=wg0` | `write-engine-configs` | A settings-key rename leaks off the tunnel. |
+| Queue prefs `queueing_enabled`, `max_active_downloads`, `dont_count_slow_torrents`, `max_active_torrents` | `apply_qbit_queue` + `write-engine-configs` | A rename leaves the stock 3-active / count-stalled defaults and one dead grab freezes the household queue. |
 | WebAPI version string we do not pin | fake + real client | Radarr’s qbit proxy gates features on version. A jump can stop completed-download handling. |
 
 ### Radarr / Sonarr HTTP API

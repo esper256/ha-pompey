@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.46
+
+- Home Assistant **Simultaneous downloads** option (default **8**, range 1–20). qBittorrent’s own default of 3 active downloads counted stalled / seedless torrents against that cap, which froze the rest of the queue. Stalled torrents stay in the client (still worth trying if seeds appear) but no longer occupy a slot: after three minutes below 2 KiB/s they do not count toward the simultaneous-download limit. A higher total-active cap leaves room for those waiting titles. Rebuild so the banner says **0.2.46**, then restart after changing the option.
+
 ## 0.2.45
 
 - Home Assistant **Debug** option (off by default). When on, the Pompey sidebar offers the hidden **Radarr**, **Sonarr**, and **qBittorrent** Web UIs through Ingress — not published on the LAN. Use that to see a stuck download. Turn it off when you are done and restart. Rebuild so the banner says **0.2.45**.

@@ -35,6 +35,14 @@ configuration:
       (the default) removes the torrent once the file is in your library.
       Share to 1.0 ratio or for one day if you want to give a little back.
       The library file is kept either way.
+  simultaneous_downloads:
+    name: Simultaneous downloads
+    description: >-
+      How many titles can download at once when they actually have peers.
+      Default 8. A torrent that is stalled or has no seeds does not use
+      up this number, so one dead grab cannot block the rest of the queue.
+      Raise it if several titles are moving slowly on purpose. Restart
+      after changing.
   debug:
     name: Debug
     description: >-
