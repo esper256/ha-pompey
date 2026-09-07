@@ -313,30 +313,30 @@ class FakeState:
         self.fail_indexer = False
         self.qbit_prefs: object = None
         self.movies = [
-            {"id": 1, "title": "Kid Flick", "certification": "PG", "path": "/media/Movies/Not Kid Friendly/Kid Flick"},
-            {"id": 2, "title": "Unknown", "certification": "", "path": "/media/Movies/Not Kid Friendly/Unknown"},
+            {"id": 1, "title": "Kid Flick", "certification": "PG", "path": "/media/Movies/By Rating/Kid Flick"},
+            {"id": 2, "title": "Unknown", "certification": "", "path": "/media/Movies/By Rating/Unknown"},
             {"id": 3, "title": "Already Kid", "certification": "G", "path": "/media/Movies/Kid Friendly/Already Kid"},
             {
                 "id": 4,
                 "title": "Nested Kid",
                 "ratings": {"tmdb": {"certification": "PG"}},
-                "path": "/media/Movies/Not Kid Friendly/Nested Kid",
+                "path": "/media/Movies/By Rating/Nested Kid",
             },
         ]
         self.import_lists: list[dict] = []
         self.series = [
-            {"id": 10, "title": "Adult Show", "certification": "TV-MA", "path": "/media/TV/Not Kid Friendly/Adult Show"},
+            {"id": 10, "title": "Adult Show", "certification": "TV-MA", "path": "/media/TV/By Rating/Adult Show"},
             {
                 "id": 11,
                 "title": "Kid Show",
                 "certification": "TV-PG",
-                "path": "/media/TV/Not Kid Friendly/Kid Show",
+                "path": "/media/TV/By Rating/Kid Show",
             },
             {
                 "id": 12,
                 "title": "Kid Pathless",
                 "certification": "TV-Y",
-                "rootFolderPath": "/media/TV/Not Kid Friendly/Kid Pathless",
+                "rootFolderPath": "/media/TV/By Rating/Kid Pathless",
             },
         ]
         self.moved: list[dict] = []
@@ -1085,6 +1085,9 @@ class Helpers(unittest.TestCase):
             self.assertEqual(rr.movies_kid_dir(), "/media/dlna/Movies/Kid Friendly")
             self.assertEqual(rr.tv_dir(), "/media/dlna/TV/Not Kid Friendly")
             self.assertEqual(rr.tv_kid_dir(), "/media/dlna/TV/Kid Friendly")
+            self.assertEqual(rr.movies_auto_dir(), "/media/dlna/Movies/By Rating")
+            self.assertEqual(rr.tv_auto_dir(), "/media/dlna/TV/By Rating")
+            self.assertEqual(ws.movies_auto_dir(), "/media/dlna/Movies/By Rating")
             self.assertEqual(ws.movies_dir(), "/media/dlna/Movies/Not Kid Friendly")
             os.environ["MEDIA_MOVIES"] = "../escape"
             self.assertEqual(rr.movies_dir(), "/media/dlna/Movies/Not Kid Friendly")
@@ -2131,11 +2134,11 @@ class WireStack(unittest.TestCase):
         self.assertTrue((self.ready / "wired").exists())
         self.assertEqual(
             set(self.state.sonarr_folders),
-            {"/media/TV/Not Kid Friendly", "/media/TV/Kid Friendly"},
+            {"/media/TV/By Rating", "/media/TV/Not Kid Friendly", "/media/TV/Kid Friendly"},
         )
         self.assertEqual(
             set(self.state.radarr_folders),
-            {"/media/Movies/Not Kid Friendly", "/media/Movies/Kid Friendly"},
+            {"/media/Movies/By Rating", "/media/Movies/Not Kid Friendly", "/media/Movies/Kid Friendly"},
         )
         self.assertEqual(len(self.state.download_clients), 2)
         for client in self.state.download_clients:
@@ -2204,7 +2207,9 @@ class WireStack(unittest.TestCase):
         self.assertEqual(self.state.seerr_radarr[0]["hostname"], "127.0.0.1")
         self.assertEqual(self.state.seerr_radarr[0]["activeProfileName"], "Default")
         self.assertEqual(self.state.seerr_sonarr[0]["activeProfileName"], "Default")
-        self.assertEqual(self.state.seerr_sonarr[0]["activeDirectory"], "/media/TV/Not Kid Friendly")
+        self.assertEqual(self.state.seerr_radarr[0]["activeDirectory"], "/media/Movies/By Rating")
+        self.assertEqual(self.state.seerr_sonarr[0]["activeDirectory"], "/media/TV/By Rating")
+        self.assertEqual(self.state.seerr_sonarr[0]["activeAnimeDirectory"], "/media/TV/By Rating")
         self.assertTrue(self.state.seerr_sonarr[0].get("enableSeasonFolders"))
         self.assertTrue((self.ready / "seerr-arr").exists())
         self.assertTrue(self.state.initialized)
@@ -4099,17 +4104,22 @@ class WireStack(unittest.TestCase):
         self.assertEqual(rc, 0)
         self.assertEqual(
             self.state.seerr_radarr[0]["activeDirectory"],
-            "/media/dlna/Movies/Not Kid Friendly",
+            "/media/dlna/Movies/By Rating",
         )
         self.assertEqual(
             self.state.seerr_sonarr[0]["activeDirectory"],
-            "/media/dlna/TV/Not Kid Friendly",
+            "/media/dlna/TV/By Rating",
+        )
+        self.assertEqual(
+            self.state.seerr_sonarr[0]["activeAnimeDirectory"],
+            "/media/dlna/TV/By Rating",
         )
         self.assertEqual(self.state.seerr_radarr[0]["activeProfileName"], "Default")
         self.assertEqual(self.state.seerr_sonarr[0]["activeProfileName"], "Default")
         self.assertEqual(
             set(self.state.radarr_folders),
             {
+                "/media/dlna/Movies/By Rating",
                 "/media/dlna/Movies/Not Kid Friendly",
                 "/media/dlna/Movies/Kid Friendly",
             },
@@ -4117,6 +4127,7 @@ class WireStack(unittest.TestCase):
         self.assertEqual(
             set(self.state.sonarr_folders),
             {
+                "/media/dlna/TV/By Rating",
                 "/media/dlna/TV/Not Kid Friendly",
                 "/media/dlna/TV/Kid Friendly",
             },
@@ -4202,11 +4213,11 @@ class RouteRating(unittest.TestCase):
         dests = {m.get("title"): m.get("rootFolderPath") for m in self.state.moved}
         self.assertEqual(dests["Kid Flick"], "/media/Movies/Kid Friendly")
         self.assertEqual(dests["Nested Kid"], "/media/Movies/Kid Friendly")
+        self.assertEqual(dests["Unknown"], "/media/Movies/Not Kid Friendly")
         self.assertEqual(dests["Kid Show"], "/media/TV/Kid Friendly")
         self.assertEqual(dests["Kid Pathless"], "/media/TV/Kid Friendly")
-        self.assertNotIn("Unknown", dests)
+        self.assertEqual(dests["Adult Show"], "/media/TV/Not Kid Friendly")
         self.assertNotIn("Already Kid", dests)
-        self.assertNotIn("Adult Show", dests)
         kid = next(m for m in self.state.moved if m.get("title") == "Kid Flick")
         self.assertEqual(kid.get("path"), "/media/Movies/Kid Friendly/Kid Flick")
         self.assertNotEqual(
@@ -4234,33 +4245,75 @@ class RouteRating(unittest.TestCase):
         self.assertEqual(dests["Kid Show"], "/media/TV/Kid Friendly")
 
     def test_world_trigger_tv14_stays_general_bluey_moves_to_kid(self):
-        """Seerr has no Kid vs Not Kid picker. TMDB cert is the only input.
+        """By Rating sorts on Arr/TMDB cert. Kid / Not Kid Friendly are forced.
 
-        World Trigger is TV-14 on TMDB — not in KID_TV — so it must stay in
-        Not Kid Friendly. A TV-Y show added to the default (general) root
-        must move to Kid Friendly.
+        World Trigger is TV-14 — not in KID_TV — so Auto sends it to
+        Not Kid Friendly. A forced pick is left alone. Movies match TV.
         """
         self.state.series = [
             {
                 "id": 20,
                 "title": "World Trigger",
                 "certification": "TV-14",
-                "path": "/media/TV/Not Kid Friendly/World Trigger",
+                "path": "/media/TV/By Rating/World Trigger",
             },
             {
                 "id": 21,
                 "title": "Bluey",
                 "certification": "TV-Y",
-                "path": "/media/TV/Not Kid Friendly/Bluey",
+                "path": "/media/TV/By Rating/Bluey",
+            },
+            {
+                "id": 22,
+                "title": "Forced Kid Trigger",
+                "certification": "TV-14",
+                "path": "/media/TV/Kid Friendly/Forced Kid Trigger",
+            },
+            {
+                "id": 23,
+                "title": "Forced General Bluey",
+                "certification": "TV-Y",
+                "path": "/media/TV/Not Kid Friendly/Forced General Bluey",
+            },
+        ]
+        self.state.movies = [
+            {
+                "id": 30,
+                "title": "Auto R",
+                "certification": "R",
+                "path": "/media/Movies/By Rating/Auto R",
+            },
+            {
+                "id": 31,
+                "title": "Auto G",
+                "certification": "G",
+                "path": "/media/Movies/By Rating/Auto G",
+            },
+            {
+                "id": 32,
+                "title": "Forced Kid R",
+                "certification": "R",
+                "path": "/media/Movies/Kid Friendly/Forced Kid R",
+            },
+            {
+                "id": 33,
+                "title": "Forced General G",
+                "certification": "G",
+                "path": "/media/Movies/Not Kid Friendly/Forced General G",
             },
         ]
         self.state.moved = []
         rr.route_series("sonarr-key")
+        rr.route_movies("radarr-key")
         dests = {item.get("title"): item.get("rootFolderPath") for item in self.state.moved}
-        self.assertNotIn("World Trigger", dests)
+        self.assertEqual(dests["World Trigger"], "/media/TV/Not Kid Friendly")
         self.assertEqual(dests["Bluey"], "/media/TV/Kid Friendly")
-        left = next(item for item in self.state.series if item["title"] == "World Trigger")
-        self.assertTrue(rr.in_root(left["path"], "/media/TV/Not Kid Friendly"))
+        self.assertEqual(dests["Auto R"], "/media/Movies/Not Kid Friendly")
+        self.assertEqual(dests["Auto G"], "/media/Movies/Kid Friendly")
+        self.assertNotIn("Forced Kid Trigger", dests)
+        self.assertNotIn("Forced General Bluey", dests)
+        self.assertNotIn("Forced Kid R", dests)
+        self.assertNotIn("Forced General G", dests)
         self.assertFalse(rr.kid_cert("TV-14", rr.KID_TV))
 
     def test_retarget_path_replaces_known_root(self):

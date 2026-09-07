@@ -161,6 +161,23 @@ def tv_kid_dir() -> str:
     return library_dir("MEDIA_TV_KID", "TV/Kid Friendly")
 
 
+AUTO_FOLDER = "By Rating"
+
+
+def sibling_auto_dir(library_path: str) -> str:
+    """Staging root Seerr uses for 'sort by rating'. Not a Plex library."""
+    parent = library_path.rstrip("/").rsplit("/", 1)[0]
+    return f"{parent}/{AUTO_FOLDER}"
+
+
+def movies_auto_dir() -> str:
+    return sibling_auto_dir(movies_dir())
+
+
+def tv_auto_dir() -> str:
+    return sibling_auto_dir(tv_dir())
+
+
 def downloads_complete() -> str:
     return f"{media_root()}/downloads/complete"
 
@@ -3357,7 +3374,7 @@ def configure_seerr(secrets: dict, radarr_profile, sonarr_profile, sonarr_lang) 
         "useSsl": False,
         "activeProfileId": radarr_id,
         "activeProfileName": radarr_name,
-        "activeDirectory": movies_dir(),
+        "activeDirectory": movies_auto_dir(),
         "isDefault": True,
         "is4k": False,
         "minimumAvailability": "released",
@@ -3376,7 +3393,8 @@ def configure_seerr(secrets: dict, radarr_profile, sonarr_profile, sonarr_lang) 
         "useSsl": False,
         "activeProfileId": sonarr_id,
         "activeProfileName": sonarr_name,
-        "activeDirectory": tv_dir(),
+        "activeDirectory": tv_auto_dir(),
+        "activeAnimeDirectory": tv_auto_dir(),
         "isDefault": True,
         "is4k": False,
         "enableSeasonFolders": True,
@@ -3401,8 +3419,12 @@ def configure_seerr(secrets: dict, radarr_profile, sonarr_profile, sonarr_lang) 
             if match:
                 want = (payload.get("activeDirectory") or "").rstrip("/")
                 have = (match.get("activeDirectory") or "").rstrip("/")
+                want_anime = (payload.get("activeAnimeDirectory") or "").rstrip("/")
+                have_anime = (match.get("activeAnimeDirectory") or "").rstrip("/")
                 server_id = match.get("id")
-                dir_changed = bool(want and want != have)
+                dir_changed = bool(want and want != have) or bool(
+                    want_anime and want_anime != have_anime
+                )
                 profile_changed = (
                     match.get("activeProfileId") != payload.get("activeProfileId")
                     or (match.get("activeProfileName") or "") != (payload.get("activeProfileName") or "")
@@ -3505,8 +3527,10 @@ def main() -> int:
     apply_qbit_queue()
     qbit_category("sonarr", complete)
     qbit_category("radarr", complete)
+    ensure_root_folder(sonarr, sk, tv_auto_dir())
     ensure_root_folder(sonarr, sk, tv_dir())
     ensure_root_folder(sonarr, sk, tv_kid_dir())
+    ensure_root_folder(radarr, rk, movies_auto_dir())
     ensure_root_folder(radarr, rk, movies_dir())
     ensure_root_folder(radarr, rk, movies_kid_dir())
     ensure_download_client(sonarr, sk, secrets, "sonarr")

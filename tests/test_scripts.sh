@@ -65,6 +65,8 @@ grep -q "Pompey" <<<"${log}"
 test -f "${POMPEY_SECRETS}"
 test -d "${MEDIA_ROOT}/Movies/Not Kid Friendly"
 test -d "${MEDIA_ROOT}/Movies/Kid Friendly"
+test -d "${MEDIA_ROOT}/Movies/By Rating"
+test -d "${MEDIA_ROOT}/TV/By Rating"
 # Secrets must not appear in banner output
 python3 - "${POMPEY_SECRETS}" "${log}" <<'PY'
 import json, sys
@@ -142,6 +144,7 @@ fi
 test -d "${MEDIA_ROOT}/Movies"
 test -d "${MEDIA_ROOT}/Movies/Not Kid Friendly"
 test -d "${MEDIA_ROOT}/Movies/Kid Friendly"
+test -d "${MEDIA_ROOT}/Movies/By Rating"
 python3 - "${POMPEY_SECRETS}" "${POMPEY_CONFIG}" <<'PY'
 import json, pathlib, sys
 secrets = json.load(open(sys.argv[1], encoding="utf-8"))
@@ -268,7 +271,9 @@ grep -Fq "Session\\DefaultSavePath=${MEDIA_ROOT}/downloads/complete" "${POMPEY_C
 grep -Fq "Session\\DefaultSavePath=${MEDIA_ROOT}/downloads/complete" "${POMPEY_CONFIG}/qBittorrent/config/qBittorrent.conf"
 test -d "${MEDIA_ROOT}/Movies/Not Kid Friendly"
 test -d "${MEDIA_ROOT}/Movies/Kid Friendly"
+test -d "${MEDIA_ROOT}/Movies/By Rating"
 test -d "${MEDIA_ROOT}/TV/Not Kid Friendly"
+test -d "${MEDIA_ROOT}/TV/By Rating"
 test -d "${MEDIA_ROOT}/downloads/incomplete"
 export MEDIA_ROOT="${WORK}/media"
 unset MEDIA_MOVIES MEDIA_MOVIES_KID MEDIA_TV MEDIA_TV_KID
