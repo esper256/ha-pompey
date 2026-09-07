@@ -1445,7 +1445,65 @@ def upsert_quality_profile(
     return int(saved_id)
 
 
-def drop_extra_quality_profiles(base: str, api_key: str) -> None:
+def arr_title_collection(kind: str) -> str:
+    return "movie" if kind == "radarr" else "series"
+
+
+def title_id_of(item: dict) -> int | None:
+    return profile_id_of(item)
+
+
+def title_quality_profile_id(item: dict) -> int | None:
+    try:
+        if item.get("qualityProfileId") is not None:
+            return int(item["qualityProfileId"])
+    except (TypeError, ValueError):
+        return None
+    return None
+
+
+def rehome_titles_off_profile(
+    base: str, api_key: str, kind: str, leftover_id: int, default_id: int
+) -> int:
+    """Move movies/series off a leftover profile so Arr will allow DELETE.
+
+    Seerr cannot change quality on an approved request. The profile lives on
+    the Arr title. Default is the household 1080p encode; leftovers (HD-1080p)
+    stay in the Seerr dropdown until every title is off them.
+    """
+    if leftover_id == default_id:
+        return 0
+    path = arr_title_collection(kind)
+    try:
+        rows = as_list(http("GET", f"{base}/{path}", headers=arr_headers(api_key)))
+    except RuntimeError as exc:
+        log(f"{kind} titles on leftover profile {leftover_id}: {exc}", "WARNING")
+        return 0
+    moved = 0
+    for item in rows:
+        if title_quality_profile_id(item) != leftover_id:
+            continue
+        tid = title_id_of(item)
+        if tid is None:
+            continue
+        payload = json.loads(json.dumps(item))
+        payload["qualityProfileId"] = default_id
+        try:
+            http(
+                "PUT",
+                f"{base}/{path}/{tid}",
+                payload,
+                headers=arr_headers(api_key),
+            )
+            moved += 1
+        except RuntimeError as exc:
+            log(f"{kind} could not move title {tid} onto Default: {exc}", "WARNING")
+    return moved
+
+
+def drop_extra_quality_profiles(
+    base: str, api_key: str, kind: str, default_id: int | None
+) -> None:
     """Seerr lists every Arr profile in the request dropdown. Keep only the three."""
     try:
         profiles = as_list(http("GET", f"{base}/qualityprofile", headers=arr_headers(api_key)))
@@ -1460,11 +1518,23 @@ def drop_extra_quality_profiles(base: str, api_key: str) -> None:
             "WARNING",
         )
         return
+    if default_id is None:
+        default_id = profile_id_by_name(base, api_key, PROFILE_DEFAULT)
     for item in profiles:
         name = item.get("name")
         pid = item.get("id")
         if name in PROFILE_NAMES or pid is None:
             continue
+        leftover_id = profile_id_of(item)
+        if leftover_id is not None and default_id is not None:
+            moved = rehome_titles_off_profile(
+                base, api_key, kind, leftover_id, int(default_id)
+            )
+            if moved:
+                log(
+                    f"{kind} moved {moved} title(s) from {name} onto Default "
+                    "so the leftover profile can be removed"
+                )
         try:
             http(
                 "DELETE",
@@ -1674,7 +1744,7 @@ def apply_household_quality_profiles(base: str, api_key: str, kind: str):
         )
     except RuntimeError as exc:
         log(f"{kind} quality profile {PROFILE_ANYTHING}: {exc}", "WARNING")
-    drop_extra_quality_profiles(base, api_key)
+    drop_extra_quality_profiles(base, api_key, kind, default_id)
     try:
         now = as_list(http("GET", f"{base}/qualityprofile", headers=arr_headers(api_key)))
     except RuntimeError:
