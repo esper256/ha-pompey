@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.49
+
+- After a TV season (or movie) lands, leftover extras in `downloads/complete` are renamed into the Plex extra folders on the Arr title path: **Behind The Scenes**, **Deleted Scenes**, **Featurettes**, **Interviews**, **Scenes**, **Shorts**, **Trailers**, **Other**. Episode-tied extras sit next to that `SxxExx` as `-behindthescenes` / `-featurette` / …. Season 00 and other specials go in **Specials**, or into **Season 00** if that folder already exists, named `Show - S00Exx - Title`. Samples are dropped. Destination is still the Kid / Not Kid folder Seerr stored — housekeeping does not guess from the filename. Rebuild so the banner says **0.2.49**.
+
 ## 0.2.48
 
 - Debug Radarr/Sonarr still 404ed webpack chunks (`/640-<hash>.js`) on the Home Assistant host. `/index-<hash>.js` was rewritten; later chunks use webpack `publicPath = "/"`, which ignores `<base href>`. Rewrite that publicPath and intercept `script.src` before the browser fetches. Rebuild so the banner says **0.2.48**, then hard-refresh the debug tab.
