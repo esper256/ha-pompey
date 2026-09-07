@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.43
+
+- After a source is added (or on the first pass of this cut), Pompey asks Arr to search **already-available** Default/Max titles that are still below cutoff — so a Dual-Audio copy on the new source can replace the file that already landed. RSS still picks up later announcements. **Anything** still does not upgrade.
+- Closing the Seerr **request** (Requests page, the ticket — not Clear Data) stops that. Pompey unmonitors the title so it is not searched again. The library file stays. A Seerr read failure does not unmonitor anything. Rebuild so the banner says **0.2.43**.
+
 ## 0.2.42
 
 - Leftover Arr quality profiles (stock **HD-1080p**, HD-720p, Ultra-HD) no longer stick in the Seerr request dropdown because a movie or show still used them. Wiring now moves those titles onto **Default**, then deletes the leftover. Seerr cannot change quality on an approved request; the profile lives on Radarr/Sonarr. Rebuild so the banner says **0.2.42**.

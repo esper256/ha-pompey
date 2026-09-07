@@ -285,6 +285,10 @@ class FakeState:
         self.sonarr_manual_import: list[dict] = []
         self.episodes: list[dict] = []
         self.wanted_missing: list[dict] = []
+        self.radarr_wanted_cutoff: list[dict] = []
+        self.sonarr_wanted_cutoff: list[dict] = []
+        self.seerr_requests: list[dict] = []
+        self.seerr_fail_requests = False
         self.queue: list[dict] = []
         self.sonarr_queue: list[dict] = []
         self.qbit_categories: dict = {}
@@ -668,6 +672,20 @@ def handler_for(state: FakeState):
                             "totalRecords": len(rows),
                         }
                     )
+                if path.endswith("/wanted/cutoff") and method == "GET":
+                    rows = (
+                        state.radarr_wanted_cutoff
+                        if role == "radarr"
+                        else state.sonarr_wanted_cutoff
+                    )
+                    return self._send(
+                        body={
+                            "records": rows,
+                            "page": 1,
+                            "pageSize": 50,
+                            "totalRecords": len(rows),
+                        }
+                    )
                 if "/series/" in path and method == "GET":
                     try:
                         idx = int(path.rsplit("/", 1)[-1])
@@ -909,6 +927,23 @@ def handler_for(state: FakeState):
                         return self._send(404, {"error": path})
                     state.seerr_jobs.append(job)
                     return self._send(body={"ok": True})
+                if path == "/api/v1/request" and method == "GET":
+                    if state.seerr_fail_requests:
+                        return self._send(500, {"message": "requests failed"})
+                    skip = int((query.get("skip") or ["0"])[0] or 0)
+                    take = int((query.get("take") or ["50"])[0] or 50)
+                    rows = state.seerr_requests[skip : skip + take]
+                    return self._send(
+                        body={
+                            "pageInfo": {
+                                "pages": 1,
+                                "pageSize": take,
+                                "results": len(state.seerr_requests),
+                                "page": 1,
+                            },
+                            "results": rows,
+                        }
+                    )
                 return self._send(404, {"error": path})
             return self._send(500, {"error": "no role"})
 
@@ -3489,6 +3524,143 @@ class WireStack(unittest.TestCase):
         self.assertEqual(movie_retry.get("movieIds"), [99])
         ep_retry = next(c for c in self.state.arr_commands if c.get("name") == "EpisodeSearch")
         self.assertEqual(ep_retry.get("episodeIds"), [44])
+
+    def test_dual_audio_regex_matches_release_tags(self):
+        import re
+
+        pattern = next(rx for name, rx in ws.CUSTOM_FORMATS if name == ws.DUAL_AUDIO)
+        rx = re.compile(pattern, re.I)
+        self.assertTrue(rx.search("Show.S01E01.Dual-Audio.1080p"))
+        self.assertTrue(rx.search("[SubsPlease] Title - 01 (1080p) [DUAL]"))
+        self.assertTrue(rx.search("Title.JA+EN.WEB"))
+        self.assertTrue(rx.search("Title.Multi-Audio.Bluray"))
+        self.assertFalse(rx.search("Title.1080p.WEB-DL.x265"))
+
+    def test_cutoff_unmet_searches_open_seerr_requests_when_sources_change(self):
+        os.environ["INDEXER_URL"] = ""
+        os.environ["INDEXER_API_KEY"] = ""
+        self.state.seerr_has_admin = True
+        self.state.indexers = [{"id": 1, "name": "Old", "enable": True}]
+        self.state.seerr_requests = [
+            {
+                "id": 7,
+                "status": 5,
+                "media": {
+                    "mediaType": "movie",
+                    "tmdbId": 111,
+                    "externalServiceId": 99,
+                },
+            }
+        ]
+        self.state.radarr_wanted_cutoff = [
+            {"id": 99, "title": "Open Anime", "tmdbId": 111, "hasFile": True},
+            {"id": 100, "title": "Closed Movie", "tmdbId": 222, "hasFile": True},
+        ]
+        self.state.sonarr_wanted_cutoff = [
+            {
+                "id": 55,
+                "seriesId": 10,
+                "series": {"id": 10, "title": "Show", "tvdbId": 88},
+            }
+        ]
+        from io import StringIO
+        from contextlib import redirect_stdout
+
+        first = StringIO()
+        with redirect_stdout(first):
+            self.assertEqual(ws.housekeep(), 0)
+        def movie_search(item: dict) -> bool:
+            name = str(item.get("name") or "")
+            return name.startswith("Movies") and name.endswith("Search")
+
+        movie_searches = [
+            item
+            for item in self.state.arr_commands
+            if movie_search(item) and item.get("movieIds") == [99]
+        ]
+        self.assertEqual(len(movie_searches), 1, self.state.arr_commands)
+        self.assertFalse(
+            any(
+                movie_search(item) and 100 in (item.get("movieIds") or [])
+                for item in self.state.arr_commands
+            )
+        )
+        self.assertFalse(
+            any(
+                item.get("name") == "EpisodeSearch" and item.get("episodeIds") == [55]
+                for item in self.state.arr_commands
+            )
+        )
+        self.assertIn("better copy of 1 movie(s) still requested in Seerr", first.getvalue())
+
+        self.state.arr_commands.clear()
+        second = StringIO()
+        with redirect_stdout(second):
+            self.assertEqual(ws.housekeep(), 0)
+        self.assertFalse(any(movie_search(item) for item in self.state.arr_commands))
+        self.assertNotIn("better copy", second.getvalue())
+
+        self.state.indexers.append({"id": 2, "name": "New", "enable": True})
+        third = StringIO()
+        with redirect_stdout(third):
+            self.assertEqual(ws.housekeep(), 0)
+        later = [
+            item
+            for item in self.state.arr_commands
+            if movie_search(item) and item.get("movieIds") == [99]
+        ]
+        self.assertEqual(len(later), 1)
+        self.assertIn("better copy of 1 movie(s) still requested in Seerr", third.getvalue())
+
+    def test_unmonitor_after_seerr_request_removed(self):
+        os.environ["INDEXER_URL"] = ""
+        os.environ["INDEXER_API_KEY"] = ""
+        self.state.seerr_has_admin = True
+        self.state.movies = [
+            {"id": 99, "title": "Open Anime", "monitored": True, "hasFile": True},
+            {"id": 1, "title": "Never Requested", "monitored": True, "hasFile": True},
+        ]
+        self.state.seerr_requests = [
+            {
+                "id": 7,
+                "status": 5,
+                "media": {"mediaType": "movie", "externalServiceId": 99},
+            }
+        ]
+        self.assertEqual(ws.housekeep(), 0)
+        self.assertTrue(self.state.movies[0]["monitored"])
+        self.assertTrue(self.state.movies[1]["monitored"])
+
+        self.state.seerr_requests = []
+        from io import StringIO
+        from contextlib import redirect_stdout
+
+        buf = StringIO()
+        with redirect_stdout(buf):
+            self.assertEqual(ws.housekeep(), 0)
+        self.assertFalse(self.state.movies[0]["monitored"])
+        self.assertTrue(self.state.movies[1]["monitored"])
+        self.assertIn("stopped looking for a better copy of Open Anime", buf.getvalue())
+
+    def test_seerr_request_read_failure_does_not_unmonitor(self):
+        os.environ["INDEXER_URL"] = ""
+        os.environ["INDEXER_API_KEY"] = ""
+        self.state.seerr_has_admin = True
+        self.state.movies = [
+            {"id": 99, "title": "Open Anime", "monitored": True, "hasFile": True},
+        ]
+        self.state.seerr_requests = [
+            {
+                "id": 7,
+                "status": 5,
+                "media": {"mediaType": "movie", "externalServiceId": 99},
+            }
+        ]
+        self.assertEqual(ws.housekeep(), 0)
+        self.state.seerr_requests = []
+        self.state.seerr_fail_requests = True
+        self.assertEqual(ws.housekeep(), 0)
+        self.assertTrue(self.state.movies[0]["monitored"])
 
     def test_housekeep_retries_missing_episodes_once_per_id_set(self):
         os.environ["INDEXER_URL"] = ""
