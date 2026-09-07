@@ -4,7 +4,7 @@ Search for a movie or TV show in Home Assistant. Confirm if we need you. It land
 
 Pompey is one Home Assistant OS app. The sidebar is the box: Proton, status, a button to search. Search itself is [Seerr](https://seerr.dev/) on this machine’s port **5055**, not an iframe. Downloads, matching, and the VPN stay inside Pompey. All internet from this app uses Proton WireGuard. If the tunnel is down, internet is dropped. **Plex is a separate Home Assistant app** (or another machine). Pompey does not run Plex.
 
-This is the user guide for the product we are building. It describes the journey as it should feel. [What is not ready yet](#what-is-not-ready-yet) is honest about the current cut (**0.2.46**). The [roadmap](#roadmap) is how we close the gap.
+This is the user guide for the product we are building. It describes the journey as it should feel. [What is not ready yet](#what-is-not-ready-yet) is honest about the current cut (**0.2.47**). The [roadmap](#roadmap) is how we close the gap.
 
 ## How a day with it should feel
 
@@ -61,9 +61,12 @@ Open **Settings → Apps → Pompey → Configuration**. The defaults already ma
 | TV | `TV/Not Kid Friendly` |
 | Kid TV | `TV/Kid Friendly` |
 | After a title is in the library | Stop sharing |
+| Simultaneous downloads | 8 |
 | Debug | Off |
 
 Those four library folders must be **siblings** (neither library folder sits inside another). In-progress downloads go in `downloads/` under the media folder. Do not add `downloads` as a Plex library.
+
+**Simultaneous downloads** is how many titles can transfer at once when they have peers. Default **8**. A torrent that is stalled or has no seeds does not use up this number, so one dead grab cannot stop every other request. Raise it if several titles are moving slowly on purpose. Restart after changing.
 
 **Debug** stays off for daily use. Turn it on only when you need the hidden Radarr, Sonarr, or qBittorrent Web UI to see why a title is stuck. The sidebar then offers those three consoles through Ingress (Home Assistant login). They are still not published on the LAN. Restart after changing this, and turn it off when you are done.
 
@@ -105,7 +108,7 @@ Daily use is two places: **search** (`http://<home-assistant>:5055`) and **Plex*
 | Search, posters, requests | Everyone in the house | `http://<this-home-assistant-ip>:5055` — Seerr, on the LAN. Do not put this on the public internet. |
 | Sources (indexers) | Whoever manages what we can grab | `http://<this-home-assistant-ip>:9696` — Prowlarr. Seerr cannot do this. First visit sets a login. Do not put this on the public internet. |
 | Pompey (Proton, status, Open search, Open sources, debug consoles) | Whoever installed the app | Home Assistant sidebar → **Pompey**. Always this UI, never rewritten into Seerr. |
-| Media folders, after-download, and Debug | Whoever installed the app | **Settings → Apps → Pompey → Configuration** |
+| Media folders, after-download, simultaneous downloads, and Debug | Whoever installed the app | **Settings → Apps → Pompey → Configuration** |
 | Watching | Everyone | Your Plex apps. On the LAN, Plex itself is typically `http://<plex-ip>:32400`. Pompey does not run Plex. |
 | Proton account / new WireGuard file | Whoever owns the VPN | Proton’s site, then paste into Pompey if you rotate the file |
 | App log | When something is stuck | **Settings → Apps → Pompey → Log** |
@@ -130,6 +133,7 @@ If a download is stuck, turn on **Debug** in the app configuration, restart, and
 - **Search and request** at `http://<home-assistant>:5055`. The sidebar is the box, not an iframe of search. Household members should not see a ticket queue. Seerr can have more than one user; the first admin is whoever completed the Plex wizard.
 - **Kid vs general** is a rule after the request, from TMDB certification. G / PG / PG-13 and TV-Y / TV-G / TV-PG go to the kid folders. Anything else, **including unknown**, goes to general. Pompey does not guess kid, and it does not stop the request to ask.
 - **After a title is in the library** is in **Settings → Apps → Pompey → Configuration**. Stop sharing is the default so finished torrents do not sit in RAM. Share to a 1.0 ratio or for one day if you want to give a little back. The library file is kept.
+- **Simultaneous downloads** (same Configuration page) is how many titles can transfer at once when they have peers. Default 8. Stalled or seedless torrents keep trying but do not block the rest of the queue.
 - **Already on Plex** is Seerr’s job. If it is already there, you should see that before you request it.
 - **Confirm if we need you** is for the cases the stack cannot decide — not for every request. Picking a specific torrent by hand is not the default path.
 - **Open sources → History.** Empty Query is not always the Seerr title. Click the row: **top100** (or similar browse) means the source was asked with no name — that is not the request. **Parameters** with IMDb/TMDb is an ID search. The movie name in Query is a title search. RSS is empty Query, empty Parameters, event type RSS. After **0.2.25**, Arr is told to title-search so a request should show the movie name on every source that actually synced into Radarr/Sonarr. A source that fails Prowlarr’s category test (or is blocked by CloudFlare) never becomes an Arr indexer — the app log warns when that happens.
@@ -172,7 +176,7 @@ A private tracker with a stable API key is set-and-forget. Prowlarr copies that 
 
 ## What is not ready yet
 
-The journey above is the target. **0.2.46** is a real Home Assistant OS install of that box, not the finished household app.
+The journey above is the target. **0.2.47** is a real Home Assistant OS install of that box, not the finished household app.
 
 | In the guide | On the machine today |
 | --- | --- |
@@ -184,13 +188,13 @@ The journey above is the target. **0.2.46** is a real Home Assistant OS install 
 | Add another source from search/settings | **Open sources** (Prowlarr :9696). A Pompey-native source UI is still roadmap. |
 | Replace Proton / change region from the running app | Paste on first wait screen. No later “new .conf” flow. |
 | Household members as first-class users | Seerr supports users; we have not productized invites or permissions beyond “first admin is the Plex wizard” and advanced-request so the quality dropdown shows. |
-| Status when a download is stuck | App log. No in-sidebar job list. Once search is up, the sidebar is a dashboard (Open search / Proton graph), not a first-boot progress bar. **0.2.46** can open the hidden engine Web UIs from the sidebar when **Debug** is on. |
-| Engine Web UIs for operators | **0.2.46** — Radarr/Sonarr/qBittorrent stay localhost and off the LAN. The sidebar exposes them through Ingress when **Debug** is on. Prowlarr is on :9696 for sources. |
+| Status when a download is stuck | App log. No in-sidebar job list. Once search is up, the sidebar is a dashboard (Open search / Proton graph), not a first-boot progress bar. **0.2.45** can open the hidden engine Web UIs from the sidebar when **Debug** is on. **0.2.46** lets stalled / seedless torrents keep trying without blocking the rest of the queue (Simultaneous downloads, default 8). **0.2.47** keeps Debug Radarr/Sonarr from loading a hashed `/index-*.js` off the Home Assistant host. |
+| Engine Web UIs for operators | **0.2.45** — Radarr/Sonarr/qBittorrent stay localhost and off the LAN. The sidebar exposes them through Ingress when **Debug** is on. **0.2.47** rewrites hashed Arr assets so those tabs are not blank. Prowlarr is on :9696 for sources. |
 | Cloudflare-protected sources | No challenge solvers. |
 | Jellyfin | Plex only. |
 | Use this from outside the house | Out of scope. Search is on the LAN at :5055. Sources at :9696. Do not port-forward either. |
 
-If search is a blank page on port 5055, or the Plex button on setup does nothing, that is a bug — send the log. Rebuild so the banner says **0.2.46** if Debug Radarr/Sonarr is a blank tab (qBittorrent already worked). Rebuild to **0.2.45** to open Radarr / Sonarr / qBittorrent from the sidebar (turn on **Debug** in Configuration). Rebuild to **0.2.44** if PG/PG-13 movies stay in Not Kid Friendly, if Recyclarr never applies TRaSH (`recyclarr.dll` missing), or if the Home Assistant log is mostly Prowlarr HTTP errors. Rebuild to **0.2.43** if a title already on Plex should be reconsidered after you add a source, or if you want removing the Seerr request to stop further upgrades. Rebuild to **0.2.42** if the movie quality list still includes leftover HD-1080p. Rebuild to **0.2.41** so Default/Max prefer Dual-Audio when it exists. Rebuild to **0.2.40** if the sidebar is still filling a progress bar days after search works. Rebuild to **0.2.39** so engines keep current without a Pompey bump per Radarr release. Rebuild to **0.2.38** to drop the Home Assistant language/subtitle options and to let Recyclarr apply TRaSH Default/Max (Anything still takes CAM). Rebuild to **0.2.37** if leftover videos are still sitting loose in `downloads/complete` after the title is in the library. Rebuild to **0.2.34** if leftover torrent *folders* stay after the title is on Plex. Rebuild to **0.2.33** if Seerr never marked a finished title available. Rebuild to **0.2.32** if a finished **video** is still under `downloads/complete`. Rebuild to **0.2.31** if the wait screen says wiring failed (including Sonarr minimum free space ≥ 100) and the request quality list is still Any / HD-720p / Ultra-HD. Rebuild to **0.2.29** if you moved a file by hand and worry qBittorrent will grab it again. Also rebuild if auto-grab picked a huge remux on Default, a Seerr request only title-searched two Prowlarr sources, or you still need tagged app logs, household media-folder defaults, **Open sources**, or an older wait screen.
+If search is a blank page on port 5055, or the Plex button on setup does nothing, that is a bug — send the log. Rebuild so the banner says **0.2.47** if Debug Radarr/Sonarr is a blank tab (qBittorrent already worked). Rebuild to **0.2.46** if three dead torrents are holding every other request (Simultaneous downloads in Configuration). Rebuild to **0.2.45** to open Radarr / Sonarr / qBittorrent from the sidebar (turn on **Debug** in Configuration). Rebuild to **0.2.44** if PG/PG-13 movies stay in Not Kid Friendly, if Recyclarr never applies TRaSH (`recyclarr.dll` missing), or if the Home Assistant log is mostly Prowlarr HTTP errors. Rebuild to **0.2.43** if a title already on Plex should be reconsidered after you add a source, or if you want removing the Seerr request to stop further upgrades. Rebuild to **0.2.42** if the movie quality list still includes leftover HD-1080p. Rebuild to **0.2.41** so Default/Max prefer Dual-Audio when it exists. Rebuild to **0.2.40** if the sidebar is still filling a progress bar days after search works. Rebuild to **0.2.39** so engines keep current without a Pompey bump per Radarr release. Rebuild to **0.2.38** to drop the Home Assistant language/subtitle options and to let Recyclarr apply TRaSH Default/Max (Anything still takes CAM). Rebuild to **0.2.37** if leftover videos are still sitting loose in `downloads/complete` after the title is in the library. Rebuild to **0.2.34** if leftover torrent *folders* stay after the title is on Plex. Rebuild to **0.2.33** if Seerr never marked a finished title available. Rebuild to **0.2.32** if a finished **video** is still under `downloads/complete`. Rebuild to **0.2.31** if the wait screen says wiring failed (including Sonarr minimum free space ≥ 100) and the request quality list is still Any / HD-720p / Ultra-HD. Rebuild to **0.2.29** if you moved a file by hand and worry qBittorrent will grab it again. Also rebuild if auto-grab picked a huge remux on Default, a Seerr request only title-searched two Prowlarr sources, or you still need tagged app logs, household media-folder defaults, **Open sources**, or an older wait screen.
 
 ## Roadmap
 

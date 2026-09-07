@@ -320,13 +320,16 @@ class SupervisorConfigSchema(unittest.TestCase):
                 "tv_folder",
                 "tv_kid_folder",
                 "after_download",
+                "simultaneous_downloads",
                 "debug",
             },
         )
         self.assertEqual(set(self.raw["schema"]), set(self.raw["options"]))
         self.assertEqual(self.raw["options"]["after_download"], "stop_sharing")
+        self.assertEqual(self.raw["options"]["simultaneous_downloads"], 8)
         self.assertEqual(self.raw["options"]["debug"], False)
         self.assertEqual(self.raw["schema"]["debug"], "bool")
+        self.assertEqual(self.raw["schema"]["simultaneous_downloads"], "int(1,20)")
         self.assertEqual(
             self.raw["schema"]["after_download"],
             "list(stop_sharing|share_to_ratio|share_one_day)",

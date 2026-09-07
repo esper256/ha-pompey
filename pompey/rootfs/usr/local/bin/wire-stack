@@ -60,6 +60,46 @@ def after_download() -> str:
     return "stop_sharing"
 
 
+def simultaneous_downloads() -> int:
+    raw = env("SIMULTANEOUS_DOWNLOADS", "8")
+    try:
+        number = int(raw)
+    except ValueError:
+        number = 8
+    return max(1, min(number, 20))
+
+
+def qbit_queue_preferences(active: int | None = None) -> dict:
+    """WebUI names for the same queue policy write-engine-configs stamps in conf."""
+    if active is None:
+        active = simultaneous_downloads()
+    return {
+        "queueing_enabled": True,
+        "max_active_downloads": active,
+        "max_active_uploads": active,
+        "max_active_torrents": max(active + 16, 20),
+        "dont_count_slow_torrents": True,
+        "slow_torrent_dl_rate_threshold": 2,
+        "slow_torrent_ul_rate_threshold": 2,
+        "slow_torrent_inactive_timer": 180,
+    }
+
+
+def qbit_set_preferences_url() -> str:
+    return f"{qbit_url()}/api/v2/app/setPreferences"
+
+
+def apply_qbit_queue() -> None:
+    """Restamp queue prefs on a running client (existing installs + Debug UI)."""
+    prefs = qbit_queue_preferences()
+    data = urllib.parse.urlencode({"json": json.dumps(prefs)}).encode()
+    http("POST", qbit_set_preferences_url(), data)
+    log(
+        f"qbit queue max_active_downloads={prefs['max_active_downloads']} "
+        f"max_active_torrents={prefs['max_active_torrents']} ignore_slow=true"
+    )
+
+
 def parse_int(value) -> int | None:
     if value in (None, "", 0, "0"):
         return None
@@ -3455,6 +3495,7 @@ def main() -> int:
     prowlarr = prowlarr_url()
 
     complete = downloads_complete()
+    apply_qbit_queue()
     qbit_category("sonarr", complete)
     qbit_category("radarr", complete)
     ensure_root_folder(sonarr, sk, tv_dir())

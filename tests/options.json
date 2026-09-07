@@ -5,5 +5,6 @@
   "tv_folder": "TV/Not Kid Friendly",
   "tv_kid_folder": "TV/Kid Friendly",
   "after_download": "stop_sharing",
+  "simultaneous_downloads": 8,
   "debug": false
 }

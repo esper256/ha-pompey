@@ -130,6 +130,11 @@ grep -Fq "Session\\DisableAutoTMMByDefault=true" "${POMPEY_CONFIG}/qBittorrent/q
 grep -Fq "Session\\MaxRatioAct=1" "${POMPEY_CONFIG}/qBittorrent/qBittorrent.conf"
 grep -Fq "Session\\MaxSeedingTime=2880" "${POMPEY_CONFIG}/qBittorrent/qBittorrent.conf"
 grep -Fq "Session\\MaxRatioEnabled=false" "${POMPEY_CONFIG}/qBittorrent/qBittorrent.conf"
+grep -Fq "Session\\QueueingSystemEnabled=true" "${POMPEY_CONFIG}/qBittorrent/qBittorrent.conf"
+grep -Fq "Session\\MaxActiveDownloads=8" "${POMPEY_CONFIG}/qBittorrent/qBittorrent.conf"
+grep -Fq "Session\\MaxActiveTorrents=24" "${POMPEY_CONFIG}/qBittorrent/qBittorrent.conf"
+grep -Fq "Session\\IgnoreSlowTorrentsForQueueing=true" "${POMPEY_CONFIG}/qBittorrent/qBittorrent.conf"
+grep -Fq "Session\\SlowTorrentsInactivityTimer=180" "${POMPEY_CONFIG}/qBittorrent/qBittorrent.conf"
 if grep -Fq "Session\\MaxRatioAct=3" "${POMPEY_CONFIG}/qBittorrent/qBittorrent.conf"; then
   echo "MaxRatioAct=3 would delete library files" >&2
   exit 1
@@ -434,6 +439,8 @@ if grep -q "proxy_pass http://127.0.0.1:7878" "${NGINX_DEBUG_INC}"; then
 fi
 grep -q "debug: false" "${ROOT}/pompey/config.yaml"
 grep -q "debug: bool" "${ROOT}/pompey/config.yaml"
+grep -q "simultaneous_downloads: 8" "${ROOT}/pompey/config.yaml"
+grep -q "simultaneous_downloads: int(1,20)" "${ROOT}/pompey/config.yaml"
 if grep -q "nginx-mod-http-sub" "${ROOT}/pompey/Dockerfile"; then
   echo "HA Alpine has no nginx-mod-http-sub package" >&2
   exit 1
@@ -792,6 +799,8 @@ grep -Fq "FileLogger\\Path=${POMPEY_CONFIG}/qBittorrent/logs" "${POMPEY_CONFIG}/
 grep -Fq "Session\\DefaultSavePath=${MEDIA_ROOT}/downloads/complete" "${POMPEY_CONFIG}/qBittorrent/qBittorrent.conf"
 grep -Fq "Session\\MaxRatioAct=1" "${POMPEY_CONFIG}/qBittorrent/qBittorrent.conf"
 grep -Fq "Session\\MaxSeedingTime=2880" "${POMPEY_CONFIG}/qBittorrent/qBittorrent.conf"
+grep -Fq "Session\\MaxActiveDownloads=8" "${POMPEY_CONFIG}/qBittorrent/qBittorrent.conf"
+grep -Fq "Session\\IgnoreSlowTorrentsForQueueing=true" "${POMPEY_CONFIG}/qBittorrent/qBittorrent.conf"
 
 echo "== write-engine-configs after_download from Home Assistant options =="
 share_opts="${WORK}/share-options.json"
@@ -826,5 +835,31 @@ unset AFTER_DOWNLOAD || true
 BASHIO_OPTIONS="${ROOT}/tests/options.json" run "${BIN}/write-engine-configs"
 grep -Fq "Session\\MaxSeedingTime=2880" "${POMPEY_CONFIG}/qBittorrent/qBittorrent.conf"
 grep -Fq "Session\\MaxRatioEnabled=false" "${POMPEY_CONFIG}/qBittorrent/qBittorrent.conf"
+
+echo "== write-engine-configs simultaneous_downloads from Home Assistant options =="
+queue_opts="${WORK}/queue-options.json"
+python3 - "${ROOT}/tests/options.json" "${queue_opts}" <<'PY'
+import json, sys
+data = json.load(open(sys.argv[1], encoding="utf-8"))
+data["simultaneous_downloads"] = 3
+json.dump(data, open(sys.argv[2], "w"))
+PY
+unset SIMULTANEOUS_DOWNLOADS || true
+BASHIO_OPTIONS="${queue_opts}" run "${BIN}/write-engine-configs"
+grep -Fq "Session\\MaxActiveDownloads=3" "${POMPEY_CONFIG}/qBittorrent/qBittorrent.conf"
+grep -Fq "Session\\MaxActiveUploads=3" "${POMPEY_CONFIG}/qBittorrent/qBittorrent.conf"
+grep -Fq "Session\\MaxActiveTorrents=20" "${POMPEY_CONFIG}/qBittorrent/qBittorrent.conf"
+grep -Fq "Session\\IgnoreSlowTorrentsForQueueing=true" "${POMPEY_CONFIG}/qBittorrent/qBittorrent.conf"
+python3 - "${POMPEY_CONFIG}/qBittorrent/qBittorrent.conf" <<'PY'
+from pathlib import Path
+import sys
+text = Path(sys.argv[1]).read_text()
+if text.count("Session\\MaxActiveDownloads=") != 1:
+    raise SystemExit("queue keys must be patched in place, not duplicated")
+PY
+unset SIMULTANEOUS_DOWNLOADS || true
+BASHIO_OPTIONS="${ROOT}/tests/options.json" run "${BIN}/write-engine-configs"
+grep -Fq "Session\\MaxActiveDownloads=8" "${POMPEY_CONFIG}/qBittorrent/qBittorrent.conf"
+grep -Fq "Session\\MaxActiveTorrents=24" "${POMPEY_CONFIG}/qBittorrent/qBittorrent.conf"
 
 echo "script tests ok (${WORK})"
