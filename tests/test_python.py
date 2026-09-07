@@ -215,6 +215,8 @@ class FakeState:
         self.calls: list[tuple[str, str, object]] = []
         self.radarr_folders: list[str] = []
         self.sonarr_folders: list[str] = []
+        self.folder_ids: dict[str, int] = {}
+        self.next_folder_id = 1
         self.download_clients: list[dict] = []
         self.radarr_clients: list[dict] = []
         self.sonarr_clients: list[dict] = []
@@ -479,10 +481,55 @@ def handler_for(state: FakeState):
                 if path == "/ping":
                     return self._send(body={"status": "OK"})
                 if path.endswith("/rootfolder") and method == "GET":
-                    return self._send(body=[{"path": p} for p in folders])
+                    rows = []
+                    for folder_path in folders:
+                        key = str(folder_path or "").rstrip("/")
+                        if key not in state.folder_ids:
+                            state.folder_ids[key] = state.next_folder_id
+                            state.next_folder_id += 1
+                        rows.append({"id": state.folder_ids[key], "path": folder_path})
+                    return self._send(body=rows)
                 if path.endswith("/rootfolder") and method == "POST":
                     folders.append((body or {}).get("path"))
                     return self._send(201, body)
+                if "/rootfolder/" in path and method == "DELETE":
+                    try:
+                        ident = int(path.rsplit("/", 1)[-1])
+                    except ValueError:
+                        return self._send(404, {"error": path})
+                    path_by_id = {fid: folder for folder, fid in state.folder_ids.items()}
+                    leftover = path_by_id.get(ident)
+                    if leftover is None:
+                        return self._send(404, {"error": path})
+                    titles = state.movies if role == "radarr" else state.series
+                    still = [
+                        item
+                        for item in titles
+                        if ws.in_root(
+                            str(item.get("path") or item.get("rootFolderPath") or ""),
+                            leftover,
+                        )
+                        and not any(
+                            ws.in_root(
+                                str(item.get("path") or item.get("rootFolderPath") or ""),
+                                wanted,
+                            )
+                            for wanted in folders
+                            if str(wanted).rstrip("/") != leftover
+                        )
+                    ]
+                    if still:
+                        return self._send(
+                            400,
+                            {"message": f"Root folder {leftover} is in use"},
+                        )
+                    folders[:] = [
+                        folder
+                        for folder in folders
+                        if str(folder).rstrip("/") != leftover
+                    ]
+                    state.folder_ids.pop(leftover, None)
+                    return self._send(200)
                 if path.endswith("/config/mediamanagement") and method == "GET":
                     media = state.radarr_media if role == "radarr" else state.sonarr_media
                     return self._send(body=media)
@@ -1063,6 +1110,57 @@ class Helpers(unittest.TestCase):
         self.assertTrue(rr.in_root("/media/Movies/Foo", "/media/Movies"))
         self.assertFalse(rr.in_root("/media/Movies Extra/Foo", "/media/Movies"))
         self.assertFalse(rr.in_root("/media/Kid Friendly Movies/Foo", "/media/Movies"))
+        self.assertTrue(ws.in_root("/media/TV/Show", "/media/TV"))
+        self.assertFalse(ws.in_root("/media/TV Extra/Show", "/media/TV"))
+
+    def test_leftover_root_dest_matches_old_movie_and_tv_defaults(self):
+        """0.2.20 `/media` + flat names, plus a flattened Not Kid path."""
+        tv_auto, tv_gen, tv_kid = (
+            "/media/dlna/TV/By Rating",
+            "/media/dlna/TV/Not Kid Friendly",
+            "/media/dlna/TV/Kid Friendly",
+        )
+        movie_auto, movie_gen, movie_kid = (
+            "/media/dlna/Movies/By Rating",
+            "/media/dlna/Movies/Not Kid Friendly",
+            "/media/dlna/Movies/Kid Friendly",
+        )
+        self.assertEqual(ws.leftover_root_dest("/media/TV", tv_kid, tv_gen, tv_auto), tv_auto)
+        self.assertEqual(
+            ws.leftover_root_dest("/media/Kid Friendly TV", tv_kid, tv_gen, tv_auto),
+            tv_kid,
+        )
+        self.assertEqual(
+            ws.leftover_root_dest("/media/dlna/TV Not Kid Friendly", tv_kid, tv_gen, tv_auto),
+            tv_gen,
+        )
+        self.assertEqual(
+            ws.leftover_root_dest("/media/Movies", movie_kid, movie_gen, movie_auto),
+            movie_auto,
+        )
+        self.assertEqual(
+            ws.leftover_root_dest(
+                "/media/Kid Friendly Movies", movie_kid, movie_gen, movie_auto
+            ),
+            movie_kid,
+        )
+        self.assertEqual(
+            ws.leftover_root_dest(
+                "/media/dlna/Movies Not Kid Friendly", movie_kid, movie_gen, movie_auto
+            ),
+            movie_gen,
+        )
+
+    def test_title_on_leftover_skips_wanted_child_roots(self):
+        wanted = {"/media/Movies/By Rating", "/media/Movies/Kid Friendly"}
+        self.assertTrue(
+            ws.title_on_leftover_root("/media/Movies/Old Title", "/media/Movies", wanted)
+        )
+        self.assertFalse(
+            ws.title_on_leftover_root(
+                "/media/Movies/By Rating/Kid Flick", "/media/Movies", wanted
+            )
+        )
 
     def test_library_dir_nested_under_media_root(self):
         old = {
@@ -2225,6 +2323,106 @@ class WireStack(unittest.TestCase):
             if call[0] == "seerr" and call[1] == "POST" and call[2] == "/api/v1/auth/local"
         ]
         self.assertEqual(local_posts, [])
+
+    def test_prunes_stale_movie_and_tv_roots_from_old_defaults(self):
+        """0.2.20 `/media` roots and a flattened Not Kid path leave the dropdown.
+
+        Movies get the same cleanup as TV: By Rating + Kid + Not Kid only.
+        """
+        os.environ["MEDIA_ROOT"] = "/media/dlna"
+        self.state.sonarr_folders = [
+            "/media/TV",
+            "/media/Kid Friendly TV",
+            "/media/dlna/TV Not Kid Friendly",
+            "/media/dlna/TV/Kid Friendly",
+        ]
+        self.state.radarr_folders = [
+            "/media/Movies",
+            "/media/Kid Friendly Movies",
+            "/media/dlna/Movies Not Kid Friendly",
+            "/media/dlna/Movies/Kid Friendly",
+        ]
+        self.state.series = [
+            {"id": 40, "title": "Old Dump Show", "path": "/media/TV/Old Dump Show"},
+            {
+                "id": 41,
+                "title": "Old Kid Show",
+                "path": "/media/Kid Friendly TV/Old Kid Show",
+            },
+            {
+                "id": 42,
+                "title": "Flat General Show",
+                "path": "/media/dlna/TV Not Kid Friendly/Flat General Show",
+            },
+            {
+                "id": 43,
+                "title": "Current Kid Show",
+                "path": "/media/dlna/TV/Kid Friendly/Current Kid Show",
+            },
+        ]
+        self.state.movies = [
+            {"id": 50, "title": "Old Dump Movie", "path": "/media/Movies/Old Dump Movie"},
+            {
+                "id": 51,
+                "title": "Old Kid Movie",
+                "path": "/media/Kid Friendly Movies/Old Kid Movie",
+            },
+            {
+                "id": 52,
+                "title": "Flat General Movie",
+                "path": "/media/dlna/Movies Not Kid Friendly/Flat General Movie",
+            },
+            {
+                "id": 53,
+                "title": "Current Kid Movie",
+                "path": "/media/dlna/Movies/Kid Friendly/Current Kid Movie",
+            },
+        ]
+        self.state.import_lists = [
+            {"id": 7, "rootFolderPath": "/media/TV"},
+            {"id": 8, "rootFolderPath": "/media/Movies"},
+        ]
+        rc = ws.main()
+        self.assertEqual(rc, 0)
+        self.assertEqual(
+            set(self.state.sonarr_folders),
+            {
+                "/media/dlna/TV/By Rating",
+                "/media/dlna/TV/Not Kid Friendly",
+                "/media/dlna/TV/Kid Friendly",
+            },
+        )
+        self.assertEqual(
+            set(self.state.radarr_folders),
+            {
+                "/media/dlna/Movies/By Rating",
+                "/media/dlna/Movies/Not Kid Friendly",
+                "/media/dlna/Movies/Kid Friendly",
+            },
+        )
+        series = {item["title"]: item.get("rootFolderPath") or item.get("path") for item in self.state.series}
+        movies = {item["title"]: item.get("rootFolderPath") or item.get("path") for item in self.state.movies}
+        self.assertTrue(str(series["Old Dump Show"]).startswith("/media/dlna/TV/By Rating"))
+        self.assertTrue(str(series["Old Kid Show"]).startswith("/media/dlna/TV/Kid Friendly"))
+        self.assertTrue(
+            str(series["Flat General Show"]).startswith("/media/dlna/TV/Not Kid Friendly")
+        )
+        self.assertTrue(
+            str(series["Current Kid Show"]).startswith("/media/dlna/TV/Kid Friendly")
+        )
+        self.assertTrue(str(movies["Old Dump Movie"]).startswith("/media/dlna/Movies/By Rating"))
+        self.assertTrue(
+            str(movies["Old Kid Movie"]).startswith("/media/dlna/Movies/Kid Friendly")
+        )
+        self.assertTrue(
+            str(movies["Flat General Movie"]).startswith("/media/dlna/Movies/Not Kid Friendly")
+        )
+        self.assertTrue(
+            str(movies["Current Kid Movie"]).startswith("/media/dlna/Movies/Kid Friendly")
+        )
+        lists = {item["id"]: item.get("rootFolderPath") for item in self.state.import_lists}
+        self.assertEqual(lists[7], "/media/dlna/TV/By Rating")
+        self.assertEqual(lists[8], "/media/dlna/Movies/By Rating")
 
     def test_wire_applies_custom_simultaneous_downloads(self):
         os.environ["SIMULTANEOUS_DOWNLOADS"] = "12"

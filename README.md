@@ -72,7 +72,7 @@ Those four library folders must be **siblings** (neither library folder sits ins
 
 **After a title is in the library** is not a hidden default. Sharing finished torrents uses RAM and CPU in this app. **Stop sharing** (the default) removes the torrent from qBittorrent once the file is in your library. You can instead share until a 1.0 ratio, or for one day. The library file is kept either way.
 
-If you already saved older defaults (`/media` plus `Movies` / `Kid Friendly Movies`), update the five fields and **restart** so engines pick up the folders.
+If you already saved older defaults (`/media` plus `Movies` / `Kid Friendly Movies`), update the five fields and **restart** so engines pick up the folders. **0.2.48** also deletes those leftover Arr roots from Radarr and Sonarr (movies and TV) so Seerr’s Root Folder list is only By Rating / Kid Friendly / Not Kid Friendly.
 
 Then in Plex, scan those same library folders. Adults who should also see kid movies can add the kid movies folder as a **second location** on the adult movie library.
 
@@ -131,7 +131,7 @@ If a download is stuck, turn on **Debug** in the app configuration, restart, and
 ## Using it after setup
 
 - **Search and request** at `http://<home-assistant>:5055`. The sidebar is the box, not an iframe of search. Household members should not see a ticket queue. Seerr can have more than one user; the first admin is whoever completed the Plex wizard.
-- **Kid vs general** on the Seerr confirm dialog is a **Root Folder** pick. The default is **By Rating** (a real Arr folder, not a Plex library): after the request, Arr/TMDB certification sorts it — G / PG / PG-13 and TV-Y / TV-Y7 / TV-G / TV-PG go to Kid Friendly; anything else, **including TV-14 and unknown**, goes to Not Kid Friendly. Pick **Kid Friendly** or **Not Kid Friendly** to force that library and skip the sort. Seerr shows those path names; we cannot label the default “Auto (TVDB)”. Same three choices for movies and TV (anime uses the same TV folders).
+- **Kid vs general** on the Seerr confirm dialog is a **Root Folder** pick. The default is **By Rating** (a real Arr folder, not a Plex library): after the request, Arr/TMDB certification sorts it — G / PG / PG-13 and TV-Y / TV-Y7 / TV-G / TV-PG go to Kid Friendly; anything else, **including TV-14 and unknown**, goes to Not Kid Friendly. Pick **Kid Friendly** or **Not Kid Friendly** to force that library and skip the sort. Seerr shows those path names; we cannot label the default “Auto (TVDB)”. Same three choices for movies and TV (anime uses the same TV folders). Older Arr roots from the 0.2.20 `/media` + `TV` / `Kid Friendly TV` / `Movies` / `Kid Friendly Movies` defaults are removed on restart so they do not sit in that list.
 - **After a title is in the library** is in **Settings → Apps → Pompey → Configuration**. Stop sharing is the default so finished torrents do not sit in RAM. Share to a 1.0 ratio or for one day if you want to give a little back. The library file is kept.
 - **Simultaneous downloads** (same Configuration page) is how many titles can transfer at once when they have peers. Default 8. Stalled or seedless torrents keep trying but do not block the rest of the queue.
 - **Already on Plex** is Seerr’s job. If it is already there, you should see that before you request it.

@@ -63,7 +63,7 @@ These are decided so we can build:
 - **Seerr itself:** they ship Docker, not a tarball. We download *their* published image at runtime and unpack the app directory. We still do not publish an image of our own, and we do not compile them from source.
 - **Not v1:** picking a specific file when quality and seeds disagree; Cloudflare challenge solvers; Jellyfin; exposing search or sources on the public internet; stuffing Seerr under Ingress.
 - **Plex:** a separate Home Assistant app or another machine. Pompey never runs Plex. Library folders under the media folder option (same filesystem as downloads).
-- **Kid vs general:** Seerr Root Folder default is **By Rating** (not a Plex library). Arr/TMDB certification then sorts: G/PG/PG-13 and TV-Y/TV-Y7/TV-G/TV-PG → kid libraries; everything else, including TV-14 and unknown, → general. Picking Kid Friendly or Not Kid Friendly on the request forces that library.
+- **Kid vs general:** Seerr Root Folder default is **By Rating** (not a Plex library). Arr/TMDB certification then sorts: G/PG/PG-13 and TV-Y/TV-Y7/TV-G/TV-PG → kid libraries; everything else, including TV-14 and unknown, → general. Picking Kid Friendly or Not Kid Friendly on the request forces that library. Leftover Arr roots from older folder defaults are deleted so movies and TV each show only those three.
 - **Sources:** we do not ship a catalog of indexers. Add or rotate sources in Prowlarr on :9696.
 
 Hardware: this stack wants a few GB of RAM on top of Home Assistant. A 2 GB Pi is not a target.

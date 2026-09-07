@@ -523,8 +523,162 @@ def ensure_root_folder(base: str, api_key: str, path: str) -> None:
     existing = as_list(http("GET", f"{base}/rootfolder", headers=arr_headers(api_key)))
     if any(item.get("path", "").rstrip("/") == path.rstrip("/") for item in existing):
         return
-    http("POST", f"{base}/rootfolder", {"path": path}, headers=arr_headers(api_key))
+    try:
+        http("POST", f"{base}/rootfolder", {"path": path}, headers=arr_headers(api_key))
+    except RuntimeError as exc:
+        # A leftover parent root (0.2.20 `/media/TV`) can block a nested
+        # household folder until prune_root_folders deletes it.
+        log(f"root folder {path}: {exc}", "WARNING")
+        return
     log(f"root folder {path}")
+
+
+def in_root(path: str, root: str) -> bool:
+    path = (path or "").rstrip("/")
+    root = (root or "").rstrip("/")
+    return bool(root) and (path == root or path.startswith(root + "/"))
+
+
+def leftover_root_dest(path: str, kid: str, gen: str, auto: str) -> str:
+    """Map a stale Arr root onto today's kid / general / By Rating dest.
+
+    0.2.20 used `/media` + `TV` / `Kid Friendly TV` (and `Movies` /
+    `Kid Friendly Movies`). 0.2.21 moved to `/media/dlna` + sibling
+    Kid / Not Kid folders. Seerr lists every Arr root, so those old
+    paths stay in the request dropdown until we delete them.
+    """
+    low = (path or "").rstrip("/").lower()
+    if "not kid" in low:
+        return gen
+    if "kid friendly" in low:
+        return kid
+    return auto
+
+
+def wanted_arr_roots(kind: str) -> tuple[str, str, str]:
+    """auto, general, kid. Same three names for movies and TV."""
+    if kind == "sonarr":
+        return tv_auto_dir(), tv_dir(), tv_kid_dir()
+    return movies_auto_dir(), movies_dir(), movies_kid_dir()
+
+
+def title_on_leftover_root(path: str, leftover: str, wanted: set[str]) -> bool:
+    """True when a title still lives on a stale root, not a current one.
+
+    `/media/Movies/By Rating/Title` is under leftover `/media/Movies`
+    but also under the wanted By Rating root — leave it alone.
+    """
+    if not in_root(path, leftover):
+        return False
+    return not any(in_root(path, root) for root in wanted)
+
+
+def rehome_titles_off_root(
+    base: str, api_key: str, kind: str, leftover: str, dest: str, wanted: set[str]
+) -> int:
+    collection = arr_title_collection(kind)
+    try:
+        rows = as_list(http("GET", f"{base}/{collection}", headers=arr_headers(api_key)))
+    except RuntimeError as exc:
+        log(f"{kind} titles on leftover root {leftover}: {exc}", "WARNING")
+        return 0
+    ids = []
+    for item in rows:
+        if not title_on_leftover_root(title_library_path(item), leftover, wanted):
+            continue
+        tid = title_id_of(item)
+        if tid is not None:
+            ids.append(tid)
+    if not ids:
+        return 0
+    id_key = "movieIds" if kind == "radarr" else "seriesIds"
+    try:
+        http(
+            "PUT",
+            f"{base}/{collection}/editor",
+            {id_key: ids, "rootFolderPath": dest, "moveFiles": True},
+            headers=arr_headers(api_key),
+        )
+        return len(ids)
+    except RuntimeError as exc:
+        log(f"{kind} could not move {len(ids)} title(s) off {leftover}: {exc}", "WARNING")
+        return 0
+
+
+def rehome_import_lists_off_root(
+    base: str, api_key: str, kind: str, leftover: str, dest: str
+) -> int:
+    try:
+        rows = as_list(http("GET", f"{base}/importlist", headers=arr_headers(api_key)))
+    except RuntimeError:
+        return 0
+    moved = 0
+    leftover = leftover.rstrip("/")
+    dest = dest.rstrip("/")
+    for item in rows:
+        have = (item.get("rootFolderPath") or "").rstrip("/")
+        if have != leftover:
+            continue
+        tid = title_id_of(item)
+        if tid is None:
+            continue
+        payload = json.loads(json.dumps(item))
+        payload["rootFolderPath"] = dest
+        try:
+            http(
+                "PUT",
+                f"{base}/importlist/{tid}",
+                payload,
+                headers=arr_headers(api_key),
+            )
+            moved += 1
+        except RuntimeError as exc:
+            log(f"{kind} could not move import list {tid} off {leftover}: {exc}", "WARNING")
+    return moved
+
+
+def prune_root_folders(base: str, api_key: str, kind: str) -> None:
+    """Seerr lists every Arr root. Keep only By Rating + Kid + Not Kid."""
+    auto, gen, kid = wanted_arr_roots(kind)
+    wanted = {auto.rstrip("/"), gen.rstrip("/"), kid.rstrip("/")}
+    try:
+        existing = as_list(http("GET", f"{base}/rootfolder", headers=arr_headers(api_key)))
+    except RuntimeError as exc:
+        log(f"{kind} root folders: {exc}", "WARNING")
+        return
+    for item in existing:
+        path = (item.get("path") or "").rstrip("/")
+        ident = item.get("id")
+        if not path or path in wanted:
+            continue
+        dest = leftover_root_dest(path, kid, gen, auto)
+        moved = rehome_titles_off_root(base, api_key, kind, path, dest, wanted)
+        lists = rehome_import_lists_off_root(base, api_key, kind, path, dest)
+        if moved:
+            log(f"{kind} moved {moved} title(s) from leftover root {path} -> {dest}")
+        if lists:
+            log(f"{kind} moved {lists} import list(s) from leftover root {path} -> {dest}")
+        if ident is None:
+            log(f"{kind} leftover root {path} has no id; leaving it", "WARNING")
+            continue
+        try:
+            http(
+                "DELETE",
+                f"{base}/rootfolder/{ident}",
+                headers=arr_headers(api_key),
+            )
+            log(f"removed leftover root folder {path}")
+        except RuntimeError as exc:
+            log(f"could not remove root folder {path}: {exc}", "WARNING")
+
+
+def sync_root_folders(base: str, api_key: str, kind: str) -> None:
+    auto, gen, kid = wanted_arr_roots(kind)
+    for path in (auto, gen, kid):
+        ensure_root_folder(base, api_key, path)
+    prune_root_folders(base, api_key, kind)
+    for path in (auto, gen, kid):
+        ensure_root_folder(base, api_key, path)
 
 
 def schema_impl(schema, name: str):
@@ -3527,12 +3681,8 @@ def main() -> int:
     apply_qbit_queue()
     qbit_category("sonarr", complete)
     qbit_category("radarr", complete)
-    ensure_root_folder(sonarr, sk, tv_auto_dir())
-    ensure_root_folder(sonarr, sk, tv_dir())
-    ensure_root_folder(sonarr, sk, tv_kid_dir())
-    ensure_root_folder(radarr, rk, movies_auto_dir())
-    ensure_root_folder(radarr, rk, movies_dir())
-    ensure_root_folder(radarr, rk, movies_kid_dir())
+    sync_root_folders(sonarr, sk, "sonarr")
+    sync_root_folders(radarr, rk, "radarr")
     ensure_download_client(sonarr, sk, secrets, "sonarr")
     ensure_download_client(radarr, rk, secrets, "radarr")
     # Recyclarr writes Default/Max before we create name stubs, so a successful
