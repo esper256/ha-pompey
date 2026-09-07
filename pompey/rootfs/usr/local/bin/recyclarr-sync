@@ -2,8 +2,10 @@
 """Write Recyclarr YAML from secrets and sync TRaSH profiles onto Arr.
 
 Default = TRaSH HD (1080p WEB/Bluray). Max = TRaSH UHD (4K encodes) with 1080p
-as a fallback so a Max request is not 4K-or-nothing. Remux stays off. Anything
-is not Recyclarr's — Pompey keeps that profile. Secrets are never printed.
+as a fallback so a Max request is not 4K-or-nothing. Remux stays off. Default
+and Max also score TRaSH Anime Dual Audio as a small tie-break; Sonarr gets
+Language: Not Original so TV dubs lose. Anything is not Recyclarr's — Pompey
+keeps that profile. Secrets are never printed.
 """
 from __future__ import annotations
 
@@ -18,6 +20,11 @@ TRASH_RADARR_HD = "d1d67249d3890e49bc12e275d989a7e9"  # HD Bluray + WEB
 TRASH_RADARR_UHD = "64fb5f9858489bdac2af690e27c8f42f"  # UHD Bluray + WEB
 TRASH_SONARR_HD = "72dae194fc92bf828f32cde7744e51a1"  # WEB-1080p
 TRASH_SONARR_UHD = "d1498e7d189fbe6c7110ceaabb7473e6"  # WEB-2160p
+# Optional TRaSH CFs. Dual Audio is a small Default/Max tie-break, not an extra profile.
+TRASH_RADARR_ANIME_DUAL_AUDIO = "4a3b087eea2ce012fcc1ce319259a3be"
+TRASH_SONARR_ANIME_DUAL_AUDIO = "418f50b10f1907201b6cfdf881f467b7"
+TRASH_SONARR_NOT_ORIGINAL = "ae575f95ab639ba5d15f663bf019e3e8"
+DUAL_AUDIO_SCORE = 15
 
 
 def env(name: str, default: str = "") -> str:
@@ -101,6 +108,13 @@ radarr:
             enabled: false
           - name: Remux-1080p
             enabled: false
+    custom_formats:
+      - trash_ids:
+          - {TRASH_RADARR_ANIME_DUAL_AUDIO}
+        score: {DUAL_AUDIO_SCORE}
+        assign_scores_to:
+          - name: Default
+          - name: Max
 sonarr:
   tv:
     base_url: {yaml_quote(sonarr_url)}
@@ -147,6 +161,19 @@ sonarr:
             enabled: false
           - name: Bluray-1080p Remux
             enabled: false
+    custom_formats:
+      - trash_ids:
+          - {TRASH_SONARR_ANIME_DUAL_AUDIO}
+        score: {DUAL_AUDIO_SCORE}
+        assign_scores_to:
+          - name: Default
+          - name: Max
+      - trash_ids:
+          - {TRASH_SONARR_NOT_ORIGINAL}
+        score: -10000
+        assign_scores_to:
+          - name: Default
+          - name: Max
 """
 
 

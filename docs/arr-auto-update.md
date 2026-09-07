@@ -156,7 +156,8 @@ Unattended `latest` can break the house overnight. Mitigations: keep the previou
 | `enableCompletedDownloadHandling` and `skipFreeSpaceCheckWhenImporting` on media management | `ensure_media_management` | NAS that reports 0 bytes free skips import again. |
 | `removeCompletedDownloads` tied to `after_download` | download client PUT | `true` plus a forget race deletes `complete/` before Arr copies. |
 | Quality **names** in Recyclarr YAML (`Bluray-2160p`, `WEB 2160p`, remux off) | `recyclarr-sync` `render_config` | Guide rename: Recyclarr exits non-zero or Max loses 1080p fallback. Pompey no longer encodes `WEBDL-*` names for Default/Max. |
-| Language CF: `LanguageSpecification` with value `-2` (Original), negate | `not_original_language_format` | Original-audio scoring stops; dubs win on Default/Max. Recyclarr’s TRaSH Original is the preferred owner — this CF is the fallback when Recyclarr is missing. |
+| Language CF: `LanguageSpecification` with value `-2` (Original), negate | `not_original_language_format` | Original-audio scoring stops; dubs win on Default/Max. Recyclarr’s TRaSH Original is the preferred owner on movies; Sonarr uses TRaSH Language: Not Original. This CF is the fallback when Recyclarr is missing. |
+| Dual Audio trash ids + score 15 on Default/Max | `recyclarr-sync` `render_config` | Guide rename/split: Recyclarr exits or Dual-Audio stops winning ties. Stub score on `Pompey Dual Audio` still applies before the first sync. |
 | Custom format `fields: [{name, value}]` | `ensure_custom_formats` | Arr has flipped between `{name,value}` and a dict more than once. |
 | Root-folder POST `{path}` | `ensure_root_folder` | Kid vs Not Kid folders fail to register; Seerr routes into the wrong library. |
 | `UpdateAutomatically=False` restamped every boot | `write-engine-configs` `pin_arr_docker_updates` | A Prowlarr UI change or an Arr rewrite can turn BuiltIn back on between boots. Re-stamp is the mitigation. |

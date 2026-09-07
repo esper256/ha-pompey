@@ -2178,13 +2178,16 @@ class WireStack(unittest.TestCase):
         scores = {item["name"]: item["score"] for item in default.get("formatItems") or []}
         self.assertEqual(scores.get("Pompey Prefer x265", 0), 0)
         self.assertEqual(scores[ws.NOT_ORIGINAL_LANGUAGE], -10000)
+        self.assertEqual(scores.get(ws.DUAL_AUDIO), ws.DUAL_AUDIO_SCORE)
         self.assertEqual(default.get("language"), {"id": -1, "name": "Any"})
         max_scores = {item["name"]: item["score"] for item in maximum.get("formatItems") or []}
         self.assertEqual(max_scores.get("Pompey Prefer Remux", 0), 0)
         self.assertEqual(max_scores[ws.NOT_ORIGINAL_LANGUAGE], -10000)
+        self.assertEqual(max_scores.get(ws.DUAL_AUDIO), ws.DUAL_AUDIO_SCORE)
         any_scores = {item["name"]: item["score"] for item in anything.get("formatItems") or []}
         self.assertEqual(any_scores.get("Pompey Prefer Proper"), 10)
         self.assertEqual(any_scores.get(ws.NOT_ORIGINAL_LANGUAGE, 0), 0)
+        self.assertEqual(any_scores.get(ws.DUAL_AUDIO, 0), 0)
         cf_item_names = {item["name"] for item in default.get("formatItems") or []}
         self.assertEqual(cf_item_names, cf_names)
         self.assertGreaterEqual(default.get("minUpgradeFormatScore") or 0, 1)
@@ -2250,9 +2253,16 @@ class WireStack(unittest.TestCase):
         default = ws.household_format_scores("Default")
         maximum = ws.household_format_scores("Max")
         anything = ws.household_format_scores("Anything")
-        self.assertEqual(default, {ws.NOT_ORIGINAL_LANGUAGE: -10000})
-        self.assertEqual(maximum, {ws.NOT_ORIGINAL_LANGUAGE: -10000})
+        self.assertEqual(
+            default,
+            {ws.NOT_ORIGINAL_LANGUAGE: -10000, ws.DUAL_AUDIO: ws.DUAL_AUDIO_SCORE},
+        )
+        self.assertEqual(
+            maximum,
+            {ws.NOT_ORIGINAL_LANGUAGE: -10000, ws.DUAL_AUDIO: ws.DUAL_AUDIO_SCORE},
+        )
         self.assertEqual(anything.get(ws.NOT_ORIGINAL_LANGUAGE, 0), 0)
+        self.assertEqual(anything.get(ws.DUAL_AUDIO, 0), 0)
         self.assertEqual(anything.get("Pompey Prefer Proper"), 10)
 
     def test_recyclarr_yaml_names_default_max_and_keeps_1080p_fallback(self):
@@ -2266,6 +2276,11 @@ class WireStack(unittest.TestCase):
         self.assertIn(recyclarr.TRASH_RADARR_UHD, body)
         self.assertIn(recyclarr.TRASH_SONARR_HD, body)
         self.assertIn(recyclarr.TRASH_SONARR_UHD, body)
+        self.assertIn(recyclarr.TRASH_RADARR_ANIME_DUAL_AUDIO, body)
+        self.assertIn(recyclarr.TRASH_SONARR_ANIME_DUAL_AUDIO, body)
+        self.assertIn(recyclarr.TRASH_SONARR_NOT_ORIGINAL, body)
+        self.assertIn(f"score: {recyclarr.DUAL_AUDIO_SCORE}", body)
+        self.assertIn("score: -10000", body)
         self.assertIn("name: Default", body)
         self.assertIn("name: Max", body)
         self.assertNotIn("name: Anything", body)

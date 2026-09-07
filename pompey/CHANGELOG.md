@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.41
+
+- Default and Max now prefer a Dual-Audio release when one exists at the same quality (TRaSH Anime Dual Audio, score +15). Recyclarr applies that on movies and TV. Sonarr also keeps Language: Not Original at −10000 so an English-only dub still loses. Anything is unchanged. No Home Assistant option and no extra Seerr quality name. Rebuild so the banner says **0.2.41**.
+
 ## 0.2.40
 
 - The sidebar is a **report**, not an installer that re-runs because you opened it. Opening Ingress only reads `status.json`. After search is wired, engine fetch, WireGuard handshake retries, and the Proton graph sampler cannot rewind the progress bar to 30% or leave Paste Proton up for days while search already works. The bar and step list hide once search is ready; Open search and the Proton graph stay. Rebuild so the banner says **0.2.40**.
