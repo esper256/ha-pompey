@@ -1249,6 +1249,7 @@ class Helpers(unittest.TestCase):
         self.assertNotIn("plex", docker.lower())
         self.assertIn("\n    git \\\n", docker)
         self.assertIn("\n    xz \\\n", docker)
+        self.assertNotIn("nginx-mod-http-sub", docker)
         self.assertFalse((ROOT / "pompey/rootfs/usr/local/bin/pompey-ingress").exists())
         self.assertFalse((ROOT / "pompey/rootfs/etc/services.d/ingress-proxy").exists())
         self.assertFalse((ROOT / "tests/preview_seerr_ingress.py").exists())

@@ -29,7 +29,6 @@ RUN apk add --no-cache \
     libnatpmp \
     libstdc++ \
     nginx \
-    nginx-mod-http-sub \
     python3 \
     sqlite \
     tar \

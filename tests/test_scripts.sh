@@ -23,7 +23,6 @@ export POMPEY_RESOLV="${WORK}/etc/resolv.conf"
 export POMPEY_NGINX_RUN="${WORK}/run/nginx"
 export NGINX_INGRESS_CONF="${WORK}/etc/nginx/http.d/ingress.conf"
 export NGINX_DEBUG_INC="${WORK}/etc/nginx/http.d/ingress-debug.inc"
-export NGINX_MODULES_CONF="${WORK}/etc/nginx/modules-enabled.conf"
 export POMPEY_WWW="${ROOT}/pompey/rootfs/usr/share/pompey"
 export MEDIA_ROOT="${WORK}/media"
 export IPTABLES_LOG="${WORK}/iptables.log"
@@ -435,6 +434,10 @@ if grep -q "proxy_pass http://127.0.0.1:7878" "${NGINX_DEBUG_INC}"; then
 fi
 grep -q "debug: false" "${ROOT}/pompey/config.yaml"
 grep -q "debug: bool" "${ROOT}/pompey/config.yaml"
+if grep -q "nginx-mod-http-sub" "${ROOT}/pompey/Dockerfile"; then
+  echo "HA Alpine has no nginx-mod-http-sub package" >&2
+  exit 1
+fi
 grep -q "debug-consoles" "${ROOT}/pompey/rootfs/usr/share/pompey/index.html"
 grep -q "mountPrefix" "${ROOT}/pompey/rootfs/usr/share/pompey/debug-shim.js"
 
