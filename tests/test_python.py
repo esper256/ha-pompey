@@ -564,6 +564,12 @@ def handler_for(state: FakeState):
                         idx = int(path.rsplit("/", 1)[-1])
                     except ValueError:
                         return self._send(404, {"error": path})
+                    titles = state.movies if role == "radarr" else state.series
+                    if any(item.get("qualityProfileId") == idx for item in titles):
+                        return self._send(
+                            400,
+                            {"message": f"Profile {idx} is in use by existing titles"},
+                        )
                     for i, item in enumerate(profiles):
                         if item.get("id") == idx:
                             profiles.pop(i)
@@ -632,6 +638,13 @@ def handler_for(state: FakeState):
                     return self._send(404, {"error": path})
                 if "/movie/" in path and method == "PUT":
                     state.moved.append(body)
+                    if isinstance(body, dict) and body.get("id") is not None:
+                        for i, movie in enumerate(state.movies):
+                            if movie.get("id") == body.get("id"):
+                                saved = dict(movie)
+                                saved.update(body)
+                                state.movies[i] = saved
+                                return self._send(body=saved)
                     return self._send(body=body)
                 if path.endswith("/series") and method == "GET":
                     return self._send(body=state.series)
@@ -666,6 +679,13 @@ def handler_for(state: FakeState):
                     return self._send(404, {"error": path})
                 if "/series/" in path and method == "PUT":
                     state.moved.append(body)
+                    if isinstance(body, dict) and body.get("id") is not None:
+                        for i, show in enumerate(state.series):
+                            if show.get("id") == body.get("id"):
+                                saved = dict(show)
+                                saved.update(body)
+                                state.series[i] = saved
+                                return self._send(body=saved)
                     return self._send(body=body)
                 if path.endswith("/command") and method == "GET":
                     queued = (
@@ -1708,6 +1728,13 @@ PersistentKeepalive = 25
     def test_language_profile_id_skips_http(self):
         self.assertIsNone(ws.language_profile_id("http://127.0.0.1:8989/api/v3", "k"))
 
+    def test_title_quality_profile_helpers(self):
+        self.assertEqual(ws.arr_title_collection("radarr"), "movie")
+        self.assertEqual(ws.arr_title_collection("sonarr"), "series")
+        self.assertEqual(ws.title_quality_profile_id({"qualityProfileId": 2}), 2)
+        self.assertIsNone(ws.title_quality_profile_id({"id": 1}))
+        self.assertEqual(ws.title_id_of({"id": 7, "qualityProfileId": 2}), 7)
+
     def test_as_list_ignores_non_arrays(self):
         self.assertEqual(ws.as_list({"initialized": False}), [])
         self.assertEqual(ws.as_list("Ok."), [])
@@ -2236,6 +2263,31 @@ class WireStack(unittest.TestCase):
         self.assertIn("Anything", names)
         self.assertIn("HD-720p", names)
         self.assertNotIn("Max", names)
+
+    def test_rehomes_titles_then_drops_leftover_profile(self):
+        os.environ["INDEXER_URL"] = ""
+        os.environ["INDEXER_API_KEY"] = ""
+        leftover = json.loads(json.dumps(any_quality_bundle(2, "HD-1080p")["profile"]))
+        self.state.radarr_profiles.append(leftover)
+        sonarr_leftover = json.loads(json.dumps(any_quality_bundle(2, "HD-1080p")["profile"]))
+        self.state.sonarr_profiles.append(sonarr_leftover)
+        self.state.movies[0]["qualityProfileId"] = 2
+        self.state.series[0]["qualityProfileId"] = 2
+        rc = ws.main()
+        self.assertEqual(rc, 0)
+        self.assertEqual(
+            {item.get("name") for item in self.state.radarr_profiles},
+            {"Max", "Default", "Anything"},
+        )
+        self.assertEqual(
+            {item.get("name") for item in self.state.sonarr_profiles},
+            {"Max", "Default", "Anything"},
+        )
+        default_id = profile_named(self.state.radarr_profiles, "Default")["id"]
+        self.assertEqual(self.state.movies[0]["qualityProfileId"], default_id)
+        sonarr_default = profile_named(self.state.sonarr_profiles, "Default")["id"]
+        self.assertEqual(self.state.series[0]["qualityProfileId"], sonarr_default)
+        self.assertNotEqual(default_id, 2)
 
     def test_grants_advanced_requests_to_existing_seerr_user(self):
         os.environ["INDEXER_URL"] = ""

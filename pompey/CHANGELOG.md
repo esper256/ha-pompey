@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.42
+
+- Leftover Arr quality profiles (stock **HD-1080p**, HD-720p, Ultra-HD) no longer stick in the Seerr request dropdown because a movie or show still used them. Wiring now moves those titles onto **Default**, then deletes the leftover. Seerr cannot change quality on an approved request; the profile lives on Radarr/Sonarr. Rebuild so the banner says **0.2.42**.
+
 ## 0.2.41
 
 - Default and Max now prefer a Dual-Audio release when one exists at the same quality (TRaSH Anime Dual Audio, score +15). Recyclarr applies that on movies and TV. Sonarr also keeps Language: Not Original at −10000 so an English-only dub still loses. Anything is unchanged. No Home Assistant option and no extra Seerr quality name. Rebuild so the banner says **0.2.41**.
