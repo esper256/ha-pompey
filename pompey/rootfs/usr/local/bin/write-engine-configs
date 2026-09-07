@@ -8,7 +8,9 @@ set -euo pipefail
 source "$(command -v pompey-env)"
 pompey-secrets >/dev/null
 export AFTER_DOWNLOAD="${AFTER_DOWNLOAD:-stop_sharing}"
+export SIMULTANEOUS_DOWNLOADS="${SIMULTANEOUS_DOWNLOADS:-8}"
 bashio::log.info "After a title is in the library: ${AFTER_DOWNLOAD}"
+bashio::log.info "Simultaneous downloads: ${SIMULTANEOUS_DOWNLOADS} (stalled do not occupy a slot)"
 
 python3 - "${POMPEY_SECRETS}" "${MEDIA_ROOT}" <<'PY'
 import json, os, re, sys
@@ -134,6 +136,37 @@ def after_download_policy() -> str:
     if raw in {"share_one_day", "one_day"}:
         return "share_one_day"
     return "stop_sharing"
+
+
+def simultaneous_downloads() -> int:
+    raw = (os.environ.get("SIMULTANEOUS_DOWNLOADS") or "8").strip()
+    try:
+        number = int(raw)
+    except ValueError:
+        number = 8
+    return max(1, min(number, 20))
+
+
+def qbit_queue_settings(active: int) -> dict:
+    """Cap transferring torrents; do not let stalled ones fill those slots.
+
+    qBittorrent's own default is 3 active downloads and it still counts
+    stalled/seedless torrents against that number — that is what froze
+    the household queue. IgnoreSlowTorrentsForQueueing is the built-in
+    "still trying, not blocking" switch. MaxActiveTorrents must be
+    higher than MaxActiveDownloads: slow torrents still count against
+    the total, which is why ignore-slow looks broken at the stock 5.
+    """
+    return {
+        r"Session\QueueingSystemEnabled": "true",
+        r"Session\MaxActiveDownloads": str(active),
+        r"Session\MaxActiveUploads": str(active),
+        r"Session\MaxActiveTorrents": str(max(active + 16, 20)),
+        r"Session\IgnoreSlowTorrentsForQueueing": "true",
+        r"Session\SlowTorrentsDownloadRate": "2",
+        r"Session\SlowTorrentsUploadRate": "2",
+        r"Session\SlowTorrentsInactivityTimer": "180",
+    }
 
 
 def qbit_seed_settings(policy: str) -> dict:
@@ -262,12 +295,21 @@ def patch_qbit_paths(text: str) -> str:
 
 seed = qbit_seed_settings(after_download_policy())
 seed[r"Session\DisableAutoTMMByDefault"] = "true"
+queue = qbit_queue_settings(simultaneous_downloads())
 # Locals: f-string expressions cannot contain backslashes on older Python.
 ratio_on = seed[r"Session\MaxRatioEnabled"]
 ratio = seed[r"Session\MaxRatio"]
 time_on = seed[r"Session\MaxSeedingTimeEnabled"]
 time_min = seed[r"Session\MaxSeedingTime"]
 ratio_act = seed[r"Session\MaxRatioAct"]
+queue_on = queue[r"Session\QueueingSystemEnabled"]
+max_dl = queue[r"Session\MaxActiveDownloads"]
+max_ul = queue[r"Session\MaxActiveUploads"]
+max_all = queue[r"Session\MaxActiveTorrents"]
+ignore_slow = queue[r"Session\IgnoreSlowTorrentsForQueueing"]
+slow_dl = queue[r"Session\SlowTorrentsDownloadRate"]
+slow_ul = queue[r"Session\SlowTorrentsUploadRate"]
+slow_wait = queue[r"Session\SlowTorrentsInactivityTimer"]
 qbit_text = f"""[Application]
 FileLogger\\Enabled=true
 FileLogger\\Path={config}/qBittorrent/logs
@@ -285,6 +327,14 @@ Session\\InterfaceAddress=
 Session\\Port=6881
 Session\\UPnP=false
 Session\\DisableAutoTMMByDefault=true
+Session\\QueueingSystemEnabled={queue_on}
+Session\\MaxActiveDownloads={max_dl}
+Session\\MaxActiveUploads={max_ul}
+Session\\MaxActiveTorrents={max_all}
+Session\\IgnoreSlowTorrentsForQueueing={ignore_slow}
+Session\\SlowTorrentsDownloadRate={slow_dl}
+Session\\SlowTorrentsUploadRate={slow_ul}
+Session\\SlowTorrentsInactivityTimer={slow_wait}
 Session\\MaxRatioEnabled={ratio_on}
 Session\\MaxRatio={ratio}
 Session\\MaxSeedingTimeEnabled={time_on}
@@ -325,7 +375,10 @@ for qconf in (
 ):
     os.makedirs(os.path.dirname(qconf), exist_ok=True)
     if os.path.isfile(qconf):
-        body = patch_qbit_seed(patch_qbit_paths(open(qconf, encoding="utf-8").read()), seed)
+        body = patch_qbit_seed(
+            patch_qbit_seed(patch_qbit_paths(open(qconf, encoding="utf-8").read()), seed),
+            queue,
+        )
         with open(qconf, "w", encoding="utf-8") as fh:
             fh.write(body)
         os.chmod(qconf, 0o600)
