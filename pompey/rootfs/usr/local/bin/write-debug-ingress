@@ -80,10 +80,10 @@ def _filters(mount: str) -> str:
         """    sub_filter "import('/" "import('./";""",
         # Webpack jsonp loads /640-<hash>.js via publicPath "/". That is
         # root-absolute, so <base href> does not apply. ./ does not rematch.
-        """    sub_filter '.p="/"' '.p="./';""",
-        """    sub_filter ".p='/'" ".p='./";""",
-        """    sub_filter '.p = "/"' '.p = "./';""",
-        """    sub_filter ".p = '/'" ".p = './";""",
+        """    sub_filter '.p="/"' '.p="./"';""",
+        """    sub_filter ".p='/'" ".p='./'";""",
+        """    sub_filter '.p = "/"' '.p = "./"';""",
+        """    sub_filter ".p = '/'" ".p = './'";""",
     ]
     for token in ROOT_TOKENS:
         lines.append(f"""    sub_filter '"/{token}' '"./{token}';""")
