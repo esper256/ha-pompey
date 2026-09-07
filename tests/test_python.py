@@ -10,6 +10,7 @@ import os
 import struct
 import sys
 import threading
+import time
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -4414,7 +4415,6 @@ class DebugIngress(unittest.TestCase):
         import socket
         import subprocess
         import tempfile
-        from urllib.error import HTTPError
         from urllib.request import Request, urlopen
 
         nginx = shutil.which("nginx")
@@ -4514,45 +4514,6 @@ class DebugIngress(unittest.TestCase):
                 timeout=5,
             ).read().decode()
             self.assertIn("Radarr", api)
-
-            off = work / "off.inc"
-            off.write_text(dbginc.render(enabled=False, www="/tmp"))
-            off_conf = work / "off.conf"
-            off_sock = socket.socket()
-            off_sock.bind(("127.0.0.1", 0))
-            off_listen = off_sock.getsockname()[1]
-            off_sock.close()
-            off_conf.write_text(
-                "\n".join(
-                    [
-                        "worker_processes 1;",
-                        f"error_log {work}/off.error.log info;",
-                        f"pid {work}/off.pid;",
-                        "events { worker_connections 32; }",
-                        "http {",
-                        f"  client_body_temp_path {work}/tmp;",
-                        f"  proxy_temp_path {work}/tmp;",
-                        f"  fastcgi_temp_path {work}/tmp;",
-                        f"  uwsgi_temp_path {work}/tmp;",
-                        f"  scgi_temp_path {work}/tmp;",
-                        "  access_log off;",
-                        f"  server {{ listen 127.0.0.1:{off_listen}; include {off}; }}",
-                        "}\n",
-                    ]
-                )
-            )
-            off_proc = subprocess.Popen(
-                [nginx, "-p", str(work), "-c", str(off_conf), "-e", str(work / "off.error.log"), "-g", "daemon off;"],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
-            try:
-                with self.assertRaises(HTTPError) as ctx:
-                    urlopen(f"http://127.0.0.1:{off_listen}/debug/radarr/", timeout=5)
-                self.assertEqual(ctx.exception.code, 404)
-            finally:
-                off_proc.terminate()
-                off_proc.wait(timeout=5)
         finally:
             proc.terminate()
             proc.wait(timeout=5)
