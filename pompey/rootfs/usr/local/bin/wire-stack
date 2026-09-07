@@ -2168,7 +2168,9 @@ def load_open_seerr_requests() -> list[dict] | None:
                 headers=headers,
             )
         except RuntimeError as exc:
-            log(f"seerr requests: {exc}", "WARNING")
+            # 403 until the Plex wizard (same as other Seerr admin routes).
+            if "403" not in str(exc):
+                log(f"seerr requests: {exc}", "WARNING")
             return None
         if isinstance(payload, list):
             batch = as_list(payload)
