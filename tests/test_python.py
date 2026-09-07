@@ -2152,6 +2152,86 @@ class VpnStats(unittest.TestCase):
                     os.environ[key] = value
 
 
+class PlexBonusFiles(unittest.TestCase):
+    def test_classifies_plex_extras_specials_episodes_and_samples(self):
+        cases = [
+            ("/c/Silo.S03/Extras/Making Of.mkv", "extra", "Other"),
+            ("/c/Silo.S03/Featurettes/The Look.mkv", "extra", "Featurettes"),
+            ("/c/Silo.S03/Silo.S03.Behind.The.Scenes.mkv", "extra", "Behind The Scenes"),
+            ("/c/Silo.S01E01-behindthescenes.mkv", "extra", "Behind The Scenes"),
+            ("/c/Silo.S00E01.Christmas.Special.1080p.mkv", "special", ""),
+            ("/c/Silo.S03/Specials/Holiday Special.mkv", "special", ""),
+            ("/c/Silo/Season 00/Christmas Special.mkv", "special", ""),
+            ("/c/Silo/Season 0/Gag Reel.mkv", "special", ""),
+            ("/c/Silo.S01E01.Who.Are.You.mkv", "episode", ""),
+            ("/c/Silo.S01E01.The.Special.One.mkv", "episode", ""),
+            ("/c/The.Interview.S01/The.Interview.S01E01.mkv", "episode", ""),
+            ("/c/Silo.S03/Sample/silo.sample.mkv", "sample", ""),
+            ("/c/Silo.S03/random-clip.mkv", "skip", ""),
+        ]
+        for path, kind, folder in cases:
+            got_kind, got_folder, _suffix = ws.classify_bonus_video(path)
+            self.assertEqual((got_kind, got_folder), (kind, folder), path)
+
+    def test_specials_folder_reuses_season_00(self):
+        tmp = Path(os.environ.get("TEST_TMP") or "/tmp") / f"pompey-specials-{os.getpid()}"
+        show = tmp / "Silo"
+        season00 = show / "Season 00"
+        season00.mkdir(parents=True)
+        self.assertEqual(ws.specials_dest_dir(str(show)), str(season00))
+        other = tmp / "Other Show"
+        self.assertEqual(
+            ws.specials_dest_dir(str(other)),
+            str(other / "Specials"),
+        )
+
+    def test_extras_dest_dir_uses_season_folder_including_season_zero(self):
+        tmp = Path(os.environ.get("TEST_TMP") or "/tmp") / f"pompey-extradest-{os.getpid()}"
+        show = tmp / "Silo"
+        season03 = show / "Season 03"
+        season00 = show / "Season 00"
+        season03.mkdir(parents=True)
+        season00.mkdir(parents=True)
+        self.assertEqual(
+            ws.extras_dest_dir(str(show), "Behind The Scenes", 3),
+            str(season03 / "Behind The Scenes"),
+        )
+        self.assertEqual(
+            ws.extras_dest_dir(str(show), "Interviews", 0),
+            str(season00 / "Interviews"),
+        )
+        bare = tmp / "Bare Show"
+        self.assertEqual(
+            ws.extras_dest_dir(str(bare), "Featurettes", 0),
+            str(bare / "Featurettes"),
+        )
+        self.assertEqual(
+            ws.extras_dest_dir(str(bare), "Featurettes", 3),
+            str(bare / "Featurettes"),
+        )
+
+    def test_bonus_display_title_strips_release_junk(self):
+        self.assertEqual(
+            ws.bonus_display_title(
+                "Silo.S00E01.Christmas.Special.1080p.WEBRip.mkv",
+                "Silo",
+            ),
+            "Christmas Special",
+        )
+        self.assertEqual(ws.bonus_display_title("Cast Interview.mkv", "Silo"), "Cast Interview")
+
+    def test_best_arr_title_match_uses_longest_arr_title(self):
+        rows = [
+            {"id": 1, "title": "Silo", "path": "/tv/Silo"},
+            {"id": 2, "title": "The Silo Files", "path": "/tv/The Silo Files"},
+            {"id": 3, "title": "Unknown", "path": "/movies/Unknown"},
+        ]
+        hit = ws.best_arr_title_match("The.Silo.Files.S00.Specials", rows)
+        self.assertEqual(hit["id"], 2)
+        self.assertIsNone(ws.best_arr_title_match("Unrelated.S01", rows))
+        self.assertIsNone(ws.best_arr_title_match("UnknownShow.S01.Behind.The.Scenes", rows))
+
+
 class WireStack(unittest.TestCase):
     def setUp(self):
         self.state = FakeState()
@@ -3448,6 +3528,242 @@ class WireStack(unittest.TestCase):
         self.assertFalse(folder.exists())
         self.assertNotIn("still in complete/:", out)
         self.assertNotIn("English.srt", out)
+
+    def test_housekeep_places_tv_extras_and_drops_samples(self):
+        os.environ["INDEXER_URL"] = ""
+        os.environ["INDEXER_API_KEY"] = ""
+        root = self.tmp / "plex-extras"
+        release = root / "downloads" / "complete" / "Silo.S03.1080p"
+        extras = release / "Extras"
+        extras.mkdir(parents=True)
+        (extras / "Making Of.mkv").write_bytes(b"extra")
+        (extras / "Making Of.srt").write_bytes(b"sub")
+        (release / "Silo.S03.Behind.The.Scenes.mkv").write_bytes(b"bts")
+        (release / "Sample").mkdir()
+        (release / "Sample" / "silo.sample.mkv").write_bytes(b"sample")
+        (release / "release.nfo").write_bytes(b"nfo")
+        os.environ["MEDIA_ROOT"] = str(root)
+        dest = root / "TV" / "Not Kid Friendly" / "Silo"
+        season = dest / "Season 03"
+        season.mkdir(parents=True)
+        (season / "Silo - S03E01.mkv").write_bytes(b"library")
+        self.state.series = [
+            {
+                "id": 10,
+                "title": "Silo",
+                "monitored": True,
+                "path": str(dest),
+                "statistics": {"episodeFileCount": 1, "episodeCount": 1},
+            }
+        ]
+        from io import StringIO
+        from contextlib import redirect_stdout
+
+        buf = StringIO()
+        with redirect_stdout(buf):
+            self.assertEqual(ws.housekeep(), 0)
+        self.assertTrue((dest / "Other" / "Making Of.mkv").is_file())
+        self.assertTrue((dest / "Other" / "Making Of.srt").is_file())
+        self.assertTrue((season / "Behind The Scenes" / "Behind The Scenes.mkv").is_file())
+        self.assertFalse(release.exists())
+        self.assertFalse((dest / "Sample").exists())
+        self.assertIn("placed 2 leftover extra/special video(s)", buf.getvalue())
+
+    def test_housekeep_places_extras_specials_and_special_season(self):
+        """One season pack: show extras, Season 03 extras, S00 specials, Season 00 extras."""
+        os.environ["INDEXER_URL"] = ""
+        os.environ["INDEXER_API_KEY"] = ""
+        root = self.tmp / "plex-bonus-pack"
+        release = root / "downloads" / "complete" / "Silo.S03.COMPLETE.1080p"
+        featurettes = release / "Featurettes"
+        season00_src = release / "Season 00"
+        featurettes.mkdir(parents=True)
+        season00_src.mkdir(parents=True)
+        (featurettes / "The Look.mkv").write_bytes(b"look")
+        (release / "Silo.S03.Behind.The.Scenes.mkv").write_bytes(b"bts")
+        (season00_src / "Silo.S00E01.Christmas.Special.mkv").write_bytes(b"xmas")
+        (season00_src / "Cast Interview.mkv").write_bytes(b"cast")
+        os.environ["MEDIA_ROOT"] = str(root)
+        dest = root / "TV" / "Not Kid Friendly" / "Silo"
+        season03 = dest / "Season 03"
+        season00 = dest / "Season 00"
+        season03.mkdir(parents=True)
+        season00.mkdir(parents=True)
+        (season03 / "Silo - S03E01.mkv").write_bytes(b"library")
+        self.state.series = [
+            {
+                "id": 10,
+                "title": "Silo",
+                "monitored": True,
+                "path": str(dest),
+                "statistics": {"episodeFileCount": 1, "episodeCount": 1},
+            }
+        ]
+        from io import StringIO
+        from contextlib import redirect_stdout
+
+        buf = StringIO()
+        with redirect_stdout(buf):
+            self.assertEqual(ws.housekeep(), 0)
+        self.assertTrue((dest / "Featurettes" / "The Look.mkv").is_file())
+        self.assertTrue((season03 / "Behind The Scenes" / "Behind The Scenes.mkv").is_file())
+        self.assertTrue((season00 / "Silo - S00E01 - Christmas Special.mkv").is_file())
+        self.assertTrue((season00 / "Interviews" / "Cast Interview.mkv").is_file())
+        self.assertFalse((dest / "Specials").exists())
+        self.assertFalse(release.exists())
+        self.assertIn("placed 4 leftover extra/special video(s)", buf.getvalue())
+
+    def test_housekeep_places_season_zero_specials(self):
+        os.environ["INDEXER_URL"] = ""
+        os.environ["INDEXER_API_KEY"] = ""
+        root = self.tmp / "plex-specials"
+        complete = root / "downloads" / "complete"
+        complete.mkdir(parents=True)
+        leftover = complete / "Silo.S00E01.Christmas.Special.1080p.WEBRip.mkv"
+        leftover.write_bytes(b"special")
+        unnamed = complete / "Silo.Holiday.Special.mkv"
+        unnamed.write_bytes(b"holiday")
+        os.environ["MEDIA_ROOT"] = str(root)
+        dest = root / "TV" / "Not Kid Friendly" / "Silo"
+        dest.mkdir(parents=True)
+        (dest / "Silo.S03E01.mkv").write_bytes(b"library")
+        self.state.series = [
+            {"id": 10, "title": "Silo", "monitored": True, "path": str(dest)}
+        ]
+        from io import StringIO
+        from contextlib import redirect_stdout
+
+        buf = StringIO()
+        with redirect_stdout(buf):
+            self.assertEqual(ws.housekeep(), 0)
+        specials = dest / "Specials"
+        self.assertTrue((specials / "Silo - S00E01 - Christmas Special.mkv").is_file())
+        self.assertTrue((specials / "Silo - S00E02 - Holiday Special.mkv").is_file())
+        self.assertFalse(leftover.exists())
+        self.assertFalse(unnamed.exists())
+        self.assertIn("placed 2 leftover extra/special video(s)", buf.getvalue())
+
+    def test_housekeep_reuses_existing_season_00_for_specials(self):
+        os.environ["INDEXER_URL"] = ""
+        os.environ["INDEXER_API_KEY"] = ""
+        root = self.tmp / "season-00"
+        complete = root / "downloads" / "complete"
+        complete.mkdir(parents=True)
+        leftover = complete / "Silo.S00E03.Gag.Reel.mkv"
+        leftover.write_bytes(b"gag")
+        os.environ["MEDIA_ROOT"] = str(root)
+        dest = root / "TV" / "Not Kid Friendly" / "Silo"
+        season00 = dest / "Season 00"
+        season00.mkdir(parents=True)
+        (season00 / "Silo - S00E01 - Pilot Special.mkv").write_bytes(b"old")
+        self.state.series = [
+            {"id": 10, "title": "Silo", "monitored": True, "path": str(dest)}
+        ]
+        self.assertEqual(ws.housekeep(), 0)
+        self.assertTrue((season00 / "Silo - S00E03 - Gag Reel.mkv").is_file())
+        self.assertFalse((dest / "Specials").exists())
+        self.assertFalse(leftover.exists())
+
+    def test_housekeep_leaves_wanted_special_for_sonarr(self):
+        os.environ["INDEXER_URL"] = ""
+        os.environ["INDEXER_API_KEY"] = ""
+        root = self.tmp / "wanted-special"
+        complete = root / "downloads" / "complete"
+        complete.mkdir(parents=True)
+        leftover = complete / "Silo.S00E01.Christmas.Special.mkv"
+        leftover.write_bytes(b"special")
+        os.environ["MEDIA_ROOT"] = str(root)
+        dest = root / "TV" / "Not Kid Friendly" / "Silo"
+        dest.mkdir(parents=True)
+        self.state.series = [
+            {"id": 10, "title": "Silo", "monitored": True, "path": str(dest)}
+        ]
+        self.state.episodes = [
+            {
+                "id": 21,
+                "seriesId": 10,
+                "seasonNumber": 0,
+                "episodeNumber": 1,
+                "hasFile": False,
+                "title": "Christmas Special",
+            }
+        ]
+        self.assertEqual(ws.housekeep(), 0)
+        self.assertTrue(leftover.is_file())
+        self.assertFalse((dest / "Specials").exists())
+
+    def test_housekeep_does_not_steal_waiting_episode(self):
+        os.environ["INDEXER_URL"] = ""
+        os.environ["INDEXER_API_KEY"] = ""
+        root = self.tmp / "waiting-ep"
+        complete = root / "downloads" / "complete"
+        complete.mkdir(parents=True)
+        leftover = complete / "Silo.S01E02.mkv"
+        leftover.write_bytes(b"episode")
+        os.environ["MEDIA_ROOT"] = str(root)
+        dest = root / "TV" / "Not Kid Friendly" / "Silo"
+        dest.mkdir(parents=True)
+        (dest / "Silo.S01E01.mkv").write_bytes(b"library")
+        self.state.series = [
+            {"id": 10, "title": "Silo", "monitored": True, "path": str(dest)}
+        ]
+        self.assertEqual(ws.housekeep(), 0)
+        self.assertTrue(leftover.is_file())
+        self.assertFalse((dest / "Specials").exists())
+
+    def test_housekeep_places_episode_tied_extra_next_to_episode(self):
+        os.environ["INDEXER_URL"] = ""
+        os.environ["INDEXER_API_KEY"] = ""
+        root = self.tmp / "episode-extra"
+        complete = root / "downloads" / "complete"
+        complete.mkdir(parents=True)
+        leftover = complete / "Silo.S01E01-behindthescenes.mkv"
+        leftover.write_bytes(b"bts")
+        os.environ["MEDIA_ROOT"] = str(root)
+        dest = root / "TV" / "Not Kid Friendly" / "Silo"
+        season = dest / "Season 01"
+        season.mkdir(parents=True)
+        episode = season / "Silo - S01E01 - Pilot.mkv"
+        episode.write_bytes(b"library")
+        self.state.series = [
+            {"id": 10, "title": "Silo", "monitored": True, "path": str(dest)}
+        ]
+        self.assertEqual(ws.housekeep(), 0)
+        self.assertTrue((season / "Silo - S01E01 - Pilot-behindthescenes.mkv").is_file())
+        self.assertFalse(leftover.exists())
+
+    def test_housekeep_does_not_guess_extras_folder_without_arr_title(self):
+        os.environ["INDEXER_URL"] = ""
+        os.environ["INDEXER_API_KEY"] = ""
+        root = self.tmp / "no-guess"
+        complete = root / "downloads" / "complete"
+        complete.mkdir(parents=True)
+        leftover = complete / "UnknownShow.S01.Behind.The.Scenes.mkv"
+        leftover.write_bytes(b"bts")
+        os.environ["MEDIA_ROOT"] = str(root)
+        self.assertEqual(ws.housekeep(), 0)
+        self.assertTrue(leftover.is_file())
+
+    def test_housekeep_places_movie_featurette(self):
+        os.environ["INDEXER_URL"] = ""
+        os.environ["INDEXER_API_KEY"] = ""
+        root = self.tmp / "movie-extra"
+        release = root / "downloads" / "complete" / "Wake Up Dead Man 2025"
+        featurettes = release / "Featurettes"
+        featurettes.mkdir(parents=True)
+        (featurettes / "Making Of.mkv").write_bytes(b"extra")
+        os.environ["MEDIA_ROOT"] = str(root)
+        dest = root / "Movies" / "Not Kid Friendly" / "Wake Up Dead Man (2025)"
+        dest.mkdir(parents=True)
+        (dest / "Wake Up Dead Man (2025).mkv").write_bytes(b"library")
+        for movie in self.state.movies:
+            if movie.get("id") == 2:
+                movie["title"] = "Wake Up Dead Man"
+                movie["hasFile"] = True
+                movie["path"] = str(dest)
+        self.assertEqual(ws.housekeep(), 0)
+        self.assertTrue((dest / "Featurettes" / "Making Of.mkv").is_file())
+        self.assertFalse(release.exists())
 
     def test_housekeep_does_not_log_unknown_series_for_a_movie_file(self):
         os.environ["INDEXER_URL"] = ""

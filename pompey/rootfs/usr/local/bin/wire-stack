@@ -30,6 +30,72 @@ import urllib.parse
 import urllib.request
 
 EPISODE_KEY_RE = re.compile(r"(?i)S(\d{1,2})E(\d{1,3})")
+SEASON_FOLDER_RE = re.compile(r"(?i)^season[ .\-_]*(\d{1,2})$")
+SEASON_TOKEN_RE = re.compile(r"(?i)(?:^|[.\s_-])S(\d{1,2})(?:[.\s_-]|$)")
+SPECIALS_FOLDER_RE = re.compile(r"(?i)^(?:specials|season[ .\-_]*0+)$")
+SPECIAL_NAME_RE = re.compile(
+    r"(?i)(?:^|[.\s_-])(?:(?:christmas|holiday|halloween|thanksgiving)[.\s_-]+)?"
+    r"specials?(?:[.\s_-]|$)"
+)
+NOT_SPECIAL_RE = re.compile(r"(?i)special[.\s_-]+(?:features?|editions?)")
+SAMPLE_NAME_RE = re.compile(r"(?i)(?:^|[.\s_\-/])samples?(?:[.\s_\-/]|$)")
+EXTRA_SUFFIX_RE = re.compile(
+    r"(?i)[-_.](behindthescenes|deleted|featurette|interview|scene|short|trailer|other)$"
+)
+QUALITY_TAIL_RE = re.compile(
+    r"(?i)[.\s_-]+(?:\d{3,4}p|4k|uhd|web-?dl|webrip|bluray|blu-?ray|hdtv|"
+    r"x26[45]|h\.?26[45]|hevc|avc|hdr10(?:plus)?|\bhdr\b|\bdv\b|proper|repack).*$"
+)
+WWW_PREFIX_RE = re.compile(r"(?i)^www\.[^\s]+?\s*-\s*")
+YEAR_SUFFIX_RE = re.compile(r"\s*\(\d{4}\)\s*$")
+
+# Plex local extras: folder names and the filename suffixes they map to.
+# https://support.plex.tv/articles/local-files-for-trailers-and-extras/
+PLEX_EXTRA_SUFFIX = {
+    "behindthescenes": "Behind The Scenes",
+    "deleted": "Deleted Scenes",
+    "featurette": "Featurettes",
+    "interview": "Interviews",
+    "scene": "Scenes",
+    "short": "Shorts",
+    "trailer": "Trailers",
+    "other": "Other",
+}
+PLEX_EXTRA_FOLDER_ALIASES = {
+    "behind the scenes": "Behind The Scenes",
+    "behind-the-scenes": "Behind The Scenes",
+    "behindthescenes": "Behind The Scenes",
+    "bts": "Behind The Scenes",
+    "deleted scenes": "Deleted Scenes",
+    "deleted scene": "Deleted Scenes",
+    "featurettes": "Featurettes",
+    "featurette": "Featurettes",
+    "interviews": "Interviews",
+    "interview": "Interviews",
+    "scenes": "Scenes",
+    "shorts": "Shorts",
+    "short": "Shorts",
+    "trailers": "Trailers",
+    "trailer": "Trailers",
+    "teasers": "Trailers",
+    "teaser": "Trailers",
+    "extras": "Other",
+    "extra": "Other",
+    "bonus": "Other",
+    "bonus disc": "Other",
+    "bonusdisk": "Other",
+    "other": "Other",
+}
+PLEX_EXTRA_KEYWORDS = (
+    (re.compile(r"(?i)behind[.\s_-]*the[.\s_-]*scenes|behindthescenes|\bbts\b"), "Behind The Scenes"),
+    (re.compile(r"(?i)deleted[.\s_-]*scenes?"), "Deleted Scenes"),
+    (re.compile(r"(?i)making[.\s_-]*of|featurettes?"), "Featurettes"),
+    (re.compile(r"(?i)interviews?"), "Interviews"),
+    (re.compile(r"(?i)\bteasers?\b|\btrailers?\b"), "Trailers"),
+    (re.compile(r"(?i)short[.\s_-]*films?"), "Shorts"),
+    (re.compile(r"(?i)bonus[.\s_-]*features?|\bextras?\b"), "Other"),
+)
+SUBTITLE_EXTENSIONS = {".srt", ".ass", ".ssa", ".sub", ".idx"}
 
 def secrets_path() -> str:
     return os.environ.get("POMPEY_SECRETS", "/data/pompey/secrets.json")
@@ -3178,6 +3244,401 @@ def prune_complete_extras() -> None:
         )
 
 
+def plex_extra_suffix_for(folder: str) -> str:
+    for suffix, name in PLEX_EXTRA_SUFFIX.items():
+        if name == folder:
+            return suffix
+    return "other"
+
+
+def classify_bonus_video(path: str) -> tuple[str, str, str]:
+    """Classify a leftover complete/ video for Plex extras / specials.
+
+    Returns (kind, extra_folder, extra_suffix). kind is extra, special,
+    episode, sample, or skip. Destination folder is Arr's title path — this
+    only decides *what* the file is.
+    """
+    full = (path or "").replace("\\", "/")
+    name = os.path.basename(full)
+    stem, _ext = os.path.splitext(name)
+    parts = [part for part in full.split("/") if part and part not in (".", "..")]
+    if SAMPLE_NAME_RE.search(name) or any(
+        SAMPLE_NAME_RE.search(f"{part}/") for part in parts[:-1]
+    ):
+        return "sample", "", ""
+    suffix_hit = EXTRA_SUFFIX_RE.search(stem)
+    if suffix_hit:
+        folder = PLEX_EXTRA_SUFFIX[suffix_hit.group(1).lower()]
+        return "extra", folder, plex_extra_suffix_for(folder)
+    for part in parts[:-1]:
+        alias = PLEX_EXTRA_FOLDER_ALIASES.get(part.strip().lower())
+        if alias:
+            return "extra", alias, plex_extra_suffix_for(alias)
+    ep_key = video_episode_key(name)
+    regular_episode = bool(ep_key) and not ep_key.startswith("S00")
+    if regular_episode:
+        return "episode", "", ""
+    for pattern, folder in PLEX_EXTRA_KEYWORDS:
+        if pattern.search(stem):
+            return "extra", folder, plex_extra_suffix_for(folder)
+    specials_dir = any(SPECIALS_FOLDER_RE.match(part) for part in parts[:-1])
+    named_special = bool(SPECIAL_NAME_RE.search(stem)) and not NOT_SPECIAL_RE.search(stem)
+    if ep_key.startswith("S00") or specials_dir or named_special:
+        return "special", "", ""
+    return "skip", "", ""
+
+
+def bonus_display_title(name: str, show_title: str = "") -> str:
+    stem = os.path.splitext(name or "")[0]
+    stem = EXTRA_SUFFIX_RE.sub("", stem)
+    stem = QUALITY_TAIL_RE.sub("", stem)
+    stem = stem.replace(".", " ").replace("_", " ")
+    stem = EPISODE_KEY_RE.sub(" ", stem)
+    stem = re.sub(r"(?i)\bS\d{1,2}\b", " ", stem)
+    if show_title:
+        stem = re.sub(re.escape(show_title), " ", stem, flags=re.I)
+    return re.sub(r"\s+", " ", stem).strip(" -.")
+
+
+def season_hint_from_path(path: str) -> int | None:
+    key = video_episode_key(os.path.basename(path or ""))
+    if key:
+        return int(key[1:3])
+    for part in (path or "").replace("\\", "/").split("/"):
+        match = SEASON_FOLDER_RE.match(part)
+        if match:
+            return int(match.group(1))
+    token = SEASON_TOKEN_RE.search(os.path.basename(path or ""))
+    if token:
+        return int(token.group(1))
+    return None
+
+
+def specials_dest_dir(show_path: str) -> str:
+    """Plex accepts Specials or Season 00. Reuse whichever already exists."""
+    for name in ("Season 00", "Season 0", "Specials"):
+        candidate = os.path.join(show_path, name)
+        if os.path.isdir(candidate):
+            return candidate
+    return os.path.join(show_path, "Specials")
+
+
+def extras_dest_dir(show_path: str, extra_folder: str, season: int | None) -> str:
+    if season == 0:
+        for name in ("Season 00", "Season 0"):
+            candidate = os.path.join(show_path, name)
+            if os.path.isdir(candidate):
+                return os.path.join(candidate, extra_folder)
+        return os.path.join(show_path, extra_folder)
+    if season and season > 0:
+        season_dir = os.path.join(show_path, f"Season {season:02d}")
+        if os.path.isdir(season_dir):
+            return os.path.join(season_dir, extra_folder)
+    return os.path.join(show_path, extra_folder)
+
+
+def next_specials_episode(dest_dir: str) -> int:
+    used: set[int] = set()
+    if os.path.isdir(dest_dir):
+        try:
+            names = os.listdir(dest_dir)
+        except OSError:
+            names = []
+        for name in names:
+            match = EPISODE_KEY_RE.search(name)
+            if match and int(match.group(1)) == 0:
+                used.add(int(match.group(2)))
+    number = 1
+    while number in used:
+        number += 1
+    return number
+
+
+def title_match_tokens(text: str) -> list[str]:
+    """Word tokens from a release or Arr title. Dots/Sxx/year are separators."""
+    cleaned = WWW_PREFIX_RE.sub("", text or "")
+    cleaned = YEAR_SUFFIX_RE.sub("", cleaned)
+    cleaned = EPISODE_KEY_RE.sub(" ", cleaned)
+    cleaned = re.sub(r"(?i)\bS\d{1,2}\b", " ", cleaned)
+    cleaned = re.sub(r"[^a-z0-9]+", " ", cleaned.lower())
+    return [part for part in cleaned.split() if part]
+
+
+def tokens_as_sequence(needle: list[str], hay: list[str]) -> bool:
+    if not needle or len(hay) < len(needle):
+        return False
+    size = len(needle)
+    return any(hay[index : index + size] == needle for index in range(len(hay) - size + 1))
+
+
+def best_arr_title_match(label: str, rows: list[dict]) -> dict | None:
+    """Longest Arr title whose words appear in the release name. Not a substring.
+
+    'Unknown' must not match UnknownShow. Never guesses Kid vs Not Kid.
+    """
+    hay = title_match_tokens(label)
+    if not hay:
+        return None
+    best: dict | None = None
+    best_len = 0
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        candidates = [str(row.get("title") or "")]
+        dest = title_library_path(row)
+        if dest:
+            candidates.append(os.path.basename(dest.rstrip("/")))
+        for raw in candidates:
+            needle = title_match_tokens(raw)
+            joined = "".join(needle)
+            if len(joined) < 3 or not tokens_as_sequence(needle, hay):
+                continue
+            if len(joined) > best_len:
+                best = row
+                best_len = len(joined)
+    return best
+
+
+def list_complete_videos() -> list[str]:
+    root = downloads_complete()
+    found: list[str] = []
+    if not os.path.isdir(root):
+        return found
+    try:
+        for dirpath, dirnames, filenames in os.walk(root):
+            dirnames[:] = [name for name in dirnames if not name.startswith(".")]
+            for name in filenames:
+                if name.startswith(".") or not is_video_file(name):
+                    continue
+                found.append(os.path.join(dirpath, name))
+    except OSError:
+        return found
+    return found
+
+
+def bonus_sidecar_paths(video_path: str) -> list[str]:
+    parent = os.path.dirname(video_path)
+    stem = os.path.splitext(os.path.basename(video_path))[0]
+    found: list[str] = []
+    try:
+        names = os.listdir(parent)
+    except OSError:
+        return found
+    for name in names:
+        if name.startswith("."):
+            continue
+        other_stem, ext = os.path.splitext(name)
+        if other_stem != stem or ext.lower() not in SUBTITLE_EXTENSIONS:
+            continue
+        found.append(os.path.join(parent, name))
+    return found
+
+
+def find_library_episode_file(show_path: str, ep_key: str) -> str:
+    if not ep_key or not os.path.isdir(show_path):
+        return ""
+    try:
+        for dirpath, dirnames, filenames in os.walk(show_path):
+            dirnames[:] = [name for name in dirnames if not name.startswith(".")]
+            for name in filenames:
+                if name.startswith(".") or not is_video_file(name):
+                    continue
+                if video_episode_key(name) != ep_key:
+                    continue
+                if EXTRA_SUFFIX_RE.search(os.path.splitext(name)[0]):
+                    continue
+                return os.path.join(dirpath, name)
+    except OSError:
+        return ""
+    return ""
+
+
+def episode_extra_dest(show_path: str, src_name: str, suffix: str) -> str:
+    key = video_episode_key(src_name)
+    if not key or key.startswith("S00") or not suffix:
+        return ""
+    existing = find_library_episode_file(show_path, key)
+    if not existing:
+        return ""
+    return f"{os.path.splitext(existing)[0]}-{suffix}{os.path.splitext(src_name)[1]}"
+
+
+def arr_library_titles(base: str, api_key: str, kind: str) -> list[dict]:
+    endpoint = "movie" if kind == "radarr" else "series"
+    try:
+        return as_list(http("GET", f"{base}/{endpoint}", headers=arr_headers(api_key)))
+    except RuntimeError as exc:
+        log(f"{kind} library list for extras: {exc}", "WARNING")
+        return []
+
+
+def match_bonus_library(
+    path: str, series_rows: list[dict], movie_rows: list[dict]
+) -> tuple[str, str, str, object]:
+    """Arr title folder for a leftover extra/special. TV first, then movies."""
+    release = release_dir_under_complete(path)
+    labels = []
+    if release:
+        labels.append(os.path.basename(release))
+    labels.append(os.path.splitext(os.path.basename(path))[0])
+    for kind, rows in (("sonarr", series_rows), ("radarr", movie_rows)):
+        for label in labels:
+            row = best_arr_title_match(label, rows)
+            if not row:
+                continue
+            dest = title_library_path(row)
+            title = str(row.get("title") or "") or os.path.basename(dest.rstrip("/"))
+            if dest:
+                return dest, title, kind, row.get("id")
+    return "", "", "", None
+
+
+def sonarr_wants_special(base: str, api_key: str, series_id, src_name: str) -> bool:
+    """True when Sonarr still has this S00Exx as a missing special — leave it for Arr."""
+    match = EPISODE_KEY_RE.search(src_name or "")
+    if not match or int(match.group(1)) != 0 or not series_id:
+        return False
+    ep_num = int(match.group(2))
+    try:
+        rows = as_list(
+            http(
+                "GET",
+                f"{base}/episode?seriesId={series_id}",
+                headers=arr_headers(api_key),
+            )
+        )
+    except RuntimeError:
+        return False
+    for ep in rows:
+        if not isinstance(ep, dict):
+            continue
+        try:
+            season = int(ep.get("seasonNumber"))
+            number = int(ep.get("episodeNumber"))
+        except (TypeError, ValueError):
+            continue
+        if season == 0 and number == ep_num and ep.get("hasFile") is not True:
+            return True
+    return False
+
+
+def relocate_bonus_file(src: str, dest: str) -> bool:
+    """Same-share rename into the library extras/specials folder. Never a library src."""
+    if not src or not dest or not safe_to_delete_complete_path(src):
+        return False
+    if path_is_library(src):
+        return False
+    try:
+        os.makedirs(os.path.dirname(dest), exist_ok=True)
+    except OSError as exc:
+        log(f"could not create Plex extras folder: {exc}", "WARNING")
+        return False
+    if os.path.exists(dest):
+        try:
+            os.remove(src)
+        except OSError as exc:
+            log(f"could not remove leftover complete/ extra: {exc}", "WARNING")
+            return False
+        log(f"library already has {os.path.basename(dest)}; removed leftover complete/ copy")
+        return True
+    try:
+        shutil.move(src, dest)
+    except OSError as exc:
+        log(f"could not place Plex extra {os.path.basename(src)}: {exc}", "WARNING")
+        return False
+    log(f"placed Plex extra {os.path.basename(src)} -> {dest}")
+    return True
+
+
+def place_complete_plex_sidecars(
+    radarr: str,
+    rk: str,
+    sonarr: str,
+    sk: str,
+    skip_paths: list[str] | None = None,
+) -> int:
+    """Move leftover extras and Season 00/specials into the Plex library layout.
+
+    Arr only imports the episode (plus .srt). Season packs leave featurettes,
+    interviews, and unmapped S00 specials in complete/. Plex wants those in
+    Behind The Scenes / Featurettes / … or Specials (or existing Season 00).
+    Destination is the Arr title path Seerr stored — we do not guess Kid vs
+    Not Kid from the filename. Files Arr already queued to import stay put.
+    """
+    if complete_overlaps_library():
+        return 0
+    skip = {os.path.normpath(path) for path in (skip_paths or []) if path}
+    series_rows = arr_library_titles(sonarr, sk, "sonarr")
+    movie_rows = arr_library_titles(radarr, rk, "radarr")
+    placed = 0
+
+    def bonus_sort_key(path: str) -> tuple:
+        key = video_episode_key(os.path.basename(path))
+        numbered = 0 if key.startswith("S00") else 1
+        return (numbered, path)
+
+    for src in sorted(list_complete_videos(), key=bonus_sort_key):
+        if os.path.normpath(src) in skip:
+            continue
+        kind, extra_folder, extra_suffix = classify_bonus_video(src)
+        if kind == "sample":
+            if safe_to_delete_complete_path(src):
+                try:
+                    os.remove(src)
+                    log(f"removed leftover complete/ sample: {os.path.basename(src)}")
+                except OSError:
+                    pass
+            continue
+        if kind not in {"extra", "special"}:
+            continue
+        dest_root, title, arr_kind, ident = match_bonus_library(src, series_rows, movie_rows)
+        if not dest_root:
+            continue
+        if kind == "special" and arr_kind != "sonarr":
+            kind = "extra"
+            extra_folder = extra_folder or "Other"
+            extra_suffix = extra_suffix or "other"
+        if kind == "special":
+            if sonarr_wants_special(sonarr, sk, ident, os.path.basename(src)):
+                continue
+            dest_dir = specials_dest_dir(dest_root)
+            ep_match = EPISODE_KEY_RE.search(os.path.basename(src))
+            if ep_match and int(ep_match.group(1)) == 0:
+                ep_label = f"S00E{int(ep_match.group(2)):02d}"
+            else:
+                ep_label = f"S00E{next_specials_episode(dest_dir):02d}"
+            pretty = bonus_display_title(os.path.basename(src), title)
+            ext = os.path.splitext(src)[1]
+            filename = (
+                f"{title} - {ep_label} - {pretty}{ext}"
+                if pretty
+                else f"{title} - {ep_label}{ext}"
+            )
+            dest = os.path.join(dest_dir, filename)
+        else:
+            ep_dest = episode_extra_dest(dest_root, os.path.basename(src), extra_suffix)
+            if ep_dest:
+                dest = ep_dest
+            else:
+                dest_dir = extras_dest_dir(
+                    dest_root, extra_folder or "Other", season_hint_from_path(src)
+                )
+                pretty = bonus_display_title(os.path.basename(src), title) or (
+                    extra_folder or "Extra"
+                )
+                dest = os.path.join(dest_dir, pretty + os.path.splitext(src)[1])
+        sidecars = bonus_sidecar_paths(src)
+        if not relocate_bonus_file(src, dest):
+            continue
+        placed += 1
+        dest_stem = os.path.splitext(dest)[0]
+        for side in sidecars:
+            relocate_bonus_file(side, dest_stem + os.path.splitext(side)[1])
+    if placed:
+        log(f"placed {placed} leftover extra/special video(s) using Plex folders")
+    return placed
+
+
 def lookup_arr_library_path(base: str, api_key: str, kind: str, row: dict) -> str:
     ident = arr_record_id(row, kind)
     if not ident:
@@ -3219,10 +3680,11 @@ def manual_import_file(item: dict, kind: str) -> dict | None:
     return row
 
 
-def import_matched_drop(base: str, api_key: str, kind: str) -> None:
+def import_matched_drop(base: str, api_key: str, kind: str) -> list[str]:
     """Rename matched files Arr already approved. Log why the rest stay in complete/."""
     seen: set[str] = set()
     files: list[dict] = []
+    queued: list[str] = []
     for folder in existing_download_scan_paths(kind):
         query = urllib.parse.urlencode(
             {"folder": folder, "filterExistingFiles": "false"}
@@ -3290,8 +3752,9 @@ def import_matched_drop(base: str, api_key: str, kind: str) -> None:
                 "(Arr record from Seerr, not the filename)"
             )
             files.append(row)
+            queued.append(path)
     if not files:
-        return
+        return queued
     try:
         http(
             "POST",
@@ -3302,6 +3765,7 @@ def import_matched_drop(base: str, api_key: str, kind: str) -> None:
         log(f"{kind} renaming {len(files)} file(s) into the library")
     except RuntimeError as exc:
         log(f"{kind} manual import: {exc}", "WARNING")
+    return queued
 
 
 def log_complete_drop_contents() -> None:
@@ -3725,9 +4189,11 @@ def import_finished_downloads(radarr: str, rk: str, sonarr: str, sk: str) -> Non
     """Stop finished torrents, rename into the library, drop leftover complete/ files.
 
     Same path for movies and TV. Destination is the Arr title folder Seerr stored.
-    Refresh is skipped when complete/ is empty or a search is already running —
-    those commands are higher priority than EpisodeSearch and starve the rest
-    of a season. Missing-title retry runs after import so housekeep also pokes.
+    Leftover extras and Season 00/specials are renamed into Plex extra folders
+    (or Specials / existing Season 00) on that same title path. Refresh is
+    skipped when complete/ is empty or a search is already running — those
+    commands are higher priority than EpisodeSearch and starve the rest of a
+    season. Missing-title retry runs after import so housekeep also pokes.
     """
     log_search_diagnostics(radarr, rk, sonarr, sk)
     unlock_completed_torrents()
@@ -3746,6 +4212,7 @@ def import_finished_downloads(radarr: str, rk: str, sonarr: str, sk: str) -> Non
         return
     videos = count_complete_videos()
     searching = arr_search_in_flight(radarr, rk) or arr_search_in_flight(sonarr, sk)
+    queued: list[str] = []
     if videos:
         if searching:
             log_if_new(
@@ -3758,7 +4225,8 @@ def import_finished_downloads(radarr: str, rk: str, sonarr: str, sk: str) -> Non
         for kind, base, key in engines:
             scan_download_drop(base, key, kind)
         for kind, base, key in engines:
-            import_matched_drop(base, key, kind)
+            queued.extend(import_matched_drop(base, key, kind))
+    place_complete_plex_sidecars(radarr, rk, sonarr, sk, queued)
     forget_moved_torrents()
     prune_complete_extras()
     log_complete_drop_contents()
