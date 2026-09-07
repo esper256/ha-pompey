@@ -47,6 +47,7 @@ bash tests/test_engine_unpack.sh
 
 echo "== wait-screen preview (--once) =="
 python3 tests/preview.py --once --port 18099
+python3 tests/preview.py --once --debug --port 18100
 
 echo "== fake wg0 smoke (skip if this VM cannot create veth) =="
 bash tests/test_dev_vpn.sh

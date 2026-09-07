@@ -177,6 +177,40 @@
       margin-top: 0.6rem;
     }
 
+    #debug-consoles {
+      margin-top: 1.25rem;
+      padding: 0.85rem 0.95rem 0.9rem;
+      border: 1px solid var(--line);
+      border-radius: 0.45rem;
+      background: #0c1018;
+    }
+
+    #debug-consoles .debug-head {
+      font-family: ui-sans-serif, system-ui, sans-serif;
+      font-size: 0.75rem;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 0.45rem;
+    }
+
+    #debug-consoles .debug-links a {
+      display: inline-block;
+      font-family: ui-sans-serif, system-ui, sans-serif;
+      font-size: 0.9rem;
+      background: #1a2230;
+      color: var(--fg);
+      border: 1px solid var(--line);
+      border-radius: 0.35rem;
+      padding: 0.45rem 0.8rem;
+      text-decoration: none;
+      margin: 0 0.4rem 0.4rem 0;
+    }
+
+    #debug-consoles .hint {
+      margin-top: 0.35rem;
+    }
+
     #vpn-bw {
       margin-top: 1.35rem;
       padding: 0.85rem 0.95rem 0.75rem;
@@ -269,6 +303,15 @@
       <a id="open-sources-btn" href="#" target="_blank" rel="noopener">Open sources</a>
       <p class="hint" id="open-search-url"></p>
     </div>
+    <section id="debug-consoles" hidden aria-label="Debug engine consoles">
+      <div class="debug-head">Debug consoles</div>
+      <div class="debug-links">
+        <a id="debug-radarr-btn" href="#" target="_blank" rel="noopener">Radarr</a>
+        <a id="debug-sonarr-btn" href="#" target="_blank" rel="noopener">Sonarr</a>
+        <a id="debug-qbit-btn" href="#" target="_blank" rel="noopener">qBittorrent</a>
+      </div>
+      <p class="hint">Hidden movie, TV, and download UIs. Still inside this sidebar’s Ingress — not published on the LAN. Turn Debug off in the app configuration when you are done.</p>
+    </section>
     <section id="vpn-bw" hidden aria-label="Proton tunnel bandwidth">
       <div class="vpn-head">
         <span>Proton tunnel</span>
@@ -309,6 +352,10 @@
     const openSearchBtn = document.getElementById("open-search-btn");
     const openSourcesBtn = document.getElementById("open-sources-btn");
     const openSearchUrl = document.getElementById("open-search-url");
+    const debugConsoles = document.getElementById("debug-consoles");
+    const debugRadarrBtn = document.getElementById("debug-radarr-btn");
+    const debugSonarrBtn = document.getElementById("debug-sonarr-btn");
+    const debugQbitBtn = document.getElementById("debug-qbit-btn");
     const vpnBw = document.getElementById("vpn-bw");
     const vpnIface = document.getElementById("vpn-iface");
     const vpnDownRate = document.getElementById("vpn-down-rate");
@@ -327,6 +374,14 @@
     let vpnLast = null;
     let sawDashboard = false;
     let lastPorts = { search: 5055, sources: 9696 };
+
+    function ingressBase() {
+      let path = location.pathname || "/";
+      if (!path.endsWith("/")) {
+        path = path.replace(/\/[^/]*$/, "/");
+      }
+      return path;
+    }
 
     function isDashboard(data) {
       if (data.need_proton) return false;
@@ -437,6 +492,7 @@
         data.search,
         data.search_port,
         data.sources_port,
+        data.debug,
         data.steps,
         dashboard,
       ]);
@@ -479,6 +535,15 @@
         openSearchUrl.textContent = url + " is search. " + sourcesUrl + " is sources (Prowlarr) — Seerr cannot add indexers. First visit to sources asks you to set a login. If this host is Home Assistant Cloud, use this machine’s LAN IP. Plex is a separate app. Do not put either port on the public internet.";
       } else {
         openSearch.hidden = true;
+      }
+      if (data.debug) {
+        const root = ingressBase();
+        debugConsoles.hidden = false;
+        debugRadarrBtn.href = root + "debug/radarr/";
+        debugSonarrBtn.href = root + "debug/sonarr/";
+        debugQbitBtn.href = root + "debug/qbittorrent/";
+      } else {
+        debugConsoles.hidden = true;
       }
     }
 

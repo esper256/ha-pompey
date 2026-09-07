@@ -10,6 +10,7 @@ import os
 import struct
 import sys
 import threading
+import time
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -38,6 +39,7 @@ rr = load("route_rating", BIN / "route-rating")
 wqc = load("wg_quick_contract", ROOT / "tests/lib/wg_quick_contract.py")
 emitmod = load("pompey_log_emit", BIN / "pompey-log-emit")
 vpnstats = load("pompey_vpn_stats", BIN / "pompey-vpn-stats")
+dbginc = load("write_debug_ingress", BIN / "write-debug-ingress")
 
 
 def any_quality_bundle(profile_id: int = 1, name: str = "Any") -> dict:
@@ -1210,6 +1212,11 @@ class Helpers(unittest.TestCase):
         self.assertIn("Open search", html)
         self.assertIn("Open sources", html)
         self.assertIn("open-sources-btn", html)
+        self.assertIn("debug-consoles", html)
+        self.assertIn("debug/radarr/", html)
+        self.assertIn("debug/sonarr/", html)
+        self.assertIn("debug/qbittorrent/", html)
+        self.assertIn("data.debug", html)
         self.assertIn("search_port", html)
         self.assertIn("sources_port", html)
         self.assertNotIn("location.replace", html)
@@ -1230,6 +1237,11 @@ class Helpers(unittest.TestCase):
         cfg = (ROOT / "pompey/config.yaml").read_text()
         self.assertIn("5055/tcp: 5055", cfg)
         self.assertIn("9696/tcp: 9696", cfg)
+        self.assertIn("debug: false", cfg)
+        self.assertIn("debug: bool", cfg)
+        self.assertNotIn("7878/tcp", cfg)
+        self.assertNotIn("8989/tcp", cfg)
+        self.assertNotIn("8080/tcp", cfg)
         seerr = (ROOT / "pompey/rootfs/etc/services.d/seerr/run").read_text()
         self.assertIn("HOST=0.0.0.0", seerr)
         self.assertNotIn("HOST=127.0.0.1", seerr)
@@ -1237,6 +1249,7 @@ class Helpers(unittest.TestCase):
         self.assertNotIn("plex", docker.lower())
         self.assertIn("\n    git \\\n", docker)
         self.assertIn("\n    xz \\\n", docker)
+        self.assertNotIn("nginx-mod-http-sub", docker)
         self.assertFalse((ROOT / "pompey/rootfs/usr/local/bin/pompey-ingress").exists())
         self.assertFalse((ROOT / "pompey/rootfs/etc/services.d/ingress-proxy").exists())
         self.assertFalse((ROOT / "tests/preview_seerr_ingress.py").exists())
@@ -4330,6 +4343,183 @@ class ProtonSetup(unittest.TestCase):
         self.assertTrue(data["need_proton"])
         self.assertEqual(data["step"], "vpn")
         self.assertIn("Paste", data["label"])
+
+    def test_status_debug_flag_follows_env(self):
+        import tempfile
+        import subprocess
+
+        ready = Path(tempfile.mkdtemp())
+        env = os.environ.copy()
+        env["POMPEY_READY"] = str(ready)
+        env.pop("POMPEY_DEBUG", None)
+        subprocess.run(
+            [sys.executable, str(BIN / "pompey-status"), "ready", "Ready", "100"],
+            check=True,
+            env=env,
+        )
+        data = json.loads((ready / "status.json").read_text())
+        self.assertFalse(data["debug"])
+        env["POMPEY_DEBUG"] = "1"
+        subprocess.run(
+            [sys.executable, str(BIN / "pompey-status"), "ready", "Ready", "100"],
+            check=True,
+            env=env,
+        )
+        data = json.loads((ready / "status.json").read_text())
+        self.assertTrue(data["debug"])
+
+
+class DebugIngress(unittest.TestCase):
+    def test_debug_off_is_404_and_on_proxies_localhost_engines(self):
+        off = dbginc.render(enabled=False, www="/usr/share/pompey")
+        self.assertIn("return 404", off)
+        self.assertNotIn("proxy_pass http://127.0.0.1:7878", off)
+        self.assertNotIn("proxy_pass http://127.0.0.1:8989", off)
+        self.assertNotIn("proxy_pass http://127.0.0.1:8080", off)
+        on = dbginc.render(enabled=True, www="/custom/www")
+        self.assertIn("alias /custom/www/debug-shim.js", on)
+        self.assertIn("proxy_pass http://127.0.0.1:7878/", on)
+        self.assertIn("proxy_pass http://127.0.0.1:8989/", on)
+        self.assertIn("proxy_pass http://127.0.0.1:8080/", on)
+        self.assertIn("/debug/radarr/", on)
+        self.assertIn("/debug/sonarr/", on)
+        self.assertIn("/debug/qbittorrent/", on)
+        self.assertIn("$http_x_ingress_path", on)
+        self.assertIn("Accept-Encoding", on)
+        self.assertNotIn("return 404", on)
+
+    def test_debug_enabled_parses_common_truthy(self):
+        self.assertFalse(dbginc.debug_enabled(""))
+        self.assertFalse(dbginc.debug_enabled("false"))
+        self.assertTrue(dbginc.debug_enabled("1"))
+        self.assertTrue(dbginc.debug_enabled("true"))
+
+    def test_wait_page_debug_links_stay_under_ingress(self):
+        html = (ROOT / "pompey/rootfs/usr/share/pompey/index.html").read_text()
+        self.assertIn("ingressBase", html)
+        self.assertIn('target="_blank"', html)
+        self.assertNotIn("http://\" + location.hostname + \":7878", html)
+        self.assertNotIn(":8080", html)
+
+    def test_preview_debug_pages_are_standins(self):
+        preview = load("preview", ROOT / "tests/preview.py")
+        html, ctype = preview.preview_debug_page("/debug/radarr/")
+        self.assertIn("text/html", ctype)
+        self.assertIn("Radarr", html)
+        api, api_type = preview.preview_debug_page("/debug/radarr/api/v3/system/status")
+        self.assertIn("json", api_type)
+        self.assertIn("Radarr", api)
+        self.assertIsNone(preview.preview_debug_page("/"))
+
+    def test_nginx_debug_proxy_rewrites_ingress_and_stays_off_when_disabled(self):
+        import shutil
+        import socket
+        import subprocess
+        import tempfile
+        from urllib.request import Request, urlopen
+
+        nginx = shutil.which("nginx")
+        if not nginx:
+            self.skipTest("nginx not installed")
+
+        class Fake(BaseHTTPRequestHandler):
+            def log_message(self, *_args):
+                return
+
+            def do_GET(self):
+                if self.path in {"/", "/index.html"}:
+                    body = (
+                        b"<html><head><title>Radarr</title></head>"
+                        b'<body><script src="/Content/app.js"></script></body></html>'
+                    )
+                    ctype = "text/html"
+                elif self.path.startswith("/Content/"):
+                    body = b"asset-ok"
+                    ctype = "application/javascript"
+                elif self.path.startswith("/api/"):
+                    body = b'{"instanceName":"Radarr"}'
+                    ctype = "application/json"
+                else:
+                    self.send_error(404)
+                    return
+                self.send_response(200)
+                self.send_header("Content-Type", ctype)
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+        backend = ThreadingHTTPServer(("127.0.0.1", 0), Fake)
+        threading.Thread(target=backend.serve_forever, daemon=True).start()
+        backend_port = backend.server_address[1]
+        work = Path(tempfile.mkdtemp())
+        sock = socket.socket()
+        sock.bind(("127.0.0.1", 0))
+        listen = sock.getsockname()[1]
+        sock.close()
+        inc = work / "debug.inc"
+        inc.write_text(
+            dbginc.render(enabled=True, www=str(ROOT / "pompey/rootfs/usr/share/pompey"))
+            .replace("127.0.0.1:7878", f"127.0.0.1:{backend_port}")
+        )
+        conf = work / "nginx.conf"
+        (work / "tmp").mkdir()
+        conf.write_text(
+            "\n".join(
+                [
+                    "worker_processes 1;",
+                    f"error_log {work}/error.log info;",
+                    f"pid {work}/nginx.pid;",
+                    "events { worker_connections 32; }",
+                    "http {",
+                    f"  client_body_temp_path {work}/tmp;",
+                    f"  proxy_temp_path {work}/tmp;",
+                    f"  fastcgi_temp_path {work}/tmp;",
+                    f"  uwsgi_temp_path {work}/tmp;",
+                    f"  scgi_temp_path {work}/tmp;",
+                    "  access_log off;",
+                    "  map $http_upgrade $connection_upgrade { default upgrade; '' close; }",
+                    f"  server {{ listen 127.0.0.1:{listen}; include {inc}; }}",
+                    "}\n",
+                ]
+            )
+        )
+        proc = subprocess.Popen(
+            [nginx, "-p", str(work), "-c", str(conf), "-e", str(work / "error.log"), "-g", "daemon off;"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        try:
+            html = ""
+            for _ in range(40):
+                try:
+                    html = urlopen(f"http://127.0.0.1:{listen}/debug/radarr/", timeout=5).read().decode()
+                    break
+                except OSError:
+                    if proc.poll() is not None:
+                        err = (work / "error.log").read_text() if (work / "error.log").is_file() else ""
+                        self.fail(f"nginx exited {proc.returncode}: {err}")
+                    time.sleep(0.05)
+            else:
+                self.fail("nginx did not accept connections")
+            self.assertIn('src="/debug/radarr/Content/app.js"', html)
+            self.assertIn('src="/debug/shim.js"', html)
+            req = Request(
+                f"http://127.0.0.1:{listen}/debug/radarr/",
+                headers={"X-Ingress-Path": "/api/hassio_ingress/tok"},
+            )
+            ingress_html = urlopen(req, timeout=5).read().decode()
+            self.assertIn('src="/api/hassio_ingress/tok/debug/radarr/Content/app.js"', ingress_html)
+            self.assertIn('src="/api/hassio_ingress/tok/debug/shim.js"', ingress_html)
+            api = urlopen(
+                f"http://127.0.0.1:{listen}/debug/radarr/api/v3/system/status",
+                timeout=5,
+            ).read().decode()
+            self.assertIn("Radarr", api)
+        finally:
+            proc.terminate()
+            proc.wait(timeout=5)
+            backend.shutdown()
+            backend.server_close()
 
 
 class TestsNeverUseBitTorrent(unittest.TestCase):

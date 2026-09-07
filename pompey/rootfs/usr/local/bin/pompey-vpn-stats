@@ -100,6 +100,15 @@ def lock_status(path: str) -> int:
     return fd
 
 
+def debug_enabled() -> bool:
+    return os.environ.get("POMPEY_DEBUG", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
 def dashboard_status() -> dict:
     seerr = int(os.environ.get("SEERR_PORT", "5055"))
     sources = int(os.environ.get("PROWLARR_PORT", "9696"))
@@ -113,6 +122,7 @@ def dashboard_status() -> dict:
         "search": True,
         "search_port": seerr,
         "sources_port": sources,
+        "debug": debug_enabled(),
         "steps": [{"id": i, "label": lab, "state": "done"} for i, lab in STEPS],
     }
 
@@ -198,6 +208,7 @@ def write_once() -> int:
             data = dashboard_status()
         else:
             data = heal_dashboard(data)
+        data["debug"] = debug_enabled()
         data["vpn"] = sample()
         try:
             save_status(data)

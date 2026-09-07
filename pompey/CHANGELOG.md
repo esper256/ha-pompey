@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.45
+
+- Home Assistant **Debug** option (off by default). When on, the Pompey sidebar offers the hidden **Radarr**, **Sonarr**, and **qBittorrent** Web UIs through Ingress — not published on the LAN. Use that to see a stuck download. Turn it off when you are done and restart. Rebuild so the banner says **0.2.45**.
+
 ## 0.2.44
 
 - Kid-rated titles were logged as moving into Kid Friendly every minute, but Radarr was given the current Not Kid Friendly path, so the files never moved. Routing now uses Arr’s editor (`rootFolderPath` + `moveFiles`).
