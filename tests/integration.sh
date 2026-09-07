@@ -3,7 +3,9 @@
 # Prowlarr search against a fake Torznab source, then a fake qBittorrent
 # WebUI that writes incomplete/ then complete/. Asserts: incomplete never
 # reaches the library; a finished file does; downloads/ does not keep leftover
-# videos. Does not care whether Arr completed-download handling or housekeep
+# videos. Also looks up World Trigger (TV-14 stays Not Kid Friendly) and
+# Bluey (kid cert → Kid Friendly). There is no request-time folder picker.
+# Does not care whether Arr completed-download handling or housekeep
 # did the rename. Not HAOS. Not Proton. Never starts a torrent client or
 # talks to public BitTorrent nodes.
 set -euo pipefail
@@ -266,6 +268,73 @@ RADARR=http://127.0.0.1:7878
 RADARR_API="$(arr_api "${RADARR}" "${RADARR_KEY}")"
 SONARR_API="$(arr_api "${SONARR}" "${SONARR_KEY}")"
 log "Arr HTTP API ${RADARR_API} / ${SONARR_API}"
+
+log "TV rating route: World Trigger (TV-14) stays Not Kid Friendly; Bluey (TV-Y) is Kid Friendly"
+# Seerr has no Kid vs Not Kid picker. route-rating uses TMDB/Arr certification
+# only. This lookup is the same metadata Sonarr stores after a request.
+export ROUTE_RATING="${BIN}/route-rating"
+ns env \
+  ROUTE_RATING="${ROUTE_RATING}" \
+  SONARR="${SONARR}" \
+  SONARR_KEY="${SONARR_KEY}" \
+  SONARR_API="${SONARR_API}" \
+  python3 - <<'PY'
+import importlib.machinery
+import importlib.util
+import json
+import os
+import urllib.parse
+import urllib.request
+
+loader = importlib.machinery.SourceFileLoader("route_rating", os.environ["ROUTE_RATING"])
+spec = importlib.util.spec_from_loader("route_rating", loader)
+rr = importlib.util.module_from_spec(spec)
+loader.exec_module(rr)
+
+sonarr = os.environ["SONARR"]
+key = os.environ["SONARR_KEY"]
+api = os.environ["SONARR_API"]
+
+
+def lookup(term: str) -> list:
+    q = urllib.parse.quote(term)
+    req = urllib.request.Request(
+        f"{sonarr}{api}/series/lookup?term={q}",
+        headers={"X-Api-Key": key},
+    )
+    with urllib.request.urlopen(req, timeout=60) as resp:
+        return json.loads(resp.read().decode())
+
+
+def pick(rows: list, tmdb: int, name: str) -> dict:
+    want = name.lower()
+    for row in rows:
+        if int(row.get("tmdbId") or 0) == tmdb:
+            return row
+        if want == (row.get("title") or "").lower():
+            return row
+    titles = [r.get("title") for r in rows[:8]]
+    raise SystemExit(f"lookup missed {name} tmdb={tmdb}: {titles}")
+
+world = pick(lookup("World Trigger"), 61628, "World Trigger")
+bluey = pick(lookup("Bluey"), 82739, "Bluey")
+world_cert = rr.title_cert(world)
+bluey_cert = rr.title_cert(bluey)
+print(f"World Trigger certification={world_cert or 'empty'} tmdb={world.get('tmdbId')}")
+print(f"Bluey certification={bluey_cert or 'empty'} tmdb={bluey.get('tmdbId')}")
+if not world_cert:
+    raise SystemExit("World Trigger lookup has no certification; cannot prove TV-14 routing")
+if not bluey_cert:
+    raise SystemExit("Bluey lookup has no certification; cannot prove kid TV routing")
+if rr.kid_cert(world_cert, rr.KID_TV):
+    raise SystemExit(
+        f"World Trigger {world_cert} would route to Kid Friendly; "
+        "household rule is TV-14+ stays general"
+    )
+if not rr.kid_cert(bluey_cert, rr.KID_TV):
+    raise SystemExit(f"Bluey {bluey_cert} would stay Not Kid Friendly; expected a kid cert")
+print("TV cert route ok: World Trigger stays Not Kid Friendly; Bluey is Kid Friendly")
+PY
 
 log "wait for Prowlarr to sync the source into Radarr/Sonarr"
 radarr_indexers="[]"
