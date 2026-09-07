@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 import time
 import urllib.request
 
@@ -37,6 +38,23 @@ def tv_dir() -> str:
 
 def tv_kid_dir() -> str:
     return library_dir("MEDIA_TV_KID", "TV/Kid Friendly")
+
+
+AUTO_FOLDER = "By Rating"
+
+
+def sibling_auto_dir(library_path: str) -> str:
+    """Staging root Seerr uses for 'sort by rating'. Not a Plex library."""
+    parent = library_path.rstrip("/").rsplit("/", 1)[0]
+    return f"{parent}/{AUTO_FOLDER}"
+
+
+def movies_auto_dir() -> str:
+    return sibling_auto_dir(movies_dir())
+
+
+def tv_auto_dir() -> str:
+    return sibling_auto_dir(tv_dir())
 
 
 def radarr_url() -> str:
@@ -135,6 +153,7 @@ def route_library(
     list_url: str,
     kid_root: str,
     gen_root: str,
+    auto_root: str,
     kid_set: set[str],
     label: str,
 ) -> None:
@@ -145,13 +164,17 @@ def route_library(
     location. Editor takes rootFolderPath + moveFiles and computes the dest.
     """
     rows = as_list(http_json("GET", list_url, headers=headers(key)))
-    known_roots = [kid_root, gen_root]
+    known_roots = [kid_root, gen_root, auto_root]
     by_dest: dict[str, list] = {}
     labels: dict = {}
     for item in rows:
         cert = title_cert(item)
         path = item.get("path") or item.get("rootFolderPath") or ""
         if not path:
+            continue
+        # Kid Friendly / Not Kid Friendly are user force picks. Only titles
+        # still in By Rating (Seerr's default) are sorted by certification.
+        if not in_root(str(path), auto_root):
             continue
         want = kid_root if kid_cert(cert, kid_set) else gen_root
         if in_root(path, want):
@@ -201,6 +224,7 @@ def route_movies(key: str) -> None:
         f"{arr_api_root(radarr_url(), key)}/movie",
         movies_kid_dir(),
         movies_dir(),
+        movies_auto_dir(),
         KID_MOVIE,
         "movie",
     )
@@ -212,17 +236,26 @@ def route_series(key: str) -> None:
         f"{arr_api_root(sonarr_url(), key)}/series",
         tv_kid_dir(),
         tv_dir(),
+        tv_auto_dir(),
         KID_TV,
         "series",
     )
 
 
-def main() -> None:
+def run_once() -> None:
+    secrets = json.load(open(secrets_path(), encoding="utf-8"))
+    route_movies(secrets["radarr_api_key"])
+    route_series(secrets["sonarr_api_key"])
+
+
+def main(argv: list[str] | None = None) -> None:
+    once = "--once" in (argv if argv is not None else sys.argv)
+    if once:
+        run_once()
+        return
     while True:
         try:
-            secrets = json.load(open(secrets_path(), encoding="utf-8"))
-            route_movies(secrets["radarr_api_key"])
-            route_series(secrets["sonarr_api_key"])
+            run_once()
         except Exception as exc:  # noqa: BLE001
             log(str(exc))
         time.sleep(60)

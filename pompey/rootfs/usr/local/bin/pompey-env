@@ -67,6 +67,8 @@ mkdir -p \
   "${MEDIA_ROOT}/${MEDIA_TV}" \
   "${MEDIA_ROOT}/${MEDIA_MOVIES_KID}" \
   "${MEDIA_ROOT}/${MEDIA_TV_KID}" \
+  "${MEDIA_ROOT}/${MEDIA_MOVIES%/*}/By Rating" \
+  "${MEDIA_ROOT}/${MEDIA_TV%/*}/By Rating" \
   "${MEDIA_ROOT}/downloads/incomplete" \
   "${MEDIA_ROOT}/downloads/complete"
 chmod 700 "${POMPEY_CONFIG}/wireguard" 2>/dev/null || true

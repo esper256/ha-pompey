@@ -65,6 +65,8 @@ grep -q "Pompey" <<<"${log}"
 test -f "${POMPEY_SECRETS}"
 test -d "${MEDIA_ROOT}/Movies/Not Kid Friendly"
 test -d "${MEDIA_ROOT}/Movies/Kid Friendly"
+test -d "${MEDIA_ROOT}/Movies/By Rating"
+test -d "${MEDIA_ROOT}/TV/By Rating"
 # Secrets must not appear in banner output
 python3 - "${POMPEY_SECRETS}" "${log}" <<'PY'
 import json, sys
@@ -142,6 +144,7 @@ fi
 test -d "${MEDIA_ROOT}/Movies"
 test -d "${MEDIA_ROOT}/Movies/Not Kid Friendly"
 test -d "${MEDIA_ROOT}/Movies/Kid Friendly"
+test -d "${MEDIA_ROOT}/Movies/By Rating"
 python3 - "${POMPEY_SECRETS}" "${POMPEY_CONFIG}" <<'PY'
 import json, pathlib, sys
 secrets = json.load(open(sys.argv[1], encoding="utf-8"))
@@ -268,7 +271,9 @@ grep -Fq "Session\\DefaultSavePath=${MEDIA_ROOT}/downloads/complete" "${POMPEY_C
 grep -Fq "Session\\DefaultSavePath=${MEDIA_ROOT}/downloads/complete" "${POMPEY_CONFIG}/qBittorrent/config/qBittorrent.conf"
 test -d "${MEDIA_ROOT}/Movies/Not Kid Friendly"
 test -d "${MEDIA_ROOT}/Movies/Kid Friendly"
+test -d "${MEDIA_ROOT}/Movies/By Rating"
 test -d "${MEDIA_ROOT}/TV/Not Kid Friendly"
+test -d "${MEDIA_ROOT}/TV/By Rating"
 test -d "${MEDIA_ROOT}/downloads/incomplete"
 export MEDIA_ROOT="${WORK}/media"
 unset MEDIA_MOVIES MEDIA_MOVIES_KID MEDIA_TV MEDIA_TV_KID
@@ -447,6 +452,8 @@ if grep -q "nginx-mod-http-sub" "${ROOT}/pompey/Dockerfile"; then
 fi
 grep -q "debug-consoles" "${ROOT}/pompey/rootfs/usr/share/pompey/index.html"
 grep -q "mountPrefix" "${ROOT}/pompey/rootfs/usr/share/pompey/debug-shim.js"
+grep -q "HTMLScriptElement" "${ROOT}/pompey/rootfs/usr/share/pompey/debug-shim.js"
+grep -q "setAttribute" "${ROOT}/pompey/rootfs/usr/share/pompey/debug-shim.js"
 
 echo "== nginx debug include when HA debug is on =="
 debug_opts="${WORK}/debug-options.json"
@@ -467,6 +474,7 @@ grep -q "/debug/qbittorrent/" "${NGINX_DEBUG_INC}"
 grep -q "X-Ingress-Path" "${NGINX_DEBUG_INC}" || grep -q 'http_x_ingress_path' "${NGINX_DEBUG_INC}"
 grep -q "debug/shim.js" "${NGINX_DEBUG_INC}"
 grep -q 'src="./' "${NGINX_DEBUG_INC}"
+grep -q '.p="./' "${NGINX_DEBUG_INC}"
 if grep -q "__pompey_debug__" "${NGINX_DEBUG_INC}"; then
   echo "debug rewrite must not use a sentinel nginx will not rescan" >&2
   exit 1
@@ -684,6 +692,18 @@ if ! grep -q 'wire-stack" housekeep' "${ROOT}/tests/integration.sh"; then
 fi
 if ! grep -q 'Movies/Not Kid Friendly' "${ROOT}/tests/integration.sh"; then
   echo "integration.sh must add the movie under Movies/Not Kid Friendly" >&2
+  exit 1
+fi
+if ! grep -q 'World Trigger' "${ROOT}/tests/integration.sh"; then
+  echo "integration.sh must prove World Trigger (TV-14) stays Not Kid Friendly" >&2
+  exit 1
+fi
+if ! grep -q 'Bluey' "${ROOT}/tests/integration.sh"; then
+  echo "integration.sh must prove a kid TV cert routes to Kid Friendly" >&2
+  exit 1
+fi
+if ! grep -q -- '--once' "${BIN}/route-rating"; then
+  echo "route-rating must support --once for one-shot routing" >&2
   exit 1
 fi
 if ! grep -q 'incomplete download leaked into the library' "${ROOT}/tests/integration.sh"; then
