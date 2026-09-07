@@ -3348,13 +3348,29 @@ def next_specials_episode(dest_dir: str) -> int:
     return number
 
 
-def title_match_key(text: str) -> str:
-    return re.sub(r"[^a-z0-9]+", "", (text or "").lower())
+def title_match_tokens(text: str) -> list[str]:
+    """Word tokens from a release or Arr title. Dots/Sxx/year are separators."""
+    cleaned = WWW_PREFIX_RE.sub("", text or "")
+    cleaned = YEAR_SUFFIX_RE.sub("", cleaned)
+    cleaned = EPISODE_KEY_RE.sub(" ", cleaned)
+    cleaned = re.sub(r"(?i)\bS\d{1,2}\b", " ", cleaned)
+    cleaned = re.sub(r"[^a-z0-9]+", " ", cleaned.lower())
+    return [part for part in cleaned.split() if part]
+
+
+def tokens_as_sequence(needle: list[str], hay: list[str]) -> bool:
+    if not needle or len(hay) < len(needle):
+        return False
+    size = len(needle)
+    return any(hay[index : index + size] == needle for index in range(len(hay) - size + 1))
 
 
 def best_arr_title_match(label: str, rows: list[dict]) -> dict | None:
-    """Longest Arr title contained in the release name. Never guesses Kid/Not Kid."""
-    hay = title_match_key(WWW_PREFIX_RE.sub("", label or ""))
+    """Longest Arr title whose words appear in the release name. Not a substring.
+
+    'Unknown' must not match UnknownShow. Never guesses Kid vs Not Kid.
+    """
+    hay = title_match_tokens(label)
     if not hay:
         return None
     best: dict | None = None
@@ -3367,12 +3383,13 @@ def best_arr_title_match(label: str, rows: list[dict]) -> dict | None:
         if dest:
             candidates.append(os.path.basename(dest.rstrip("/")))
         for raw in candidates:
-            key = title_match_key(YEAR_SUFFIX_RE.sub("", raw))
-            if len(key) < 3 or key not in hay:
+            needle = title_match_tokens(raw)
+            joined = "".join(needle)
+            if len(joined) < 3 or not tokens_as_sequence(needle, hay):
                 continue
-            if len(key) > best_len:
+            if len(joined) > best_len:
                 best = row
-                best_len = len(key)
+                best_len = len(joined)
     return best
 
 

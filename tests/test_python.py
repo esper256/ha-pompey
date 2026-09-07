@@ -2196,10 +2196,12 @@ class PlexBonusFiles(unittest.TestCase):
         rows = [
             {"id": 1, "title": "Silo", "path": "/tv/Silo"},
             {"id": 2, "title": "The Silo Files", "path": "/tv/The Silo Files"},
+            {"id": 3, "title": "Unknown", "path": "/movies/Unknown"},
         ]
         hit = ws.best_arr_title_match("The.Silo.Files.S00.Specials", rows)
         self.assertEqual(hit["id"], 2)
         self.assertIsNone(ws.best_arr_title_match("Unrelated.S01", rows))
+        self.assertIsNone(ws.best_arr_title_match("UnknownShow.S01.Behind.The.Scenes", rows))
 
 
 class WireStack(unittest.TestCase):
