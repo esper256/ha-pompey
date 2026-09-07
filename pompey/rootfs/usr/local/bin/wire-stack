@@ -1023,6 +1023,8 @@ PROFILE_MAX = "Max"
 PROFILE_ANYTHING = "Anything"
 PROFILE_NAMES = (PROFILE_DEFAULT, PROFILE_MAX, PROFILE_ANYTHING)
 LEGACY_DEFAULT_NAMES = ("HD", "Any")
+DUAL_AUDIO = "Pompey Dual Audio"
+DUAL_AUDIO_SCORE = 15
 # Title CFs. Scores are per-profile; -10000 is a hard reject.
 CUSTOM_FORMATS = (
     (
@@ -1042,7 +1044,7 @@ CUSTOM_FORMATS = (
         r"\b(TrueHD|TRUEHD|DTS[-_. ]?HD(?:MA)?|DTS[-_. ]?X|Atmos|ATMOS|FLAC|LPCM)\b",
     ),
     (
-        "Pompey Dual Audio",
+        DUAL_AUDIO,
         r"\b(Dual[-_. ]Audio|DUAL[-_. ]AUDIO|DualAudio|Multi[-_. ]Audio)\b",
     ),
 )
@@ -1198,11 +1200,12 @@ def household_custom_formats() -> list[dict]:
 def household_format_scores(tier: str) -> dict[str, int]:
     """Per-profile CF scores. Default/Max scores are Recyclarr's once it syncs.
 
-    On a name stub (Recyclarr missing) we only attach original-audio reject.
+    On a name stub (Recyclarr missing) attach original-audio reject and a small
+    Dual-Audio nudge. Recyclarr then owns Default/Max (TRaSH Anime Dual Audio).
     Anything takes CAM; Prefer Proper is a mild tie-break.
     """
     if tier in {PROFILE_DEFAULT, PROFILE_MAX}:
-        return {NOT_ORIGINAL_LANGUAGE: -10000}
+        return {NOT_ORIGINAL_LANGUAGE: -10000, DUAL_AUDIO: DUAL_AUDIO_SCORE}
     return {"Pompey Prefer Proper": 10}
 
 
