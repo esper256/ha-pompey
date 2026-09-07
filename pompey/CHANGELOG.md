@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.46
+
+- Debug Radarr/Sonarr were blank: their current UI loads `/index-<hash>.js` from the site root, so the browser asked Home Assistant for that file (404, `text/plain`) instead of Ingress. Rewrite every root-absolute asset/API path (not only `/Content/`). qBittorrent was already fine. Rebuild so the banner says **0.2.46**, then hard-refresh the debug tab.
+
 ## 0.2.45
 
 - Home Assistant **Debug** option (off by default). When on, the Pompey sidebar offers the hidden **Radarr**, **Sonarr**, and **qBittorrent** Web UIs through Ingress — not published on the LAN. Use that to see a stuck download. Turn it off when you are done and restart. Rebuild so the banner says **0.2.45**.

@@ -89,4 +89,28 @@
     WrappedES.prototype = OrigES.prototype;
     window.EventSource = WrappedES;
   }
+
+  function fixEl(el) {
+    if (!el || !el.getAttribute) return;
+    ["src", "href"].forEach(function (attr) {
+      var value = el.getAttribute(attr);
+      if (!value) return;
+      var next = rewrite(value);
+      if (next !== value) el.setAttribute(attr, next);
+    });
+  }
+
+  if (document.documentElement && window.MutationObserver) {
+    new MutationObserver(function (records) {
+      records.forEach(function (record) {
+        record.addedNodes.forEach(function (node) {
+          if (node.nodeType !== 1) return;
+          fixEl(node);
+          if (node.querySelectorAll) {
+            node.querySelectorAll("[src],[href]").forEach(fixEl);
+          }
+        });
+      });
+    }).observe(document.documentElement, { childList: true, subtree: true });
+  }
 })();

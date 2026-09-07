@@ -459,6 +459,11 @@ grep -q "/debug/sonarr/" "${NGINX_DEBUG_INC}"
 grep -q "/debug/qbittorrent/" "${NGINX_DEBUG_INC}"
 grep -q "X-Ingress-Path" "${NGINX_DEBUG_INC}" || grep -q 'http_x_ingress_path' "${NGINX_DEBUG_INC}"
 grep -q "debug/shim.js" "${NGINX_DEBUG_INC}"
+grep -q 'src="./' "${NGINX_DEBUG_INC}"
+if grep -q "__pompey_debug__" "${NGINX_DEBUG_INC}"; then
+  echo "debug rewrite must not use a sentinel nginx will not rescan" >&2
+  exit 1
+fi
 if grep -q "return 404" "${NGINX_DEBUG_INC}"; then
   echo "debug on must expose engine consoles" >&2
   cat "${NGINX_DEBUG_INC}" >&2
