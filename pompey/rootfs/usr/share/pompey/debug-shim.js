@@ -90,6 +90,38 @@
     window.EventSource = WrappedES;
   }
 
+  // Webpack jsonp does script.src = publicPath + "640-<hash>.js". A
+  // MutationObserver is too late: the browser already requested "/640-….js"
+  // from the Home Assistant host (text/plain 404). Intercept the setter.
+  function patchUrlProp(ctor, prop) {
+    if (!ctor || !ctor.prototype) return;
+    var proto = ctor.prototype;
+    var desc = Object.getOwnPropertyDescriptor(proto, prop);
+    if (!desc || !desc.set) {
+      proto = Object.getPrototypeOf(proto);
+      desc = proto && Object.getOwnPropertyDescriptor(proto, prop);
+    }
+    if (!desc || !desc.set) return;
+    Object.defineProperty(proto, prop, {
+      configurable: true,
+      enumerable: desc.enumerable,
+      get: desc.get,
+      set: function (value) {
+        desc.set.call(this, rewrite(String(value == null ? "" : value)));
+      },
+    });
+  }
+  patchUrlProp(window.HTMLScriptElement, "src");
+  patchUrlProp(window.HTMLLinkElement, "href");
+
+  var origSetAttribute = Element.prototype.setAttribute;
+  Element.prototype.setAttribute = function (name, value) {
+    if ((name === "src" || name === "href") && value != null) {
+      value = rewrite(String(value));
+    }
+    return origSetAttribute.call(this, name, value);
+  };
+
   function fixEl(el) {
     if (!el || !el.getAttribute) return;
     ["src", "href"].forEach(function (attr) {

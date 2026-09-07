@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.48
+
+- Debug Radarr/Sonarr still 404ed webpack chunks (`/640-<hash>.js`) on the Home Assistant host. `/index-<hash>.js` was rewritten; later chunks use webpack `publicPath = "/"`, which ignores `<base href>`. Rewrite that publicPath and intercept `script.src` before the browser fetches. Rebuild so the banner says **0.2.48**, then hard-refresh the debug tab.
+- Seerr PUT `/api/v1/user/1` 400 (`email` is read-only). Grant advanced-request with `{permissions}` only.
+- Seerr’s Root Folder list was a false choice: both library folders were Arr roots, then `route-rating` overwrote the pick from certification. Default is now **By Rating** (not a Plex library). Leave that selected to sort by Arr/TMDB cert. **Kid Friendly** / **Not Kid Friendly** stay put. Same for movies and TV. Leftover Arr roots from older defaults (`/media/TV`, `/media/Kid Friendly TV`, `/media/Movies`, `/media/Kid Friendly Movies`, and flattened Not Kid paths) are moved off and deleted so the dropdown is only those three. Rebuild so the banner says **0.2.48**.
+
 ## 0.2.47
 
 - Debug Radarr/Sonarr were blank: their current UI loads `/index-<hash>.js` from the site root, so the browser asked Home Assistant for that file (404, `text/plain`) instead of Ingress. Rewrite every root-absolute asset/API path (not only `/Content/`). qBittorrent was already fine. Rebuild so the banner says **0.2.47**, then hard-refresh the debug tab.

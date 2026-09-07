@@ -270,8 +270,9 @@ SONARR_API="$(arr_api "${SONARR}" "${SONARR_KEY}")"
 log "Arr HTTP API ${RADARR_API} / ${SONARR_API}"
 
 log "TV rating route: World Trigger (TV-14) stays Not Kid Friendly; Bluey (TV-Y) is Kid Friendly"
-# Seerr has no Kid vs Not Kid picker. route-rating uses TMDB/Arr certification
-# only. This lookup is the same metadata Sonarr stores after a request.
+# By Rating sorts on TMDB/Arr certification. This lookup is the same metadata
+# Sonarr stores after a request on the default root. Kid / Not Kid Friendly
+# force picks skip this sort.
 export ROUTE_RATING="${BIN}/route-rating"
 ns env \
   ROUTE_RATING="${ROUTE_RATING}" \
