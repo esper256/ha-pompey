@@ -472,7 +472,8 @@ fetch_recyclarr() {
   fi
   local dest="${POMPEY_ENGINES}/recyclarr"
   local required=1
-  if [[ -x "${dest}" ]]; then
+  # Directory + launcher. A lone apphost at dest looks for dest.dll (exit 154).
+  if [[ -x "${dest}/recyclarr" ]]; then
     required=0
     local identity
     identity="$(probe_identity "${recyclarr_url}")"
@@ -484,6 +485,9 @@ fetch_recyclarr() {
       bashio::log.warning "Recyclarr could not check upstream; keeping the installed copy"
       return 0
     fi
+  elif [[ -f "${dest}" && -x "${dest}" ]]; then
+    required=0
+    bashio::log.info "Replacing single-file Recyclarr with the full package"
   fi
   bashio::log.info "Downloading Recyclarr (linux-musl/${servarr_arch})"
   fetch_status fetch "Downloading Recyclarr" 50
@@ -509,7 +513,7 @@ fetch_recyclarr() {
   filename="$(header_filename "${headers}")"
   identity="$(identity_from_headers "${headers}" "${effective}")"
   bashio::log.info "Recyclarr artifact ${filename:-unknown} (${effective})"
-  if [[ "${required}" -eq 0 ]] && identity_current recyclarr "${dest}" "${identity}"; then
+  if [[ -x "${dest}/recyclarr" ]] && identity_current recyclarr "${dest}" "${identity}"; then
     rm -rf "${staging}"
     bashio::log.info "Recyclarr current"
     return 0
@@ -551,7 +555,12 @@ fetch_recyclarr() {
     return 0
   fi
   chmod 755 "${bin}"
-  if install_staged recyclarr "${dest}" "${bin}" "${identity}" "${required}"; then
+  # Keep sibling .dll / deps. The apphost looks for recyclarr.dll next to itself.
+  local package="${unpack}"
+  if [[ "$(dirname "${bin}")" != "${unpack}" ]]; then
+    package="$(dirname "${bin}")"
+  fi
+  if install_staged recyclarr "${dest}" "${package}" "${identity}" "${required}"; then
     bashio::log.info "Recyclarr ready (ELF) under ${dest}"
   fi
   rm -rf "${staging}"

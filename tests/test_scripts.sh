@@ -105,9 +105,9 @@ test -f "${POMPEY_CONFIG}/qBittorrent/qBittorrent.conf"
 grep -q "BindAddress>127.0.0.1" "${POMPEY_CONFIG}/sonarr/config.xml"
 grep -q "BindAddress>127.0.0.1" "${POMPEY_CONFIG}/radarr/config.xml"
 grep -Fq 'BindAddress>*</BindAddress>' "${POMPEY_CONFIG}/prowlarr/config.xml"
-grep -q "<LogLevel>info</LogLevel>" "${POMPEY_CONFIG}/sonarr/config.xml"
-grep -q "<LogLevel>info</LogLevel>" "${POMPEY_CONFIG}/radarr/config.xml"
-grep -q "<LogLevel>info</LogLevel>" "${POMPEY_CONFIG}/prowlarr/config.xml"
+grep -q "<LogLevel>warn</LogLevel>" "${POMPEY_CONFIG}/sonarr/config.xml"
+grep -q "<LogLevel>warn</LogLevel>" "${POMPEY_CONFIG}/radarr/config.xml"
+grep -q "<LogLevel>warn</LogLevel>" "${POMPEY_CONFIG}/prowlarr/config.xml"
 if grep -q "BindAddress>127.0.0.1" "${POMPEY_CONFIG}/prowlarr/config.xml"; then
   echo "Prowlarr must not bind only localhost" >&2
   exit 1
@@ -166,9 +166,9 @@ if grep -qi "AuthenticationMethod>None" "${POMPEY_CONFIG}/prowlarr/config.xml"; 
   cat "${POMPEY_CONFIG}/prowlarr/config.xml" >&2
   exit 1
 fi
-grep -q "<LogLevel>info</LogLevel>" "${POMPEY_CONFIG}/prowlarr/config.xml"
+grep -q "<LogLevel>warn</LogLevel>" "${POMPEY_CONFIG}/prowlarr/config.xml"
 
-echo "== write-engine-configs pins existing Arr LogLevel to info =="
+echo "== write-engine-configs pins existing Arr LogLevel to warn =="
 python3 - "${POMPEY_CONFIG}/sonarr/config.xml" <<'PY'
 from pathlib import Path
 import sys
@@ -184,10 +184,10 @@ Path(sys.argv[1]).write_text(
 )
 PY
 run "${BIN}/write-engine-configs"
-grep -q "<LogLevel>info</LogLevel>" "${POMPEY_CONFIG}/sonarr/config.xml"
+grep -q "<LogLevel>warn</LogLevel>" "${POMPEY_CONFIG}/sonarr/config.xml"
 grep -q "keep-sonarr" "${POMPEY_CONFIG}/sonarr/config.xml"
 if grep -qi "<LogLevel>debug</LogLevel>" "${POMPEY_CONFIG}/sonarr/config.xml"; then
-  echo "existing Arr debug log level must be pinned to info" >&2
+  echo "existing Arr debug log level must be pinned to warn" >&2
   cat "${POMPEY_CONFIG}/sonarr/config.xml" >&2
   exit 1
 fi
@@ -201,7 +201,7 @@ Path(sys.argv[1]).write_text(
   <BindAddress>127.0.0.1</BindAddress>
   <Port>8989</Port>
   <ApiKey>keep-sonarr</ApiKey>
-  <LogLevel>info</LogLevel>
+  <LogLevel>warn</LogLevel>
   <InstanceName>Sonarr</InstanceName>
   <UpdateAutomatically>True</UpdateAutomatically>
   <UpdateMechanism>BuiltIn</UpdateMechanism>
@@ -602,6 +602,12 @@ for named in radarr sonarr prowlarr prowlarr-arr seerr nginx; do
 done
 grep -q 'pompey-log tail' "${svc}/qbittorrent/run"
 grep -q 'qBittorrent/logs' "${svc}/qbittorrent/run"
+grep -q 'tail -n 0' "${BIN}/pompey-log"
+if grep -q 'tail -n +1' "${BIN}/pompey-log"; then
+  echo "pompey-log tail must not replay the whole file on start" >&2
+  exit 1
+fi
+grep -q 'dest}/recyclarr' "${BIN}/fetch-engines"
 test -x "${BIN}/pompey-log"
 test -x "${BIN}/pompey-log-emit"
 test -x "${BIN}/prowlarr-arr-proxy"
@@ -693,11 +699,22 @@ if grep -q 'already exists' <<<"${debug}"; then
   printf '%s\n' "${debug}" >&2
   exit 1
 fi
-secret="$(python3 "${BIN}/pompey-log-emit" Sonarr '[Warn] HTTP request failed: [GET] http://127.0.0.1:9698/4/api?apikey=supersecretkey&t=tvsearch' 2>&1)"
+secret="$(python3 "${BIN}/pompey-log-emit" Sonarr '[Warn] DiskScanService: Folder is empty apikey=supersecretkey' 2>&1)"
 grep -q 'apikey=(redacted)' <<<"${secret}"
 if grep -q 'supersecretkey' <<<"${secret}"; then
   echo "apikey must be redacted" >&2
   printf '%s\n' "${secret}" >&2
+  exit 1
+fi
+flake="$(printf '%s\n' '[Warn] HttpClient: HTTP Error - Res: 429' '[Info] ReleaseSearchService: Searching indexer(s)' | python3 "${BIN}/pompey-log-emit" Prowlarr 2>&1)"
+if grep -q 'HTTP Error' <<<"${flake}"; then
+  echo "indexer HTTP flakes must not reach the app log" >&2
+  printf '%s\n' "${flake}" >&2
+  exit 1
+fi
+if grep -q 'ReleaseSearchService' <<<"${flake}"; then
+  echo "indexer search info must not reach the app log" >&2
+  printf '%s\n' "${flake}" >&2
   exit 1
 fi
 

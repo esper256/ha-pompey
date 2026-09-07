@@ -54,7 +54,11 @@ def recyclarr_bin() -> str:
     override = env("POMPEY_RECYCLARR")
     if override:
         return override
-    return os.path.join(env("POMPEY_ENGINES", "/data/engines"), "recyclarr")
+    root = os.path.join(env("POMPEY_ENGINES", "/data/engines"), "recyclarr")
+    nested = os.path.join(root, "recyclarr")
+    if os.path.isfile(nested) and os.access(nested, os.X_OK):
+        return nested
+    return root
 
 
 def load_secrets() -> dict:

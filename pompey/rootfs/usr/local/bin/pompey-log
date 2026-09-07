@@ -69,7 +69,9 @@ case "${cmd}" in
       fi
     done
     log info "${name} file log ${file}"
-    tail -n +1 -F "${file}" 2>/dev/null | emit_py "${name}"
+    # Follow new lines only. +1 replays the whole file on every add-on start
+    # (weeks of qBittorrent history in the HA log).
+    tail -n 0 -F "${file}" 2>/dev/null | emit_py "${name}"
     ;;
   *)
     printf 'usage: pompey-log start|finish NAME [exitcode] [signal]\n' >&2
