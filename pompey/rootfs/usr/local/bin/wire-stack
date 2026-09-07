@@ -60,6 +60,16 @@ def after_download() -> str:
     return "stop_sharing"
 
 
+def parse_int(value) -> int | None:
+    if value in (None, "", 0, "0"):
+        return None
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        return None
+    return number if number > 0 else None
+
+
 def as_list(value):
     """HTTP JSON is usually an array of objects; stubs and error bodies often are not.
 
@@ -297,6 +307,9 @@ def seerr_api_key_from_disk() -> str:
 # REQUEST_ADVANCED (8192) is what shows the quality-profile dropdown on a request.
 SEERR_HOUSEHOLD_PERMS = 32 + 128 + 256 + 512 + 8192
 SEERR_REQUEST_ADVANCED = 8192
+# Seerr MediaRequestStatus. Declined stays in the list; Available/Completed stay
+# open until the household removes the request (the ticket, not Clear Data).
+SEERR_REQUEST_DECLINED = 3
 
 
 def log(msg: str, level: str = "INFO") -> None:
@@ -1045,7 +1058,7 @@ CUSTOM_FORMATS = (
     ),
     (
         DUAL_AUDIO,
-        r"\b(Dual[-_. ]Audio|DUAL[-_. ]AUDIO|DualAudio|Multi[-_. ]Audio)\b",
+        r"\b(Dual[-_. ]?Audio|DUAL[-_. ]?AUDIO|DualAudio|Multi[-_. ]?Audio|DUAL|JA[-+&/]+EN|EN[-+&/]+JA)\b",
     ),
 )
 
@@ -2128,6 +2141,266 @@ def retry_unfilled_titles(radarr: str, radarr_key: str, sonarr: str, sonarr_key:
             log(f"could not retry episode search: {exc}", "WARNING")
 
 
+def seerr_request_headers() -> dict | None:
+    key = seerr_api_key_from_disk()
+    if not key:
+        return None
+    return {"X-API-Key": key, "Content-Type": "application/json"}
+
+
+def load_open_seerr_requests() -> list[dict] | None:
+    """Seerr request rows that still want a better file. None if Seerr cannot be read.
+
+    Removing the request (Requests page) is the household close-out. Declined
+    stays listed but is closed. Fail closed: a 403/5xx must not unmonitor.
+    """
+    headers = seerr_request_headers()
+    if not headers:
+        return None
+    rows: list[dict] = []
+    skip = 0
+    take = 50
+    while skip <= 2000:
+        try:
+            payload = http(
+                "GET",
+                f"{seerr_url()}/api/v1/request?take={take}&skip={skip}&filter=all&sort=added",
+                headers=headers,
+            )
+        except RuntimeError as exc:
+            log(f"seerr requests: {exc}", "WARNING")
+            return None
+        if isinstance(payload, list):
+            batch = as_list(payload)
+        elif isinstance(payload, dict) and "results" in payload:
+            batch = as_list(payload.get("results"))
+        else:
+            log("seerr requests: unexpected payload; not closing or upgrading", "WARNING")
+            return None
+        for item in batch:
+            status = parse_int(item.get("status"))
+            if status == SEERR_REQUEST_DECLINED:
+                continue
+            rows.append(item)
+        if len(batch) < take:
+            return rows
+        skip += take
+    return rows
+
+
+def open_seerr_upgrade_keys(requests: list[dict]) -> set[str]:
+    keys: set[str] = set()
+    for item in requests:
+        media = item.get("media") if isinstance(item.get("media"), dict) else {}
+        media_type = str(media.get("mediaType") or item.get("type") or "").lower()
+        movie = media_type in {"movie", "movies"}
+        ext = parse_int(media.get("externalServiceId"))
+        if ext:
+            keys.add(f"{'movie' if movie else 'series'}:{ext}")
+        tmdb = parse_int(media.get("tmdbId"))
+        if tmdb:
+            keys.add(f"tmdb:{'movie' if movie else 'series'}:{tmdb}")
+        tvdb = parse_int(media.get("tvdbId"))
+        if tvdb and not movie:
+            keys.add(f"tvdb:{tvdb}")
+    return keys
+
+
+def remembered_arr_upgrade_ids(keys: set[str]) -> list[str]:
+    return sorted(key for key in keys if key.startswith("movie:") or key.startswith("series:"))
+
+
+def request_covers_movie(movie: dict, keys: set[str]) -> bool:
+    mid = parse_int(movie.get("id"))
+    if mid is not None and f"movie:{mid}" in keys:
+        return True
+    tmdb = parse_int(movie.get("tmdbId"))
+    return tmdb is not None and f"tmdb:movie:{tmdb}" in keys
+
+
+def request_covers_episode(episode: dict, keys: set[str]) -> bool:
+    series = episode.get("series") if isinstance(episode.get("series"), dict) else {}
+    sid = parse_int(episode.get("seriesId") or series.get("id"))
+    if sid is not None and f"series:{sid}" in keys:
+        return True
+    tvdb = parse_int(series.get("tvdbId") or episode.get("tvdbId"))
+    if tvdb is not None and f"tvdb:{tvdb}" in keys:
+        return True
+    tmdb = parse_int(series.get("tmdbId") or episode.get("tmdbId"))
+    return tmdb is not None and f"tmdb:series:{tmdb}" in keys
+
+
+def set_arr_monitored(base: str, api_key: str, endpoint: str, item_id: int, monitored: bool):
+    item = http(
+        "GET",
+        f"{base}/{endpoint}/{item_id}",
+        headers=arr_headers(api_key),
+    )
+    if not isinstance(item, dict):
+        return None
+    if item.get("monitored") is monitored:
+        return item
+    item["monitored"] = monitored
+    return http(
+        "PUT",
+        f"{base}/{endpoint}/{item_id}",
+        item,
+        headers=arr_headers(api_key),
+    )
+
+
+def unmonitor_closed_seerr_requests(
+    radarr: str, radarr_key: str, sonarr: str, sonarr_key: str
+) -> None:
+    """Stop Arr upgrades after the household removes the Seerr request.
+
+    Only titles we previously saw on an open request. Arr-only rows and a
+    Seerr read failure stay monitored.
+    """
+    requests = load_open_seerr_requests()
+    if requests is None:
+        return
+    current = remembered_arr_upgrade_ids(open_seerr_upgrade_keys(requests))
+    state = _load_quiet()
+    previous = state.get("seerr-upgrade-ids")
+    if not isinstance(previous, list):
+        previous = []
+    prev_set = {str(item) for item in previous if item}
+    cur_set = set(current)
+    failed: set[str] = set()
+    for key in sorted(prev_set - cur_set):
+        kind, _, raw = key.partition(":")
+        item_id = parse_int(raw)
+        if item_id is None or kind not in {"movie", "series"}:
+            continue
+        endpoint = "movie" if kind == "movie" else "series"
+        base, api_key = (radarr, radarr_key) if kind == "movie" else (sonarr, sonarr_key)
+        try:
+            saved = set_arr_monitored(base, api_key, endpoint, item_id, False)
+        except RuntimeError as exc:
+            log(f"could not stop upgrades for {key}: {exc}", "WARNING")
+            failed.add(key)
+            continue
+        title = ""
+        if isinstance(saved, dict):
+            title = str(saved.get("title") or "")
+        label = title or key
+        log(f"stopped looking for a better copy of {label} (Seerr request removed)")
+    stored = sorted(cur_set | failed)
+    if stored != previous:
+        state = _load_quiet()
+        state["seerr-upgrade-ids"] = stored
+        _save_quiet(state)
+
+
+def prowlarr_source_fingerprint() -> str | None:
+    try:
+        secrets = load_secrets()
+    except (OSError, RuntimeError, KeyError, TypeError, json.JSONDecodeError):
+        return None
+    key = str(secrets.get("prowlarr_api_key") or "").strip()
+    if not key:
+        return None
+    try:
+        rows = as_list(http("GET", f"{prowlarr_url()}/api/v1/indexer", headers=arr_headers(key)))
+    except RuntimeError as exc:
+        log(f"could not read Prowlarr sources: {exc}", "WARNING")
+        return None
+    ids = []
+    for item in rows:
+        if item.get("enable") is not True:
+            continue
+        iid = parse_int(item.get("id"))
+        if iid is not None:
+            ids.append(str(iid))
+    return ",".join(sorted(ids))
+
+
+def wanted_cutoff_records(base: str, api_key: str) -> list[dict] | None:
+    try:
+        payload = http(
+            "GET",
+            f"{base}/wanted/cutoff?page=1&pageSize=50&sortKey=title",
+            headers=arr_headers(api_key),
+        )
+    except RuntimeError as exc:
+        if "404" in str(exc):
+            return []
+        log(f"cutoff unmet: {exc}", "WARNING")
+        return None
+    return as_list(payload)
+
+
+def retry_cutoff_unmet(radarr: str, radarr_key: str, sonarr: str, sonarr_key: str) -> None:
+    """Search already-imported titles that are still below Default/Max cutoff.
+
+    Runs when the Prowlarr source set changes (and once after this feature
+    first wires). RSS still catches later announcements. Only titles with an
+    open Seerr request are searched — remove the request to opt out.
+    """
+    if arr_search_in_flight(radarr, radarr_key) or arr_search_in_flight(sonarr, sonarr_key):
+        return
+    requests = load_open_seerr_requests()
+    if requests is None:
+        return
+    fingerprint = prowlarr_source_fingerprint()
+    if fingerprint is None:
+        return
+    state = _load_quiet()
+    if state.get("cutoff-sources") == fingerprint:
+        return
+    keys = open_seerr_upgrade_keys(requests)
+    movie_ids: list[int] = []
+    episode_ids: list[int] = []
+    movies = wanted_cutoff_records(radarr, radarr_key)
+    episodes = wanted_cutoff_records(sonarr, sonarr_key)
+    if movies is None or episodes is None:
+        return
+    for item in movies:
+        mid = parse_int(item.get("id"))
+        if mid is not None and request_covers_movie(item, keys):
+            movie_ids.append(mid)
+    for item in episodes:
+        eid = parse_int(item.get("id"))
+        if eid is not None and request_covers_episode(item, keys):
+            episode_ids.append(eid)
+    movie_ids = movie_ids[:8]
+    episode_ids = episode_ids[:8]
+    try:
+        if movie_ids:
+            http(
+                "POST",
+                f"{radarr}/command",
+                {"name": "MoviesSearch", "movieIds": movie_ids},
+                headers=arr_headers(radarr_key),
+            )
+            log(
+                f"searching for a better copy of {len(movie_ids)} movie(s) still requested in Seerr"
+            )
+        if episode_ids:
+            http(
+                "POST",
+                f"{sonarr}/command",
+                {"name": "EpisodeSearch", "episodeIds": episode_ids},
+                headers=arr_headers(sonarr_key),
+            )
+            log(
+                f"searching for a better copy of {len(episode_ids)} episode(s) still requested in Seerr"
+            )
+    except RuntimeError as exc:
+        log(f"could not search cutoff unmet: {exc}", "WARNING")
+        return
+    state = _load_quiet()
+    state["cutoff-sources"] = fingerprint
+    _save_quiet(state)
+
+
+def improve_existing_requests(radarr: str, radarr_key: str, sonarr: str, sonarr_key: str) -> None:
+    """Close-out unmonitor, then one cutoff poke when sources changed."""
+    unmonitor_closed_seerr_requests(radarr, radarr_key, sonarr, sonarr_key)
+    retry_cutoff_unmet(radarr, radarr_key, sonarr, sonarr_key)
+
+
 def qbit_category(name: str, save_path: str) -> None:
     data = urllib.parse.urlencode({"category": name, "savePath": save_path}).encode()
     try:
@@ -3168,6 +3441,7 @@ def main() -> int:
 
     configure_seerr(secrets, rp, sp, sl)
     tickle_seerr_availability()
+    improve_existing_requests(radarr, rk, sonarr, sk)
     port = os.environ.get("SEERR_PORT", "5055")
     sources = os.environ.get("PROWLARR_PORT", "9696")
     log(f"search is on 0.0.0.0:{port}; sources on 0.0.0.0:{sources}; Ingress stays Pompey")
@@ -3199,6 +3473,7 @@ def import_finished_downloads(radarr: str, rk: str, sonarr: str, sk: str) -> Non
             log_stuck_imports(base, key, kind)
             log_titles_waiting_for_library(base, key, kind)
         retry_unfilled_titles(radarr, rk, sonarr, sk)
+        improve_existing_requests(radarr, rk, sonarr, sk)
         return
     videos = count_complete_videos()
     searching = arr_search_in_flight(radarr, rk) or arr_search_in_flight(sonarr, sk)
@@ -3222,6 +3497,7 @@ def import_finished_downloads(radarr: str, rk: str, sonarr: str, sk: str) -> Non
         log_stuck_imports(base, key, kind)
         log_titles_waiting_for_library(base, key, kind)
     retry_unfilled_titles(radarr, rk, sonarr, sk)
+    improve_existing_requests(radarr, rk, sonarr, sk)
 
 
 def engines_checked_path() -> str:
