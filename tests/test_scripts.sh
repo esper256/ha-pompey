@@ -447,6 +447,8 @@ if grep -q "nginx-mod-http-sub" "${ROOT}/pompey/Dockerfile"; then
 fi
 grep -q "debug-consoles" "${ROOT}/pompey/rootfs/usr/share/pompey/index.html"
 grep -q "mountPrefix" "${ROOT}/pompey/rootfs/usr/share/pompey/debug-shim.js"
+grep -q "HTMLScriptElement" "${ROOT}/pompey/rootfs/usr/share/pompey/debug-shim.js"
+grep -q "setAttribute" "${ROOT}/pompey/rootfs/usr/share/pompey/debug-shim.js"
 
 echo "== nginx debug include when HA debug is on =="
 debug_opts="${WORK}/debug-options.json"
@@ -467,6 +469,7 @@ grep -q "/debug/qbittorrent/" "${NGINX_DEBUG_INC}"
 grep -q "X-Ingress-Path" "${NGINX_DEBUG_INC}" || grep -q 'http_x_ingress_path' "${NGINX_DEBUG_INC}"
 grep -q "debug/shim.js" "${NGINX_DEBUG_INC}"
 grep -q 'src="./' "${NGINX_DEBUG_INC}"
+grep -q '.p="./' "${NGINX_DEBUG_INC}"
 if grep -q "__pompey_debug__" "${NGINX_DEBUG_INC}"; then
   echo "debug rewrite must not use a sentinel nginx will not rescan" >&2
   exit 1

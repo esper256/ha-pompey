@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.48
+
+- Debug Radarr/Sonarr still 404ed webpack chunks (`/640-<hash>.js`) on the Home Assistant host. `/index-<hash>.js` was rewritten; later chunks use webpack `publicPath = "/"`, which ignores `<base href>`. Rewrite that publicPath and intercept `script.src` before the browser fetches. Rebuild so the banner says **0.2.48**, then hard-refresh the debug tab.
+- Seerr PUT `/api/v1/user/1` 400 (`email` is read-only). Grant advanced-request with `{permissions}` only.
+
 ## 0.2.47
 
 - Debug Radarr/Sonarr were blank: their current UI loads `/index-<hash>.js` from the site root, so the browser asked Home Assistant for that file (404, `text/plain`) instead of Ingress. Rewrite every root-absolute asset/API path (not only `/Content/`). qBittorrent was already fine. Rebuild so the banner says **0.2.47**, then hard-refresh the debug tab.

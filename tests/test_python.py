@@ -2485,6 +2485,26 @@ class WireStack(unittest.TestCase):
         ]
         self.assertTrue(user_puts)
         self.assertNotIn("id", user_puts[0][3] or {})
+        self.assertNotIn("email", user_puts[0][3] or {})
+        self.assertEqual(
+            set((user_puts[0][3] or {}).keys()),
+            {"permissions"},
+        )
+
+    def test_seerr_permission_update_omits_readonly_email(self):
+        user = {
+            "id": 1,
+            "email": "plex@local",
+            "permissions": 32 + 128,
+            "displayName": "Admin",
+        }
+        payload = ws.seerr_permission_update(user)
+        self.assertEqual(payload, {"permissions": 32 + 128 + ws.SEERR_REQUEST_ADVANCED})
+        self.assertIsNone(
+            ws.seerr_permission_update(
+                {"id": 1, "email": "plex@local", "permissions": ws.SEERR_REQUEST_ADVANCED}
+            )
+        )
 
     def test_not_original_language_cf_uses_arr_language_id(self):
         spec = ws.not_original_language_format()["specifications"][0]
@@ -4442,6 +4462,7 @@ class DebugIngress(unittest.TestCase):
         self.assertIn("$http_x_ingress_path", on)
         self.assertIn('src="./', on)
         self.assertIn('src="/', on)
+        self.assertIn('.p="./', on)
         self.assertNotIn("__pompey_debug__", on)
         self.assertIn("Accept-Encoding", on)
         self.assertNotIn("return 404", on)
@@ -4494,7 +4515,10 @@ class DebugIngress(unittest.TestCase):
                     )
                     ctype = "text/html"
                 elif self.path.startswith("/index-") or self.path.startswith("/Content/"):
-                    body = b'import("/api/v3/system/status");'
+                    body = b'o.p="/";import("/api/v3/system/status");'
+                    ctype = "application/javascript"
+                elif self.path.startswith("/640-"):
+                    body = b"window.__pompeyChunk = true;"
                     ctype = "application/javascript"
                 elif self.path.startswith("/api/"):
                     body = b'{"instanceName":"Radarr"}'
@@ -4584,6 +4608,13 @@ class DebugIngress(unittest.TestCase):
                 timeout=5,
             ).read().decode()
             self.assertIn('import("./api/v3/system/status")', js)
+            self.assertIn('o.p="./"', js)
+            self.assertNotIn('o.p="/"', js)
+            chunk = urlopen(
+                f"http://127.0.0.1:{listen}/debug/radarr/640-6947d4b0d5ef9ee0fef3.js",
+                timeout=5,
+            ).read().decode()
+            self.assertIn("__pompeyChunk", chunk)
             api = urlopen(
                 f"http://127.0.0.1:{listen}/debug/radarr/api/v3/system/status",
                 timeout=5,
