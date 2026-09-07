@@ -22,6 +22,9 @@ export POMPEY_LAN_FILE="${WORK}/etc/pompey-lan-networks"
 export POMPEY_RESOLV="${WORK}/etc/resolv.conf"
 export POMPEY_NGINX_RUN="${WORK}/run/nginx"
 export NGINX_INGRESS_CONF="${WORK}/etc/nginx/http.d/ingress.conf"
+export NGINX_DEBUG_INC="${WORK}/etc/nginx/http.d/ingress-debug.inc"
+export NGINX_MODULES_CONF="${WORK}/etc/nginx/modules-enabled.conf"
+export POMPEY_WWW="${ROOT}/pompey/rootfs/usr/share/pompey"
 export MEDIA_ROOT="${WORK}/media"
 export IPTABLES_LOG="${WORK}/iptables.log"
 mkdir -p "${WORK}/bin"
@@ -104,6 +107,8 @@ test -f "${POMPEY_CONFIG}/prowlarr/config.xml"
 test -f "${POMPEY_CONFIG}/qBittorrent/qBittorrent.conf"
 grep -q "BindAddress>127.0.0.1" "${POMPEY_CONFIG}/sonarr/config.xml"
 grep -q "BindAddress>127.0.0.1" "${POMPEY_CONFIG}/radarr/config.xml"
+grep -q "<UrlBase></UrlBase>" "${POMPEY_CONFIG}/sonarr/config.xml"
+grep -q "<UrlBase></UrlBase>" "${POMPEY_CONFIG}/radarr/config.xml"
 grep -Fq 'BindAddress>*</BindAddress>' "${POMPEY_CONFIG}/prowlarr/config.xml"
 grep -q "<LogLevel>warn</LogLevel>" "${POMPEY_CONFIG}/sonarr/config.xml"
 grep -q "<LogLevel>warn</LogLevel>" "${POMPEY_CONFIG}/radarr/config.xml"
@@ -415,10 +420,50 @@ echo "== nginx ingress port from stub =="
 run "${INIT}/20-nginx.sh"
 grep -q "listen 8099" "${NGINX_INGRESS_CONF}"
 grep -qv "%%port%%" "${NGINX_INGRESS_CONF}"
+grep -qv "%%debug_inc%%" "${NGINX_INGRESS_CONF}"
 grep -q "status.json" "${NGINX_INGRESS_CONF}"
 grep -q "setup/proton" "${NGINX_INGRESS_CONF}"
 grep -q "access_log off" "${NGINX_INGRESS_CONF}"
 grep -q "access_log off" "${ROOT}/pompey/rootfs/etc/nginx/http.d/ingress.conf"
+grep -q "allow 127.0.0.1" "${NGINX_INGRESS_CONF}"
+test -f "${NGINX_DEBUG_INC}"
+grep -q "return 404" "${NGINX_DEBUG_INC}"
+if grep -q "proxy_pass http://127.0.0.1:7878" "${NGINX_DEBUG_INC}"; then
+  echo "debug off must not proxy Radarr" >&2
+  cat "${NGINX_DEBUG_INC}" >&2
+  exit 1
+fi
+grep -q "debug: false" "${ROOT}/pompey/config.yaml"
+grep -q "debug: bool" "${ROOT}/pompey/config.yaml"
+grep -q "debug-consoles" "${ROOT}/pompey/rootfs/usr/share/pompey/index.html"
+grep -q "mountPrefix" "${ROOT}/pompey/rootfs/usr/share/pompey/debug-shim.js"
+
+echo "== nginx debug include when HA debug is on =="
+debug_opts="${WORK}/debug-options.json"
+python3 - "${ROOT}/tests/options.json" "${debug_opts}" <<'PY'
+import json, sys
+data = json.loads(open(sys.argv[1], encoding="utf-8").read())
+data["debug"] = True
+open(sys.argv[2], "w", encoding="utf-8").write(json.dumps(data, indent=2) + "\n")
+PY
+cp "${ROOT}/pompey/rootfs/etc/nginx/http.d/ingress.conf" "${NGINX_INGRESS_CONF}"
+BASHIO_OPTIONS="${debug_opts}" run "${INIT}/20-nginx.sh"
+grep -q "proxy_pass http://127.0.0.1:7878/" "${NGINX_DEBUG_INC}"
+grep -q "proxy_pass http://127.0.0.1:8989/" "${NGINX_DEBUG_INC}"
+grep -q "proxy_pass http://127.0.0.1:8080/" "${NGINX_DEBUG_INC}"
+grep -q "/debug/radarr/" "${NGINX_DEBUG_INC}"
+grep -q "/debug/sonarr/" "${NGINX_DEBUG_INC}"
+grep -q "/debug/qbittorrent/" "${NGINX_DEBUG_INC}"
+grep -q "X-Ingress-Path" "${NGINX_DEBUG_INC}" || grep -q 'http_x_ingress_path' "${NGINX_DEBUG_INC}"
+grep -q "debug/shim.js" "${NGINX_DEBUG_INC}"
+if grep -q "return 404" "${NGINX_DEBUG_INC}"; then
+  echo "debug on must expose engine consoles" >&2
+  cat "${NGINX_DEBUG_INC}" >&2
+  exit 1
+fi
+# Restore the default (debug off) include so later steps match household options.
+cp "${ROOT}/pompey/rootfs/etc/nginx/http.d/ingress.conf" "${NGINX_INGRESS_CONF}"
+run "${INIT}/20-nginx.sh"
 grep -q '/status.json' "${ROOT}/pompey/rootfs/etc/nginx/nginx.conf"
 grep -q 'if=$pompey_accesslog' "${ROOT}/pompey/rootfs/etc/nginx/nginx.conf"
 grep -q 'vpn-up' "${ROOT}/pompey/rootfs/etc/services.d/engines/run"
@@ -463,6 +508,11 @@ python3 "${BIN}/pompey-status" ready "Ready" 100
 test "$(jq -r .search "${POMPEY_READY}/status.json")" = true
 test "$(jq -r .search_port "${POMPEY_READY}/status.json")" = 5055
 test "$(jq -r .sources_port "${POMPEY_READY}/status.json")" = 9696
+test "$(jq -r .debug "${POMPEY_READY}/status.json")" = false
+POMPEY_DEBUG=1 python3 "${BIN}/pompey-status" ready "Ready" 100
+test "$(jq -r .debug "${POMPEY_READY}/status.json")" = true
+POMPEY_DEBUG=0 python3 "${BIN}/pompey-status" ready "Ready" 100
+test "$(jq -r .debug "${POMPEY_READY}/status.json")" = false
 touch "${POMPEY_READY}/wired"
 python3 "${BIN}/pompey-status" fetch "Downloading hidden engines" 35
 test "$(jq -r .step "${POMPEY_READY}/status.json")" = ready

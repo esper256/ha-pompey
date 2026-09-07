@@ -1,0 +1,92 @@
+/* Pompey debug: keep engine Web UIs under Home Assistant Ingress.
+   Root-absolute /api and /Content calls would otherwise leave the
+   /api/hassio_ingress/<token>/ prefix. Loaded first via nginx sub_filter. */
+(function () {
+  function mountPrefix() {
+    var path = window.location.pathname || "";
+    var match = path.match(/^(.*\/debug\/(?:radarr|sonarr|qbittorrent))(?:\/|$)/);
+    return match ? match[1] : "";
+  }
+
+  var base = mountPrefix();
+  if (!base) return;
+
+  function rewrite(url) {
+    if (typeof url !== "string" || !url) return url;
+    if (url.indexOf(base) === 0) return url;
+    if (url.charAt(0) === "#" || url.indexOf("mailto:") === 0) return url;
+    if (url.indexOf("//") === 0 || /^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(url)) {
+      try {
+        var parsed = new URL(url, window.location.href);
+        if (parsed.origin === window.location.origin && parsed.pathname.charAt(0) === "/") {
+          if (parsed.pathname.indexOf(base) !== 0) {
+            parsed.pathname = base + parsed.pathname;
+            return parsed.toString();
+          }
+        }
+      } catch (_exc) {}
+      return url;
+    }
+    if (url.charAt(0) === "/") return base + url;
+    return url;
+  }
+
+  var origFetch = window.fetch;
+  if (origFetch) {
+    window.fetch = function (input, init) {
+      if (typeof input === "string") {
+        input = rewrite(input);
+      } else if (input && typeof Request !== "undefined" && input instanceof Request) {
+        input = new Request(rewrite(input.url), input);
+      }
+      return origFetch.call(this, input, init);
+    };
+  }
+
+  if (window.XMLHttpRequest) {
+    var origOpen = window.XMLHttpRequest.prototype.open;
+    window.XMLHttpRequest.prototype.open = function (method, url) {
+      arguments[1] = rewrite(url);
+      return origOpen.apply(this, arguments);
+    };
+  }
+
+  function patchHistory(name) {
+    var orig = window.history && window.history[name];
+    if (!orig) return;
+    window.history[name] = function (state, title, url) {
+      if (url != null) arguments[2] = rewrite(String(url));
+      return orig.apply(this, arguments);
+    };
+  }
+  patchHistory("pushState");
+  patchHistory("replaceState");
+
+  if (window.WebSocket) {
+    var OrigWS = window.WebSocket;
+    function WrappedWS(url, protocols) {
+      var next = rewrite(url);
+      if (typeof next === "string" && next.charAt(0) === "/") {
+        next = (window.location.protocol === "https:" ? "wss:" : "ws:") +
+          "//" + window.location.host + next;
+      }
+      if (protocols === undefined) return new OrigWS(next);
+      return new OrigWS(next, protocols);
+    }
+    WrappedWS.prototype = OrigWS.prototype;
+    WrappedWS.CONNECTING = OrigWS.CONNECTING;
+    WrappedWS.OPEN = OrigWS.OPEN;
+    WrappedWS.CLOSING = OrigWS.CLOSING;
+    WrappedWS.CLOSED = OrigWS.CLOSED;
+    window.WebSocket = WrappedWS;
+  }
+
+  if (window.EventSource) {
+    var OrigES = window.EventSource;
+    function WrappedES(url, config) {
+      return new OrigES(rewrite(url), config);
+    }
+    WrappedES.prototype = OrigES.prototype;
+    window.EventSource = WrappedES;
+  }
+})();

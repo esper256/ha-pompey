@@ -8,6 +8,11 @@ hides. This is the Pompey sidebar (wait, then dashboard). Search is Seerr on
 host port 5055 and sources are Prowlarr on 9696, not this page (`status.json`
 has `"search": true` plus `"search_port"` and `"sources_port"`). Opening the
 page only reads status; it does not re-run setup.
+
+Pass ``--debug`` to set ``POMPEY_DEBUG=1`` (same as the Home Assistant Debug
+option). The dashboard then offers Radarr / Sonarr / qBittorrent links under
+``/debug/…``, served here as stand-in pages so you can click them without
+engines.
 """
 from __future__ import annotations
 
@@ -38,7 +43,8 @@ class Handler(SimpleHTTPRequestHandler):
         sys.stderr.write("[%s] INFO: %s - %s\n" % (stamp, self.address_string(), fmt % args))
 
     def do_GET(self):
-        if self.path.split("?", 1)[0] == "/status.json":
+        path = self.path.split("?", 1)[0]
+        if path == "/status.json":
             body = b'{"step":"vpn","label":"Starting","percent":5,"error":"","steps":[]}\n'
             if self._status_path.is_file():
                 body = self._status_path.read_bytes()
@@ -49,7 +55,68 @@ class Handler(SimpleHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(body)
             return
+        if path == "/debug/shim.js":
+            shim = STATIC / "debug-shim.js"
+            body = shim.read_bytes() if shim.is_file() else b""
+            self.send_response(200)
+            self.send_header("Content-Type", "application/javascript")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+        fake = preview_debug_page(path)
+        if fake is not None:
+            body, ctype = fake
+            raw = body.encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", ctype)
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Content-Length", str(len(raw)))
+            self.end_headers()
+            self.wfile.write(raw)
+            return
         return super().do_GET()
+
+
+DEBUG_TITLES = {
+    "radarr": "Radarr",
+    "sonarr": "Sonarr",
+    "qbittorrent": "qBittorrent",
+}
+
+
+def preview_debug_page(path: str):
+    """Stand-in engine pages for --debug. Production nginx proxies the real UIs."""
+    if path in {"/debug/radarr", "/debug/sonarr", "/debug/qbittorrent"}:
+        path = path + "/"
+    parts = path.strip("/").split("/")
+    if len(parts) < 2 or parts[0] != "debug":
+        return None
+    name = parts[1]
+    title = DEBUG_TITLES.get(name)
+    if not title:
+        return None
+    if len(parts) >= 3 and parts[2] == "api":
+        return ('{"instanceName":"%s","preview":true}\n' % title, "application/json")
+    html = f"""<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><title>{title}</title></head>
+<body style="font-family:ui-sans-serif,system-ui,sans-serif;background:#07090d;color:#ece8e1;padding:2rem">
+  <p style="color:#9a948a;text-transform:uppercase;letter-spacing:.04em;font-size:.75rem">Pompey debug preview</p>
+  <h1>{title}</h1>
+  <p>This stand-in is only <code>tests/preview.py --debug</code>. On Home Assistant, Ingress proxies the real Web UI.</p>
+  <p id="api">Checking /api…</p>
+  <script src="/debug/shim.js"></script>
+  <script>
+    fetch("/api/v3/system/status").then((r) => r.json()).then((data) => {{
+      document.getElementById("api").textContent = "API via shim: " + (data.instanceName || "ok");
+    }}).catch((exc) => {{
+      document.getElementById("api").textContent = "API via shim failed: " + exc;
+    }});
+  </script>
+</body></html>
+"""
+    return (html, "text/html; charset=utf-8")
 
 
 def status(env: dict, *args: str) -> None:
@@ -106,6 +173,11 @@ def main() -> int:
     parser.add_argument("--delay", type=float, default=1.2, help="Seconds between demo steps")
     parser.add_argument("--no-demo", action="store_true", help="Do not animate steps; only serve")
     parser.add_argument("--once", action="store_true", help="Stop after reaching ready (for tests)")
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Same as the Home Assistant Debug option: show engine console links",
+    )
     args = parser.parse_args()
 
     work = Path(os.environ.get("POMPEY_READY", "/tmp/pompey-preview"))
@@ -116,6 +188,8 @@ def main() -> int:
     env = os.environ.copy()
     env["POMPEY_READY"] = str(work)
     env["POMPEY_STATUS"] = str(status_path)
+    if args.debug:
+        env["POMPEY_DEBUG"] = "1"
     status(env, "vpn", "Starting", "5")
     netdev = work / "net-dev"
     write_fake_netdev(netdev, 18_000_000, 1_200_000)

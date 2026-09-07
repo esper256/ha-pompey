@@ -44,6 +44,15 @@ def ports() -> tuple[int, int]:
     )
 
 
+def debug_enabled() -> bool:
+    return os.environ.get("POMPEY_DEBUG", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
 def default_status(*, search: bool) -> dict:
     seerr, sources = ports()
     if search:
@@ -57,6 +66,7 @@ def default_status(*, search: bool) -> dict:
             "search": True,
             "search_port": seerr,
             "sources_port": sources,
+            "debug": debug_enabled(),
             "steps": [{"id": i, "label": lab, "state": "done"} for i, lab in STEPS],
         }
     return {
@@ -68,6 +78,7 @@ def default_status(*, search: bool) -> dict:
         "search": False,
         "search_port": seerr,
         "sources_port": sources,
+        "debug": debug_enabled(),
         "steps": [{"id": i, "label": lab, "state": "pending"} for i, lab in STEPS],
     }
 
@@ -210,6 +221,7 @@ def main(argv: list[str]) -> int:
         seerr, sources = ports()
         data["search_port"] = seerr
         data["sources_port"] = sources
+        data["debug"] = debug_enabled()
         if percent is not None:
             data["percent"] = max(0, min(100, percent))
         elif step in order:

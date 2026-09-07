@@ -35,3 +35,10 @@ configuration:
       (the default) removes the torrent once the file is in your library.
       Share to 1.0 ratio or for one day if you want to give a little back.
       The library file is kept either way.
+  debug:
+    name: Debug
+    description: >-
+      Off by default. When on, the Pompey sidebar offers the hidden
+      qBittorrent, Radarr, and Sonarr Web UIs (still inside Ingress, not
+      on the LAN). Use this to see a stuck download. Turn it off when you
+      are done. Restart the app after changing this.
