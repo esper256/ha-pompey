@@ -209,7 +209,7 @@ Work that turns the current box into the guide above, in the order it unblocks t
 6. **Sources without opening Prowlarr.** Adding a source, rotating a key, and “source is down” should be possible from Pompey. Until then, **Open sources** is Prowlarr on :9696. Still no indexer catalog shipped in the repo, and no Home Assistant options for this.
 7. **Proton file lifecycle.** Replace a working `.conf` (new region, rotated certificate) from the running app. Keep the kill switch. Do not put private keys in a Home Assistant options list.
 8. **Household users.** After the Plex wizard, inviting someone who already uses that Plex server should be enough. Auto-approve for the house; no ticket queue.
-9. **Not this product:** Jellyfin, split tunnel, publishing a Docker image, challenge-solver sidecars, exposing search or sources on the public internet, stuffing Seerr under Ingress (Next.js has no basePath; rewriting `/_next` will keep breaking).
+9. **Not this product:** Jellyfin, split tunnel, publishing a Docker image, challenge-solver sidecars, exposing search or sources on the public internet, stuffing Seerr under Ingress (Next.js has no basePath; rewriting `/_next` will keep breaking). Replacing Radarr/Sonarr with a Seerr-facing mock is the same class of work — [why, and how large an MVP would be](docs/replace-arr.md).
 10. **Optional Radarr/Sonarr consoles** for the few people who want them — **0.2.45** is the Debug flag plus Ingress links, still not a second sidebar app, still not on the LAN.
 
 ## Storage
