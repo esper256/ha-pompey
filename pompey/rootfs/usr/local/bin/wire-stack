@@ -2984,34 +2984,28 @@ def series_still_hunting(item: dict) -> bool:
     return False
 
 
-def set_arr_monitored(base: str, api_key: str, endpoint: str, item_id: int, monitored: bool):
-    item = http(
-        "GET",
-        f"{base}/{endpoint}/{item_id}",
-        headers=arr_headers(api_key),
-    )
-    if not isinstance(item, dict):
-        return None
+def title_is_hunting(item: dict, endpoint: str) -> bool:
     if endpoint == "series" or "seasons" in item:
-        if not monitored:
-            if not series_still_hunting(item):
-                return item
-            item["monitored"] = False
-            item["monitorNewItems"] = "none"
-            for season in item.get("seasons") or []:
-                if isinstance(season, dict):
-                    season["monitored"] = False
-        else:
-            if item.get("monitored") is True:
-                return item
-            item["monitored"] = True
+        return series_still_hunting(item)
+    return item.get("monitored") is not False
+
+
+def unmonitor_arr_item(base: str, api_key: str, endpoint: str, item: dict):
+    """PUT unmonitor using the already-fetched movie/series row. No extra GET."""
+    title_id = parse_int(item.get("id"))
+    if title_id is None or not title_is_hunting(item, endpoint):
+        return item
+    if endpoint == "series" or "seasons" in item:
+        item["monitored"] = False
+        item["monitorNewItems"] = "none"
+        for season in item.get("seasons") or []:
+            if isinstance(season, dict):
+                season["monitored"] = False
     else:
-        if item.get("monitored") is monitored:
-            return item
-        item["monitored"] = monitored
+        item["monitored"] = False
     return http(
         "PUT",
-        f"{base}/{endpoint}/{item_id}",
+        f"{base}/{endpoint}/{title_id}",
         item,
         headers=arr_headers(api_key),
     )
@@ -3036,46 +3030,23 @@ def arr_command_targets_title(cmd: dict, title_id: int) -> bool:
     return False
 
 
-def cancel_arr_search_commands(base: str, api_key: str, title_id: int) -> int:
-    """Abort queued/started Arr searches for a title the household closed out."""
-    cancelled = 0
+def arr_command_is_search(cmd: dict) -> bool:
+    name = str(cmd.get("name") or "")
+    body = cmd.get("body") if isinstance(cmd.get("body"), dict) else {}
+    return name in SEARCH_COMMAND_NAMES or str(body.get("name") or "") in SEARCH_COMMAND_NAMES
+
+
+def arr_list_commands(base: str, api_key: str) -> list[dict]:
     try:
-        rows = as_list(http("GET", f"{base}/command", headers=arr_headers(api_key)))
+        return as_list(http("GET", f"{base}/command", headers=arr_headers(api_key)))
     except RuntimeError as exc:
         log(f"could not list Arr commands: {exc}", "WARNING")
-        return 0
-    for cmd in rows:
-        name = str(cmd.get("name") or "")
-        body = cmd.get("body") if isinstance(cmd.get("body"), dict) else {}
-        if name not in SEARCH_COMMAND_NAMES and str(body.get("name") or "") not in SEARCH_COMMAND_NAMES:
-            continue
-        if not arr_command_targets_title(cmd, title_id):
-            continue
-        cid = parse_int(cmd.get("id"))
-        if cid is None:
-            continue
-        status = str(cmd.get("status") or "").lower()
-        if status not in {"", "started", "queued"}:
-            continue
-        try:
-            http("DELETE", f"{base}/command/{cid}", headers=arr_headers(api_key))
-            cancelled += 1
-        except RuntimeError as exc:
-            log(f"could not cancel Arr search {cid}: {exc}", "WARNING")
-    return cancelled
+        return []
 
 
-def abort_arr_queue_for_title(base: str, api_key: str, title_id: int) -> int:
-    """Drop Arr-queued downloads for a closed-out title (not Prowlarr Grabs).
-
-    Prowlarr Search → Grab uses the prowlarr qBittorrent category, so it is
-    not in Radarr/Sonarr's queue. removeFromClient only touches the Arr
-    category torrent. skipRedownload keeps Arr from immediately grabbing again
-    while unmonitor is still in flight.
-    """
-    aborted = 0
+def arr_list_queue(base: str, api_key: str) -> list[dict]:
     try:
-        rows = as_list(
+        return as_list(
             http(
                 "GET",
                 f"{base}/queue?page=1&pageSize=200",
@@ -3083,12 +3054,52 @@ def abort_arr_queue_for_title(base: str, api_key: str, title_id: int) -> int:
             )
         )
     except RuntimeError as exc:
-        if "404" in str(exc):
-            return 0
-        log(f"could not read Arr queue: {exc}", "WARNING")
-        return 0
+        if "404" not in str(exc):
+            log(f"could not read Arr queue: {exc}", "WARNING")
+        return []
+
+
+def cancel_arr_search_commands(base: str, api_key: str, title_ids: set[int], rows: list[dict]) -> dict[int, int]:
+    """Abort queued/started Arr searches for closed-out titles. One GET, then DELETEs."""
+    cancelled: dict[int, int] = {}
+    if not title_ids:
+        return cancelled
+    for cmd in rows:
+        if not arr_command_is_search(cmd):
+            continue
+        status = str(cmd.get("status") or "").lower()
+        if status not in {"", "started", "queued"}:
+            continue
+        cid = parse_int(cmd.get("id"))
+        if cid is None:
+            continue
+        matched = [tid for tid in title_ids if arr_command_targets_title(cmd, tid)]
+        if not matched:
+            continue
+        try:
+            http("DELETE", f"{base}/command/{cid}", headers=arr_headers(api_key))
+        except RuntimeError as exc:
+            log(f"could not cancel Arr search {cid}: {exc}", "WARNING")
+            continue
+        for tid in matched:
+            cancelled[tid] = cancelled.get(tid, 0) + 1
+    return cancelled
+
+
+def abort_arr_queue_for_titles(base: str, api_key: str, title_ids: set[int], rows: list[dict]) -> dict[int, int]:
+    """Drop Arr-queued downloads for closed-out titles (not Prowlarr Grabs).
+
+    Prowlarr Search → Grab uses the prowlarr qBittorrent category, so it is
+    not in Radarr/Sonarr's queue. removeFromClient only touches the Arr
+    category torrent. skipRedownload keeps Arr from immediately grabbing again
+    while unmonitor is still in flight.
+    """
+    aborted: dict[int, int] = {}
+    if not title_ids:
+        return aborted
     for item in rows:
-        if parse_int(item.get("movieId")) != title_id and parse_int(item.get("seriesId")) != title_id:
+        tid = parse_int(item.get("movieId")) or parse_int(item.get("seriesId"))
+        if tid is None or tid not in title_ids:
             continue
         qid = parse_int(item.get("id"))
         if qid is None:
@@ -3099,52 +3110,67 @@ def abort_arr_queue_for_title(base: str, api_key: str, title_id: int) -> int:
         )
         try:
             http("DELETE", url, headers=arr_headers(api_key))
-            aborted += 1
         except RuntimeError as exc:
             log(f"could not drop queued download {qid}: {exc}", "WARNING")
+            continue
+        aborted[tid] = aborted.get(tid, 0) + 1
     return aborted
 
 
-def close_arr_title(
+def log_closed_title(item: dict, key: str, cancelled: int, aborted: int) -> None:
+    label = str(item.get("title") or "") or key
+    extra = []
+    if cancelled:
+        extra.append(f"{cancelled} search command(s)")
+    if aborted:
+        extra.append(f"{aborted} queued download(s)")
+    suffix = f"; cancelled {' and '.join(extra)}" if extra else ""
+    log(f"stopped looking for a better copy of {label} (Seerr request removed){suffix}")
+
+
+def close_arr_kind(
     base: str,
     api_key: str,
     endpoint: str,
-    item: dict,
-    key: str,
-) -> None:
-    """Unmonitor, cancel searches, and abort the Arr queue. Never delete the row."""
-    title_id = parse_int(item.get("id"))
-    if title_id is None:
-        return
-    label = str(item.get("title") or "") or key
-    changed = False
-    hunting = (
-        series_still_hunting(item)
-        if endpoint == "series"
-        else item.get("monitored") is not False
-    )
-    unmonitor_error: Exception | None = None
-    try:
-        if hunting:
-            saved = set_arr_monitored(base, api_key, endpoint, title_id, False)
-            changed = True
-            if isinstance(saved, dict) and saved.get("title"):
-                label = str(saved.get("title") or label)
-    except RuntimeError as exc:
-        unmonitor_error = exc
-        log(f"could not unmonitor {key}: {exc}", "WARNING")
-    cancelled = cancel_arr_search_commands(base, api_key, title_id)
-    aborted = abort_arr_queue_for_title(base, api_key, title_id)
-    if changed or cancelled or aborted:
-        extra = []
-        if cancelled:
-            extra.append(f"{cancelled} search command(s)")
-        if aborted:
-            extra.append(f"{aborted} queued download(s)")
-        suffix = f"; cancelled {' and '.join(extra)}" if extra else ""
-        log(f"stopped looking for a better copy of {label} (Seerr request removed){suffix}")
-    if unmonitor_error:
-        raise unmonitor_error
+    rows: list[dict],
+    keys: set[str],
+    covered,
+) -> set[str]:
+    """Unmonitor uncovered titles, then cancel their searches/queue in one pass."""
+    failed: set[str] = set()
+    drop: list[dict] = []
+    drop_ids: set[int] = set()
+    hunting_ids: set[int] = set()
+    for item in rows:
+        if covered(item, keys):
+            continue
+        title_id = parse_int(item.get("id"))
+        if title_id is None:
+            continue
+        drop.append(item)
+        drop_ids.add(title_id)
+        if title_is_hunting(item, endpoint):
+            hunting_ids.add(title_id)
+            try:
+                unmonitor_arr_item(base, api_key, endpoint, item)
+            except RuntimeError as exc:
+                kind = "movie" if endpoint == "movie" else "series"
+                log(f"could not unmonitor {kind}:{title_id}: {exc}", "WARNING")
+                failed.add(f"{kind}:{title_id}")
+    if not drop_ids:
+        return failed
+    cancelled = cancel_arr_search_commands(base, api_key, drop_ids, arr_list_commands(base, api_key))
+    aborted = abort_arr_queue_for_titles(base, api_key, drop_ids, arr_list_queue(base, api_key))
+    kind = "movie" if endpoint == "movie" else "series"
+    for item in drop:
+        title_id = parse_int(item.get("id"))
+        if title_id is None:
+            continue
+        ncmd = cancelled.get(title_id, 0)
+        nqueue = aborted.get(title_id, 0)
+        if title_id in hunting_ids or ncmd or nqueue:
+            log_closed_title(item, f"{kind}:{title_id}", ncmd, nqueue)
+    return failed
 
 
 def unmonitor_closed_seerr_requests(
@@ -3173,28 +3199,8 @@ def unmonitor_closed_seerr_requests(
     except RuntimeError as exc:
         log(f"could not list series to close out: {exc}", "WARNING")
         series = []
-    for movie in movies:
-        if request_covers_movie(movie, keys):
-            continue
-        mid = parse_int(movie.get("id"))
-        if mid is None:
-            continue
-        key = f"movie:{mid}"
-        try:
-            close_arr_title(radarr, radarr_key, "movie", movie, key)
-        except RuntimeError:
-            failed.add(key)
-    for show in series:
-        if request_covers_series(show, keys):
-            continue
-        sid = parse_int(show.get("id"))
-        if sid is None:
-            continue
-        key = f"series:{sid}"
-        try:
-            close_arr_title(sonarr, sonarr_key, "series", show, key)
-        except RuntimeError:
-            failed.add(key)
+    failed |= close_arr_kind(radarr, radarr_key, "movie", movies, keys, request_covers_movie)
+    failed |= close_arr_kind(sonarr, sonarr_key, "series", series, keys, request_covers_series)
     current = remembered_arr_upgrade_ids(keys)
     stored = sorted(set(current) | failed)
     state = _load_quiet()
