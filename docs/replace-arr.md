@@ -109,6 +109,20 @@ That is roughly 1–3k lines on top of housekeep, no Seerr fork, no fake `/api/v
 
 Season-pack search via official knobs (**0.2.51**) is the still-smaller move and should be the first thing the household tries on World Trigger.
 
+## Can we reuse Servarr’s scene parser?
+
+There is no NuGet, no shared `Servarr.Parser` package, and no blessed extract. The regex engine lives in `NzbDrone.Core/Parser/Parser.cs` inside each app. Sonarr’s copy is TV/anime (absolute numbers, pre-substitutions). Radarr’s copy is movies (year, edition). They have already diverged. `ParsingService` — the part that turns a parse into “this is episode 7 of this series” — needs the series database and XEM scene maps. Servarr have said they will not adopt guessit; their own test suite is the product.
+
+| Path | What you actually get | Cost vs reward |
+| --- | --- | --- |
+| **`GET /api/v3/parse?title=`** while Arr is still running | Official parser + series match, one HTTP call. GPL does not touch Pompey (MIT). | **This is the library.** It is the “steal search, keep Arr as importer” move. |
+| **Vendor `Parser.cs` into a C# sidecar** | Title/season/quality/group only. Still write matching ourselves. Recyclarr already proved a musl .NET binary can live in this container. | Permanent fork of a file that moves on `develop`. Sonarr **and** Radarr copies. GPL-3 on that sidecar (and a lawyer’s question if we statically link it into the add-on). More complexity than the reward unless we have already committed to dropping Arr. |
+| **Port the regexes to Python** | We own every scene exception from that day on. | The test suite is the value. We will drift. Worse than a sidecar. |
+| **guessit / similar** | Fine on `Show.S01E01.1080p.WEB`. Weak on anime batches and multi-episode packs. | Servarr already rejected this as not covering their cases. Fine for a movie-only experiment, not World Trigger. |
+| **pythonnet in-process** | Theoretically load their DLL from Python. | Musl HAOS, s6, two runtimes in one process. Do not. |
+
+So: **use the parser as a service, not as a library.** If Arr is still up, `/parse` plus ManualImport is how we borrow their filename accountant without copying C#. If Arr is gone, extracting `Parser.cs` saves some of job C’s “parser we will get wrong,” but not matching, not scene maps, and not the update clock we were trying to delete. That is only worth it after we have already decided to become the engine.
+
 ## Decision
 
 | Question | Answer |
