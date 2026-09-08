@@ -2623,7 +2623,13 @@ def post_sonarr_season_and_episode_searches(
         log(episode_log)
 
 
-def retry_unfilled_titles(radarr: str, radarr_key: str, sonarr: str, sonarr_key: str) -> None:
+def retry_unfilled_titles(
+    radarr: str,
+    radarr_key: str,
+    sonarr: str,
+    sonarr_key: str,
+    skip_search: set[str] | None = None,
+) -> None:
     """Search monitored titles that still have no file. Seerr already handed off.
 
     A request that searched too few indexers stays approved in Seerr; Arr will
@@ -2631,18 +2637,28 @@ def retry_unfilled_titles(radarr: str, radarr_key: str, sonarr: str, sonarr_key:
     One poke per missing season / leftover-episode set so housekeep does not
     re-search every 5 minutes. SeasonSearch is what can query a pack; an
     EpisodeSearch of eight holes in the same season never will.
+    Skip titles we just retargeted after a hand-move, and seasons whose files
+    already sit on disk under the Arr path (Plex/Seerr can look done while
+    Sonarr hasFile is still false).
     """
+    skip_search = skip_search or set()
     if arr_search_in_flight(radarr, radarr_key) or arr_search_in_flight(sonarr, sonarr_key):
         return
     try:
         movies = as_list(http("GET", f"{radarr}/movie", headers=arr_headers(radarr_key)))
-        movie_ids = [
-            int(item["id"])
-            for item in movies
-            if item.get("monitored") is True
-            and item.get("hasFile") is False
-            and item.get("id") is not None
-        ][:8]
+        movie_ids = []
+        for item in movies:
+            if item.get("monitored") is not True or item.get("hasFile") is not False:
+                continue
+            mid = parse_int(item.get("id"))
+            if mid is None:
+                continue
+            if f"movie:{mid}" in skip_search:
+                continue
+            if library_video_count(title_library_path(item)):
+                continue
+            movie_ids.append(mid)
+        movie_ids = movie_ids[:8]
         token = ",".join(str(i) for i in movie_ids)
         if movie_ids and _load_quiet().get("retry-movies") != token:
             http(
@@ -2664,6 +2680,25 @@ def retry_unfilled_titles(radarr: str, radarr_key: str, sonarr: str, sonarr_key:
             headers=arr_headers(sonarr_key),
         )
         records = as_list(missing)
+        try:
+            series_rows = as_list(http("GET", f"{sonarr}/series", headers=arr_headers(sonarr_key)))
+        except RuntimeError:
+            series_rows = []
+        paths = {
+            tid: title_library_path(row)
+            for row in series_rows
+            if (tid := title_id_of(row)) is not None
+        }
+        filtered = []
+        for item in records:
+            sid = series_id_of(item)
+            if sid is not None and f"series:{sid}" in skip_search:
+                continue
+            path = paths.get(sid) if sid is not None else ""
+            if missing_episode_already_on_disk(item, path):
+                continue
+            filtered.append(item)
+        records = filtered
         seasons, episode_ids = season_and_episode_searches(records)
         token = missing_search_token(seasons, episode_ids)
         if token and _load_quiet().get("retry-episodes") != token:
@@ -2875,13 +2910,20 @@ def wanted_cutoff_records(base: str, api_key: str) -> list[dict] | None:
     return as_list(payload)
 
 
-def retry_cutoff_unmet(radarr: str, radarr_key: str, sonarr: str, sonarr_key: str) -> None:
+def retry_cutoff_unmet(
+    radarr: str,
+    radarr_key: str,
+    sonarr: str,
+    sonarr_key: str,
+    skip_search: set[str] | None = None,
+) -> None:
     """Search already-imported titles that are still below Default/Max cutoff.
 
     Runs when the Prowlarr source set changes (and once after this feature
     first wires). RSS still catches later announcements. Only titles with an
     open Seerr request are searched — remove the request to opt out.
     """
+    skip_search = skip_search or set()
     if arr_search_in_flight(radarr, radarr_key) or arr_search_in_flight(sonarr, sonarr_key):
         return
     requests = load_open_seerr_requests()
@@ -2905,9 +2947,14 @@ def retry_cutoff_unmet(radarr: str, radarr_key: str, sonarr: str, sonarr_key: st
         return
     for item in movies:
         mid = parse_int(item.get("id"))
+        if mid is not None and f"movie:{mid}" in skip_search:
+            continue
         if mid is not None and request_covers_movie(item, keys):
             movie_ids.append(mid)
     for item in episodes:
+        sid = series_id_of(item)
+        if sid is not None and f"series:{sid}" in skip_search:
+            continue
         if request_covers_episode(item, keys):
             covered_episodes.append(item)
     movie_ids = movie_ids[:8]
@@ -2941,10 +2988,25 @@ def retry_cutoff_unmet(radarr: str, radarr_key: str, sonarr: str, sonarr_key: st
     _save_quiet(state)
 
 
-def improve_existing_requests(radarr: str, radarr_key: str, sonarr: str, sonarr_key: str) -> None:
+def improve_existing_requests(
+    radarr: str,
+    radarr_key: str,
+    sonarr: str,
+    sonarr_key: str,
+    skip_search: set[str] | None = None,
+) -> None:
     """Close-out unmonitor, then one cutoff poke when sources changed."""
     unmonitor_closed_seerr_requests(radarr, radarr_key, sonarr, sonarr_key)
-    retry_cutoff_unmet(radarr, radarr_key, sonarr, sonarr_key)
+    retry_cutoff_unmet(radarr, radarr_key, sonarr, sonarr_key, skip_search=skip_search)
+
+
+def poke_missing_and_upgrades(radarr: str, rk: str, sonarr: str, sk: str) -> None:
+    """Reconcile hand-moved library folders, then missing/cutoff search."""
+    skip: set[str] = set()
+    if not (arr_search_in_flight(radarr, rk) or arr_search_in_flight(sonarr, sk)):
+        skip = reconcile_hand_moved_library_paths(radarr, rk, sonarr, sk)
+    retry_unfilled_titles(radarr, rk, sonarr, sk, skip_search=skip)
+    improve_existing_requests(radarr, rk, sonarr, sk, skip_search=skip)
 
 
 def qbit_category(name: str, save_path: str) -> None:
@@ -3010,6 +3072,242 @@ VIDEO_EXTENSIONS = {
 
 def is_video_file(name: str) -> bool:
     return os.path.splitext(name)[1].lower() in VIDEO_EXTENSIONS
+
+
+def library_video_count(path: str, limit: int = 8) -> int:
+    """How many videos sit under a library title folder (capped)."""
+    root = os.path.normpath(path or "")
+    if not root or not os.path.isdir(root):
+        return 0
+    count = 0
+    try:
+        for dirpath, dirnames, filenames in os.walk(root):
+            dirnames[:] = [name for name in dirnames if not name.startswith(".")]
+            for name in filenames:
+                if name.startswith("."):
+                    continue
+                if is_video_file(name):
+                    count += 1
+                    if count >= limit:
+                        return count
+    except OSError:
+        return count
+    return count
+
+
+def title_folder_name(path: str) -> str:
+    return (path or "").rstrip("/").rsplit("/", 1)[-1]
+
+
+def root_of_title_path(path: str, roots: list[str]) -> str:
+    """Longest matching library root. Avoids `/media` beating Kid Friendly."""
+    path = (path or "").rstrip("/")
+    best = ""
+    for root in roots:
+        root = (root or "").rstrip("/")
+        if in_root(path, root) and len(root) > len(best):
+            best = root
+    return best
+
+
+def sibling_title_paths_with_video(stored: str, roots: list[str]) -> list[str]:
+    """Same title folder name under another Kid / Not Kid / By Rating root."""
+    name = title_folder_name(stored)
+    if not name:
+        return []
+    stored_n = os.path.normpath(stored.rstrip("/")) if stored else ""
+    found: list[str] = []
+    for root in roots:
+        root = (root or "").rstrip("/")
+        if not root:
+            continue
+        candidate = os.path.normpath(f"{root}/{name}")
+        if stored_n and candidate == stored_n:
+            continue
+        if library_video_count(candidate):
+            found.append(candidate)
+    return found
+
+
+def plan_library_retarget(stored: str, roots: list[str]) -> tuple[str, str]:
+    """Decide whether Arr's stored folder is the one that actually has video.
+
+    keep — videos are at the stored path.
+    retarget — exactly one sibling root has the title folder.
+    ambiguous — two+ sibling folders have video; do not guess Kid vs Not Kid.
+    missing — nothing on disk under these roots.
+    """
+    stored = (stored or "").rstrip("/")
+    clean_roots = [root.rstrip("/") for root in roots if root]
+    if library_video_count(stored):
+        return "keep", root_of_title_path(stored, clean_roots)
+    siblings = sibling_title_paths_with_video(stored, clean_roots)
+    if len(siblings) == 1:
+        return "retarget", root_of_title_path(siblings[0], clean_roots)
+    if len(siblings) > 1:
+        return "ambiguous", ""
+    return "missing", ""
+
+
+def season_videos_on_disk(series_path: str, season: int) -> bool:
+    """True when Season N (folder or SxxE filenames) already has library video."""
+    root = os.path.normpath(series_path or "")
+    if not root or not os.path.isdir(root):
+        return False
+    try:
+        want = int(season)
+    except (TypeError, ValueError):
+        return False
+    prefix = f"S{want:02d}E"
+    try:
+        for name in os.listdir(root):
+            if name.startswith("."):
+                continue
+            full = os.path.join(root, name)
+            if os.path.isdir(full):
+                match = SEASON_FOLDER_RE.match(name)
+                if match and int(match.group(1)) == want and library_video_count(full):
+                    return True
+                continue
+            if is_video_file(name) and video_episode_key(name).startswith(prefix):
+                return True
+    except OSError:
+        return False
+    return False
+
+
+HAND_MOVE_STATE = "hand-move-roots"
+
+
+def already_hand_moved(key: str, dest: str) -> bool:
+    state = _load_quiet()
+    done = state.get(HAND_MOVE_STATE)
+    if not isinstance(done, dict):
+        return False
+    return done.get(key) == dest
+
+
+def save_hand_move(key: str, dest: str) -> None:
+    state = _load_quiet()
+    done = state.get(HAND_MOVE_STATE)
+    if not isinstance(done, dict):
+        done = {}
+    done[key] = dest
+    state[HAND_MOVE_STATE] = done
+    _save_quiet(state)
+
+
+def hand_move_skip_key(kind: str, title_id: int) -> str:
+    return f"{'movie' if kind == 'radarr' else 'series'}:{title_id}"
+
+
+def post_arr_rescan(base: str, api_key: str, kind: str, title_id: int) -> None:
+    name = "RescanMovie" if kind == "radarr" else "RescanSeries"
+    id_key = "movieId" if kind == "radarr" else "seriesId"
+    http(
+        "POST",
+        f"{base}/command",
+        {"name": name, id_key: title_id},
+        headers=arr_headers(api_key),
+    )
+
+
+def retarget_title_root(
+    base: str, api_key: str, kind: str, title_id: int, dest_root: str
+) -> None:
+    collection = arr_title_collection(kind)
+    id_key = "movieIds" if kind == "radarr" else "seriesIds"
+    http(
+        "PUT",
+        f"{base}/{collection}/editor",
+        {id_key: [title_id], "rootFolderPath": dest_root, "moveFiles": False},
+        headers=arr_headers(api_key),
+    )
+
+
+def _reconcile_kind(base: str, api_key: str, kind: str) -> set[str]:
+    """Retarget Arr when the household already moved the title folder.
+
+    Editor with moveFiles false — the files are already at dest. Then rescan
+    so episode records match disk. Skip search for titles we just pointed or
+    that sit in more than one kid/general folder.
+    """
+    skipped: set[str] = set()
+    auto, gen, kid = wanted_arr_roots("sonarr" if kind == "sonarr" else "radarr")
+    roots = [auto, gen, kid]
+    collection = arr_title_collection(kind)
+    try:
+        rows = as_list(http("GET", f"{base}/{collection}", headers=arr_headers(api_key)))
+    except RuntimeError as exc:
+        log(f"{kind} hand-move reconcile: {exc}", "WARNING")
+        return skipped
+    for item in rows:
+        if not isinstance(item, dict) or item.get("monitored") is False:
+            continue
+        tid = title_id_of(item)
+        if tid is None:
+            continue
+        stored = title_library_path(item)
+        if not stored:
+            continue
+        key = hand_move_skip_key(kind, tid)
+        action, dest = plan_library_retarget(stored, roots)
+        title = item.get("title") or key
+        if action == "ambiguous":
+            log(
+                f"{kind} {title} is on more than one Kid / Not Kid / By Rating folder; "
+                "not searching until there is one library copy",
+                "WARNING",
+            )
+            skipped.add(key)
+            continue
+        if action == "retarget" and dest:
+            if not already_hand_moved(key, dest):
+                try:
+                    retarget_title_root(base, api_key, kind, tid, dest)
+                    post_arr_rescan(base, api_key, kind, tid)
+                    save_hand_move(key, dest)
+                    log(
+                        f"{kind} pointed {title} at {dest} "
+                        "(files already there; rescanning instead of grabbing again)"
+                    )
+                except RuntimeError as exc:
+                    log(f"{kind} could not retarget {title}: {exc}", "WARNING")
+                    skipped.add(key)
+                    continue
+            skipped.add(key)
+            continue
+        if action == "keep" and title_needs_library_file(item, kind):
+            if not already_hand_moved(key, stored):
+                try:
+                    post_arr_rescan(base, api_key, kind, tid)
+                    save_hand_move(key, stored)
+                    log(
+                        f"{kind} {title} already has library video at {stored}; "
+                        "rescanning instead of grabbing again"
+                    )
+                except RuntimeError as exc:
+                    log(f"{kind} could not rescan {title}: {exc}", "WARNING")
+    return skipped
+
+
+def reconcile_hand_moved_library_paths(
+    radarr: str, radarr_key: str, sonarr: str, sonarr_key: str
+) -> set[str]:
+    skipped: set[str] = set()
+    for kind, base, key in each_arr(radarr, radarr_key, sonarr, sonarr_key):
+        skipped |= _reconcile_kind(base, key, kind)
+    return skipped
+
+
+def missing_episode_already_on_disk(item: dict, series_path: str) -> bool:
+    """True when wanted/missing is a season folder Arr has not imported yet."""
+    if not series_path:
+        return False
+    season = parse_int(item.get("seasonNumber"))
+    if season is None:
+        return library_video_count(series_path) > 0
+    return season_videos_on_disk(series_path, season)
 
 
 def video_episode_key(name: str) -> str:
@@ -4421,8 +4719,7 @@ def import_finished_downloads(radarr: str, rk: str, sonarr: str, sk: str) -> Non
         for kind, base, key in engines:
             log_stuck_imports(base, key, kind)
             log_titles_waiting_for_library(base, key, kind)
-        retry_unfilled_titles(radarr, rk, sonarr, sk)
-        improve_existing_requests(radarr, rk, sonarr, sk)
+        poke_missing_and_upgrades(radarr, rk, sonarr, sk)
         return
     videos = count_complete_videos()
     searching = arr_search_in_flight(radarr, rk) or arr_search_in_flight(sonarr, sk)
@@ -4447,8 +4744,7 @@ def import_finished_downloads(radarr: str, rk: str, sonarr: str, sk: str) -> Non
     for kind, base, key in engines:
         log_stuck_imports(base, key, kind)
         log_titles_waiting_for_library(base, key, kind)
-    retry_unfilled_titles(radarr, rk, sonarr, sk)
-    improve_existing_requests(radarr, rk, sonarr, sk)
+    poke_missing_and_upgrades(radarr, rk, sonarr, sk)
 
 
 def engines_checked_path() -> str:
