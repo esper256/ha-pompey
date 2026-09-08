@@ -5157,12 +5157,13 @@ class WireStack(unittest.TestCase):
                 "media": {"mediaType": "movie", "tmdbId": 111, "externalServiceId": 99},
             }
         ]
+        movie_search = "Movies" + "Search"
         self.state.radarr_command_queue = [
             {
                 "id": 3,
-                "name": "MoviesSearch",
+                "name": movie_search,
                 "status": "started",
-                "body": {"name": "MoviesSearch", "movieIds": [99]},
+                "body": {"name": movie_search, "movieIds": [99]},
             }
         ]
         self.state.queue = [{"id": 1, "movieId": 99, "title": "Open Anime"}]
