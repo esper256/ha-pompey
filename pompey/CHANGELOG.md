@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.50
+
+- Prowlarr Settings → Download Clients was empty, so Search → Grab did nothing useful. Wire a qBittorrent client at `127.0.0.1:8080` with category **`prowlarr`** (same `downloads/complete` folder as Arr). Do not reuse `radarr` / `sonarr` — Arr completed-download handling would claim a TV grab as a movie. Prowlarr never removes a completed torrent (it is not the importer). Preferred manual path: request in Seerr first, then Debug → Radarr/Sonarr **Interactive Search**. Prowlarr Grab is the fallback; housekeeping only imports if Arr already has the title. Debug also turns Interactive Search on for Arr indexer rows that landed with it off. Rebuild so the banner says **0.2.50**.
+
 ## 0.2.49
 
 - After a TV season (or movie) lands, leftover extras in `downloads/complete` are renamed into the Plex extra folders on the Arr title path: **Behind The Scenes**, **Deleted Scenes**, **Featurettes**, **Interviews**, **Scenes**, **Shorts**, **Trailers**, **Other**. Episode-tied extras sit next to that `SxxExx` as `-behindthescenes` / `-featurette` / …. Season 00 and other specials go in **Specials**, or into **Season 00** if that folder already exists, named `Show - S00Exx - Title`. Samples are dropped. Destination is still the Kid / Not Kid folder Seerr stored — housekeeping does not guess from the filename. Rebuild so the banner says **0.2.49**.

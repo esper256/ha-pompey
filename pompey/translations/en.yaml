@@ -48,5 +48,6 @@ configuration:
     description: >-
       Off by default. When on, the Pompey sidebar offers the hidden
       qBittorrent, Radarr, and Sonarr Web UIs (still inside Ingress, not
-      on the LAN). Use this to see a stuck download. Turn it off when you
-      are done. Restart the app after changing this.
+      on the LAN). Use this to see a stuck download, or to run
+      Interactive Search on a title you already requested. Turn it off
+      when you are done. Restart the app after changing this.
