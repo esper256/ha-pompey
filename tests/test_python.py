@@ -1617,6 +1617,39 @@ PersistentKeepalive = 25
         self.assertEqual(fields["prowlarrUrl"], "http://127.0.0.1:9698")
         self.assertEqual(fields["syncCategories"], [2000])
 
+    def test_season_and_episode_searches_groups_a_holey_season(self):
+        seasons, leftover = ws.season_and_episode_searches(
+            [
+                {
+                    "id": 1,
+                    "seriesId": 10,
+                    "seasonNumber": 1,
+                    "series": {"id": 10, "title": "World Trigger"},
+                },
+                {
+                    "id": 2,
+                    "seriesId": 10,
+                    "seasonNumber": 1,
+                    "series": {"id": 10, "title": "World Trigger"},
+                },
+                {
+                    "id": 3,
+                    "seriesId": 10,
+                    "seasonNumber": 1,
+                    "series": {"id": 10, "title": "World Trigger"},
+                },
+                {
+                    "id": 9,
+                    "seriesId": 11,
+                    "seasonNumber": 2,
+                    "series": {"id": 11, "title": "Silo"},
+                },
+                {"id": 12, "title": "no-season-row"},
+            ]
+        )
+        self.assertEqual(seasons, [(10, 1)])
+        self.assertEqual(leftover, [12, 9])
+
     def test_after_download_defaults_to_stop_sharing(self):
         os.environ.pop("AFTER_DOWNLOAD", None)
         self.assertEqual(ws.after_download(), "stop_sharing")
@@ -2466,8 +2499,10 @@ class WireStack(unittest.TestCase):
             self.assertEqual(fields.get("prowlarrUrl"), "http://127.0.0.1:9698")
             if app["name"] == "Radarr":
                 self.assertEqual(fields.get("syncCategories"), ws.RADARR_SYNC_CATS)
+                self.assertNotIn("syncAnimeStandardFormatSearch", fields)
             else:
                 self.assertEqual(fields.get("syncCategories"), ws.SONARR_SYNC_CATS)
+                self.assertTrue(fields.get("syncAnimeStandardFormatSearch"))
         lang_gets = [
             call
             for call in self.state.calls
@@ -4127,6 +4162,11 @@ class WireStack(unittest.TestCase):
         self.assertTrue(self.state.sonarr_indexers[0]["enableRss"])
         self.assertTrue(self.state.sonarr_indexers[0]["enableAutomaticSearch"])
         self.assertTrue(self.state.sonarr_indexers[0]["enableInteractiveSearch"])
+        sonarr_fields = {
+            f["name"]: f.get("value")
+            for f in self.state.sonarr_indexers[0].get("fields") or []
+        }
+        self.assertTrue(sonarr_fields.get("animeStandardFormatSearch"))
         radarr_puts = [
             call
             for call in self.state.calls
@@ -4139,6 +4179,47 @@ class WireStack(unittest.TestCase):
         ]
         self.assertTrue(radarr_puts)
         self.assertTrue(sonarr_puts)
+
+    def test_turns_on_sonarr_anime_standard_format_search(self):
+        os.environ["INDEXER_URL"] = ""
+        os.environ["INDEXER_API_KEY"] = ""
+        flags = {
+            "enableRss": True,
+            "enableAutomaticSearch": True,
+            "enableInteractiveSearch": True,
+        }
+        self.state.sonarr_indexers = [
+            {
+                "id": 1,
+                "name": "Nyaa.si",
+                "enable": True,
+                **flags,
+                "fields": [{"name": "animeStandardFormatSearch", "value": False}],
+            }
+        ]
+        self.state.apps = [
+            {
+                "id": 3,
+                "name": "Sonarr",
+                "fields": [
+                    {"name": "prowlarrUrl", "value": "http://127.0.0.1:9698"},
+                    {"name": "baseUrl", "value": "http://127.0.0.1:8989"},
+                    {"name": "apiKey", "value": "sonarr-key"},
+                    {"name": "syncCategories", "value": list(ws.SONARR_SYNC_CATS)},
+                    {"name": "syncAnimeStandardFormatSearch", "value": False},
+                ],
+            }
+        ]
+        rc = ws.main()
+        self.assertEqual(rc, 0)
+        sonarr_app = next(item for item in self.state.apps if item["name"] == "Sonarr")
+        app_fields = {f["name"]: f.get("value") for f in sonarr_app.get("fields") or []}
+        self.assertTrue(app_fields.get("syncAnimeStandardFormatSearch"))
+        idx_fields = {
+            f["name"]: f.get("value")
+            for f in self.state.sonarr_indexers[0].get("fields") or []
+        }
+        self.assertTrue(idx_fields.get("animeStandardFormatSearch"))
 
     def test_media_management_skips_nas_free_space_check(self):
         os.environ["INDEXER_URL"] = ""
@@ -4499,6 +4580,62 @@ class WireStack(unittest.TestCase):
         self.assertEqual(len(later), 1)
         self.assertIn("better copy of 1 movie(s) still requested in Seerr", third.getvalue())
 
+    def test_cutoff_unmet_season_searches_open_tv_request_once(self):
+        os.environ["INDEXER_URL"] = ""
+        os.environ["INDEXER_API_KEY"] = ""
+        self.state.seerr_has_admin = True
+        self.state.indexers = [{"id": 1, "name": "Nyaa.si", "enable": True}]
+        self.state.seerr_requests = [
+            {
+                "id": 8,
+                "status": 5,
+                "media": {
+                    "mediaType": "tv",
+                    "tvdbId": 88,
+                    "externalServiceId": 10,
+                },
+            }
+        ]
+        self.state.sonarr_wanted_cutoff = [
+            {
+                "id": 55,
+                "seriesId": 10,
+                "seasonNumber": 1,
+                "series": {"id": 10, "title": "World Trigger", "tvdbId": 88},
+            },
+            {
+                "id": 56,
+                "seriesId": 10,
+                "seasonNumber": 1,
+                "series": {"id": 10, "title": "World Trigger", "tvdbId": 88},
+            },
+        ]
+        from io import StringIO
+        from contextlib import redirect_stdout
+
+        first = StringIO()
+        with redirect_stdout(first):
+            self.assertEqual(ws.housekeep(), 0)
+        seasons = [
+            item for item in self.state.arr_commands if item.get("name") == "SeasonSearch"
+        ]
+        self.assertEqual(len(seasons), 1, self.state.arr_commands)
+        self.assertEqual(seasons[0].get("seriesId"), 10)
+        self.assertEqual(seasons[0].get("seasonNumber"), 1)
+        self.assertFalse(
+            any(item.get("name") == "EpisodeSearch" for item in self.state.arr_commands)
+        )
+        self.assertIn("better copy of 1 season(s) still requested in Seerr", first.getvalue())
+
+        self.state.arr_commands.clear()
+        second = StringIO()
+        with redirect_stdout(second):
+            self.assertEqual(ws.housekeep(), 0)
+        self.assertFalse(
+            any(item.get("name") == "SeasonSearch" for item in self.state.arr_commands)
+        )
+        self.assertNotIn("better copy", second.getvalue())
+
     def test_unmonitor_after_seerr_request_removed(self):
         os.environ["INDEXER_URL"] = ""
         os.environ["INDEXER_API_KEY"] = ""
@@ -4553,9 +4690,27 @@ class WireStack(unittest.TestCase):
         os.environ["INDEXER_URL"] = ""
         os.environ["INDEXER_API_KEY"] = ""
         self.state.wanted_missing = [
-            {"id": 1, "seasonNumber": 3, "episodeNumber": 1, "series": {"title": "Silo"}},
-            {"id": 2, "seasonNumber": 3, "episodeNumber": 2, "series": {"title": "Silo"}},
-            {"id": 3, "seasonNumber": 3, "episodeNumber": 3, "series": {"title": "Silo"}},
+            {
+                "id": 1,
+                "seriesId": 10,
+                "seasonNumber": 3,
+                "episodeNumber": 1,
+                "series": {"id": 10, "title": "Silo"},
+            },
+            {
+                "id": 2,
+                "seriesId": 10,
+                "seasonNumber": 3,
+                "episodeNumber": 2,
+                "series": {"id": 10, "title": "Silo"},
+            },
+            {
+                "id": 3,
+                "seriesId": 10,
+                "seasonNumber": 3,
+                "episodeNumber": 3,
+                "series": {"id": 10, "title": "Silo"},
+            },
         ]
         from io import StringIO
         from contextlib import redirect_stdout
@@ -4564,11 +4719,15 @@ class WireStack(unittest.TestCase):
         with redirect_stdout(first):
             self.assertEqual(ws.housekeep(), 0)
         searches = [
-            item for item in self.state.arr_commands if item.get("name") == "EpisodeSearch"
+            item for item in self.state.arr_commands if item.get("name") == "SeasonSearch"
         ]
-        self.assertEqual(len(searches), 1)
-        self.assertEqual(searches[0].get("episodeIds"), [1, 2, 3])
-        self.assertIn("searching again for 3 missing episode(s)", first.getvalue())
+        self.assertEqual(len(searches), 1, self.state.arr_commands)
+        self.assertEqual(searches[0].get("seriesId"), 10)
+        self.assertEqual(searches[0].get("seasonNumber"), 3)
+        self.assertFalse(
+            any(item.get("name") == "EpisodeSearch" for item in self.state.arr_commands)
+        )
+        self.assertIn("searching again for 1 missing season(s)", first.getvalue())
         self.assertFalse(
             any(item.get("name") == "RefreshMonitoredDownloads" for item in self.state.arr_commands)
         )
@@ -4578,21 +4737,45 @@ class WireStack(unittest.TestCase):
         with redirect_stdout(second):
             self.assertEqual(ws.housekeep(), 0)
         self.assertEqual(
-            [item for item in self.state.arr_commands if item.get("name") == "EpisodeSearch"],
+            [item for item in self.state.arr_commands if item.get("name") == "SeasonSearch"],
             [],
         )
         self.assertNotIn("searching again for", second.getvalue())
 
+        # Same season still missing two holes is the same token — do not
+        # episode-walk it again.
         self.state.wanted_missing = self.state.wanted_missing[:2]
         third = StringIO()
         with redirect_stdout(third):
             self.assertEqual(ws.housekeep(), 0)
-        searches = [
+        self.assertEqual(
+            [
+                item
+                for item in self.state.arr_commands
+                if item.get("name") in {"SeasonSearch", "EpisodeSearch"}
+            ],
+            [],
+        )
+        self.assertNotIn("searching again for", third.getvalue())
+
+        self.state.wanted_missing = [
+            {
+                "id": 4,
+                "seriesId": 10,
+                "seasonNumber": 4,
+                "episodeNumber": 1,
+                "series": {"id": 10, "title": "Silo"},
+            }
+        ]
+        fourth = StringIO()
+        with redirect_stdout(fourth):
+            self.assertEqual(ws.housekeep(), 0)
+        singles = [
             item for item in self.state.arr_commands if item.get("name") == "EpisodeSearch"
         ]
-        self.assertEqual(len(searches), 1)
-        self.assertEqual(searches[0].get("episodeIds"), [1, 2])
-        self.assertIn("searching again for 2 missing episode(s)", third.getvalue())
+        self.assertEqual(len(singles), 1)
+        self.assertEqual(singles[0].get("episodeIds"), [4])
+        self.assertIn("searching again for 1 missing episode(s)", fourth.getvalue())
 
     def test_housekeep_skips_refresh_when_search_running_and_complete_has_videos(self):
         os.environ["INDEXER_URL"] = ""

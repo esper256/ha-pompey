@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.51
+
+- Anime requests were searching every episode on every source (`World Trigger 28`, then `World Trigger` + Season 1 Episode 28) and never asking for a season pack. That is Sonarr’s **Anime** series type: it has no pack concept unless the indexer has **Anime Standard Format Search** *and* the command is a season search. Prowlarr’s Sonarr app was leaving that box off (or an older app row never got it), and housekeeping posted `EpisodeSearch` for the next eight holes — which never queries packs. Turn the official flag on, copy it onto Sonarr indexer rows, and poke a missing/cutoff season once with `SeasonSearch`. Dual-Audio stays a +15 tie-break on whatever was actually found; we do not stuff `Dual` into indexer queries. Rebuild so the banner says **0.2.51**, then restart so Prowlarr re-syncs. A still-open Seerr request gets one season search for a better copy.
+
 ## 0.2.50
 
 - Prowlarr Settings → Download Clients was empty, so Search → Grab did nothing useful. Wire a qBittorrent client at `127.0.0.1:8080` with category **`prowlarr`** (same `downloads/complete` folder as Arr). Do not reuse `radarr` / `sonarr` — Arr completed-download handling would claim a TV grab as a movie. Prowlarr never removes a completed torrent (it is not the importer). Preferred manual path: request in Seerr first, then Debug → Radarr/Sonarr **Interactive Search**. Prowlarr Grab is the fallback; housekeeping only imports if Arr already has the title. Debug also turns Interactive Search on for Arr indexer rows that landed with it off. Rebuild so the banner says **0.2.50**.
