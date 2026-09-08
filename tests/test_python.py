@@ -5067,6 +5067,242 @@ class WireStack(unittest.TestCase):
         self.assertTrue((self.ready / "wired").exists())
         self.assertFalse(self.nginx.exists())
 
+    def test_plan_library_retarget_sibling_not_kid_folder(self):
+        root = self.tmp / "retarget-plan"
+        kid = root / "TV" / "Kid Friendly"
+        gen = root / "TV" / "Not Kid Friendly"
+        auto = root / "TV" / "By Rating"
+        dest = gen / "World Trigger" / "Season 02"
+        dest.mkdir(parents=True)
+        (dest / "World Trigger - S02E01.mkv").write_bytes(b"x" * 80)
+        stored = str(kid / "World Trigger")
+        action, dest_root = ws.plan_library_retarget(
+            stored, [str(auto), str(gen), str(kid)]
+        )
+        self.assertEqual(action, "retarget")
+        self.assertEqual(dest_root, str(gen))
+        self.assertTrue(ws.season_videos_on_disk(str(gen / "World Trigger"), 2))
+        self.assertFalse(ws.season_videos_on_disk(str(gen / "World Trigger"), 1))
+
+    def test_plan_library_retarget_ambiguous_when_both_libraries_have_files(self):
+        root = self.tmp / "retarget-both"
+        kid = root / "TV" / "Kid Friendly" / "Show"
+        gen = root / "TV" / "Not Kid Friendly" / "Show"
+        auto = root / "TV" / "By Rating"
+        kid.mkdir(parents=True)
+        gen.mkdir(parents=True)
+        (kid / "Show.S02E01.mkv").write_bytes(b"x" * 80)
+        (gen / "Show.S02E01.mkv").write_bytes(b"y" * 80)
+        action, dest = ws.plan_library_retarget(
+            str(auto / "Show"), [str(auto), str(gen.parent), str(kid.parent)]
+        )
+        self.assertEqual(action, "ambiguous")
+        self.assertEqual(dest, "")
+
+    def test_housekeep_retargets_hand_moved_season_instead_of_search(self):
+        os.environ["INDEXER_URL"] = ""
+        os.environ["INDEXER_API_KEY"] = ""
+        root = self.tmp / "hand-move"
+        kid = root / "TV" / "Kid Friendly" / "World Trigger"
+        dest = root / "TV" / "Not Kid Friendly" / "World Trigger" / "Season 02"
+        dest.mkdir(parents=True)
+        (dest / "World Trigger - S02E01.mkv").write_bytes(b"x" * 100)
+        os.environ["MEDIA_ROOT"] = str(root)
+        self.state.series = [
+            {
+                "id": 10,
+                "title": "World Trigger",
+                "monitored": True,
+                "path": str(kid),
+                "statistics": {"episodeCount": 8, "episodeFileCount": 0},
+            }
+        ]
+        self.state.wanted_missing = [
+            {
+                "id": 1,
+                "seriesId": 10,
+                "seasonNumber": 2,
+                "episodeNumber": 1,
+                "series": {"id": 10, "title": "World Trigger"},
+            },
+            {
+                "id": 2,
+                "seriesId": 10,
+                "seasonNumber": 2,
+                "episodeNumber": 2,
+                "series": {"id": 10, "title": "World Trigger"},
+            },
+        ]
+        from io import StringIO
+        from contextlib import redirect_stdout
+
+        buf = StringIO()
+        with redirect_stdout(buf):
+            self.assertEqual(ws.housekeep(), 0)
+        out = buf.getvalue()
+        self.assertFalse(
+            any(item.get("name") == "SeasonSearch" for item in self.state.arr_commands),
+            self.state.arr_commands,
+        )
+        self.assertFalse(
+            any(item.get("name") == "EpisodeSearch" for item in self.state.arr_commands)
+        )
+        rescans = [
+            item for item in self.state.arr_commands if item.get("name") == "RescanSeries"
+        ]
+        self.assertEqual(len(rescans), 1, self.state.arr_commands)
+        self.assertEqual(rescans[0].get("seriesId"), 10)
+        path = str(self.state.series[0].get("path") or "")
+        self.assertTrue(path.startswith(str(root / "TV" / "Not Kid Friendly")))
+        self.assertIn("pointed World Trigger", out)
+        self.assertIn("rescanning instead of grabbing again", out)
+
+    def test_housekeep_skips_search_when_both_kid_folders_have_the_show(self):
+        os.environ["INDEXER_URL"] = ""
+        os.environ["INDEXER_API_KEY"] = ""
+        root = self.tmp / "hand-move-both"
+        kid = root / "TV" / "Kid Friendly" / "Show"
+        gen = root / "TV" / "Not Kid Friendly" / "Show"
+        kid.mkdir(parents=True)
+        gen.mkdir(parents=True)
+        (kid / "Show.S02E01.mkv").write_bytes(b"x" * 80)
+        (gen / "Show.S02E01.mkv").write_bytes(b"y" * 80)
+        os.environ["MEDIA_ROOT"] = str(root)
+        self.state.series = [
+            {
+                "id": 10,
+                "title": "Show",
+                "monitored": True,
+                "path": str(root / "TV" / "By Rating" / "Show"),
+                "statistics": {"episodeCount": 8, "episodeFileCount": 0},
+            }
+        ]
+        self.state.wanted_missing = [
+            {
+                "id": 1,
+                "seriesId": 10,
+                "seasonNumber": 2,
+                "episodeNumber": 1,
+                "series": {"id": 10},
+            },
+            {
+                "id": 2,
+                "seriesId": 10,
+                "seasonNumber": 2,
+                "episodeNumber": 2,
+                "series": {"id": 10},
+            },
+        ]
+        from io import StringIO
+        from contextlib import redirect_stdout
+
+        buf = StringIO()
+        with redirect_stdout(buf):
+            self.assertEqual(ws.housekeep(), 0)
+        self.assertFalse(
+            any(
+                item.get("name") in {"SeasonSearch", "EpisodeSearch", "RescanSeries"}
+                for item in self.state.arr_commands
+            ),
+            self.state.arr_commands,
+        )
+        self.assertIn("more than one Kid / Not Kid / By Rating folder", buf.getvalue())
+        self.assertTrue(
+            str(self.state.series[0].get("path") or "").endswith("By Rating/Show")
+        )
+
+    def test_housekeep_still_searches_a_season_that_is_not_on_disk(self):
+        os.environ["INDEXER_URL"] = ""
+        os.environ["INDEXER_API_KEY"] = ""
+        root = self.tmp / "real-missing"
+        show = root / "TV" / "Not Kid Friendly" / "Silo"
+        season1 = show / "Season 01"
+        season1.mkdir(parents=True)
+        (season1 / "Silo.S01E01.mkv").write_bytes(b"x" * 80)
+        os.environ["MEDIA_ROOT"] = str(root)
+        self.state.series = [
+            {
+                "id": 10,
+                "title": "Silo",
+                "monitored": True,
+                "path": str(show),
+                "statistics": {"episodeCount": 20, "episodeFileCount": 10},
+            }
+        ]
+        self.state.wanted_missing = [
+            {
+                "id": 1,
+                "seriesId": 10,
+                "seasonNumber": 2,
+                "episodeNumber": 1,
+                "series": {"id": 10, "title": "Silo"},
+            },
+            {
+                "id": 2,
+                "seriesId": 10,
+                "seasonNumber": 2,
+                "episodeNumber": 2,
+                "series": {"id": 10, "title": "Silo"},
+            },
+        ]
+        self.assertEqual(ws.housekeep(), 0)
+        seasons = [
+            item for item in self.state.arr_commands if item.get("name") == "SeasonSearch"
+        ]
+        self.assertEqual(len(seasons), 1, self.state.arr_commands)
+        self.assertEqual(seasons[0].get("seriesId"), 10)
+        self.assertEqual(seasons[0].get("seasonNumber"), 2)
+
+    def test_housekeep_rescans_unimported_season_already_at_arr_path(self):
+        os.environ["INDEXER_URL"] = ""
+        os.environ["INDEXER_API_KEY"] = ""
+        root = self.tmp / "stale-scan"
+        show = root / "TV" / "Not Kid Friendly" / "Show"
+        season = show / "Season 02"
+        season.mkdir(parents=True)
+        (season / "Show.S02E01.mkv").write_bytes(b"x" * 80)
+        os.environ["MEDIA_ROOT"] = str(root)
+        self.state.series = [
+            {
+                "id": 10,
+                "title": "Show",
+                "monitored": True,
+                "path": str(show),
+                "statistics": {"episodeCount": 8, "episodeFileCount": 0},
+            }
+        ]
+        self.state.wanted_missing = [
+            {
+                "id": 1,
+                "seriesId": 10,
+                "seasonNumber": 2,
+                "episodeNumber": 1,
+                "series": {"id": 10},
+            },
+            {
+                "id": 2,
+                "seriesId": 10,
+                "seasonNumber": 2,
+                "episodeNumber": 2,
+                "series": {"id": 10},
+            },
+        ]
+        from io import StringIO
+        from contextlib import redirect_stdout
+
+        buf = StringIO()
+        with redirect_stdout(buf):
+            self.assertEqual(ws.housekeep(), 0)
+        self.assertFalse(
+            any(item.get("name") == "SeasonSearch" for item in self.state.arr_commands),
+            self.state.arr_commands,
+        )
+        rescans = [
+            item for item in self.state.arr_commands if item.get("name") == "RescanSeries"
+        ]
+        self.assertEqual(len(rescans), 1, self.state.arr_commands)
+        self.assertIn("already has library video", buf.getvalue())
+
 
 class RouteRating(unittest.TestCase):
     def setUp(self):
@@ -5588,242 +5824,6 @@ class DebugIngress(unittest.TestCase):
             proc.wait(timeout=5)
             backend.shutdown()
             backend.server_close()
-
-    def test_plan_library_retarget_sibling_not_kid_folder(self):
-        root = self.tmp / "retarget-plan"
-        kid = root / "TV" / "Kid Friendly"
-        gen = root / "TV" / "Not Kid Friendly"
-        auto = root / "TV" / "By Rating"
-        dest = gen / "World Trigger" / "Season 02"
-        dest.mkdir(parents=True)
-        (dest / "World Trigger - S02E01.mkv").write_bytes(b"x" * 80)
-        stored = str(kid / "World Trigger")
-        action, dest_root = ws.plan_library_retarget(
-            stored, [str(auto), str(gen), str(kid)]
-        )
-        self.assertEqual(action, "retarget")
-        self.assertEqual(dest_root, str(gen))
-        self.assertTrue(ws.season_videos_on_disk(str(gen / "World Trigger"), 2))
-        self.assertFalse(ws.season_videos_on_disk(str(gen / "World Trigger"), 1))
-
-    def test_plan_library_retarget_ambiguous_when_both_libraries_have_files(self):
-        root = self.tmp / "retarget-both"
-        kid = root / "TV" / "Kid Friendly" / "Show"
-        gen = root / "TV" / "Not Kid Friendly" / "Show"
-        auto = root / "TV" / "By Rating"
-        kid.mkdir(parents=True)
-        gen.mkdir(parents=True)
-        (kid / "Show.S02E01.mkv").write_bytes(b"x" * 80)
-        (gen / "Show.S02E01.mkv").write_bytes(b"y" * 80)
-        action, dest = ws.plan_library_retarget(
-            str(auto / "Show"), [str(auto), str(gen), str(kid.parent)]
-        )
-        self.assertEqual(action, "ambiguous")
-        self.assertEqual(dest, "")
-
-    def test_housekeep_retargets_hand_moved_season_instead_of_search(self):
-        os.environ["INDEXER_URL"] = ""
-        os.environ["INDEXER_API_KEY"] = ""
-        root = self.tmp / "hand-move"
-        kid = root / "TV" / "Kid Friendly" / "World Trigger"
-        dest = root / "TV" / "Not Kid Friendly" / "World Trigger" / "Season 02"
-        dest.mkdir(parents=True)
-        (dest / "World Trigger - S02E01.mkv").write_bytes(b"x" * 100)
-        os.environ["MEDIA_ROOT"] = str(root)
-        self.state.series = [
-            {
-                "id": 10,
-                "title": "World Trigger",
-                "monitored": True,
-                "path": str(kid),
-                "statistics": {"episodeCount": 8, "episodeFileCount": 0},
-            }
-        ]
-        self.state.wanted_missing = [
-            {
-                "id": 1,
-                "seriesId": 10,
-                "seasonNumber": 2,
-                "episodeNumber": 1,
-                "series": {"id": 10, "title": "World Trigger"},
-            },
-            {
-                "id": 2,
-                "seriesId": 10,
-                "seasonNumber": 2,
-                "episodeNumber": 2,
-                "series": {"id": 10, "title": "World Trigger"},
-            },
-        ]
-        from io import StringIO
-        from contextlib import redirect_stdout
-
-        buf = StringIO()
-        with redirect_stdout(buf):
-            self.assertEqual(ws.housekeep(), 0)
-        out = buf.getvalue()
-        self.assertFalse(
-            any(item.get("name") == "SeasonSearch" for item in self.state.arr_commands),
-            self.state.arr_commands,
-        )
-        self.assertFalse(
-            any(item.get("name") == "EpisodeSearch" for item in self.state.arr_commands)
-        )
-        rescans = [
-            item for item in self.state.arr_commands if item.get("name") == "RescanSeries"
-        ]
-        self.assertEqual(len(rescans), 1, self.state.arr_commands)
-        self.assertEqual(rescans[0].get("seriesId"), 10)
-        path = str(self.state.series[0].get("path") or "")
-        self.assertTrue(path.startswith(str(root / "TV" / "Not Kid Friendly")))
-        self.assertIn("pointed World Trigger", out)
-        self.assertIn("rescanning instead of grabbing again", out)
-
-    def test_housekeep_skips_search_when_both_kid_folders_have_the_show(self):
-        os.environ["INDEXER_URL"] = ""
-        os.environ["INDEXER_API_KEY"] = ""
-        root = self.tmp / "hand-move-both"
-        kid = root / "TV" / "Kid Friendly" / "Show"
-        gen = root / "TV" / "Not Kid Friendly" / "Show"
-        kid.mkdir(parents=True)
-        gen.mkdir(parents=True)
-        (kid / "Show.S02E01.mkv").write_bytes(b"x" * 80)
-        (gen / "Show.S02E01.mkv").write_bytes(b"y" * 80)
-        os.environ["MEDIA_ROOT"] = str(root)
-        self.state.series = [
-            {
-                "id": 10,
-                "title": "Show",
-                "monitored": True,
-                "path": str(root / "TV" / "By Rating" / "Show"),
-                "statistics": {"episodeCount": 8, "episodeFileCount": 0},
-            }
-        ]
-        self.state.wanted_missing = [
-            {
-                "id": 1,
-                "seriesId": 10,
-                "seasonNumber": 2,
-                "episodeNumber": 1,
-                "series": {"id": 10},
-            },
-            {
-                "id": 2,
-                "seriesId": 10,
-                "seasonNumber": 2,
-                "episodeNumber": 2,
-                "series": {"id": 10},
-            },
-        ]
-        from io import StringIO
-        from contextlib import redirect_stdout
-
-        buf = StringIO()
-        with redirect_stdout(buf):
-            self.assertEqual(ws.housekeep(), 0)
-        self.assertFalse(
-            any(
-                item.get("name") in {"SeasonSearch", "EpisodeSearch", "RescanSeries"}
-                for item in self.state.arr_commands
-            ),
-            self.state.arr_commands,
-        )
-        self.assertIn("more than one Kid / Not Kid / By Rating folder", buf.getvalue())
-        self.assertTrue(
-            str(self.state.series[0].get("path") or "").endswith("By Rating/Show")
-        )
-
-    def test_housekeep_still_searches_a_season_that_is_not_on_disk(self):
-        os.environ["INDEXER_URL"] = ""
-        os.environ["INDEXER_API_KEY"] = ""
-        root = self.tmp / "real-missing"
-        show = root / "TV" / "Not Kid Friendly" / "Silo"
-        season1 = show / "Season 01"
-        season1.mkdir(parents=True)
-        (season1 / "Silo.S01E01.mkv").write_bytes(b"x" * 80)
-        os.environ["MEDIA_ROOT"] = str(root)
-        self.state.series = [
-            {
-                "id": 10,
-                "title": "Silo",
-                "monitored": True,
-                "path": str(show),
-                "statistics": {"episodeCount": 20, "episodeFileCount": 10},
-            }
-        ]
-        self.state.wanted_missing = [
-            {
-                "id": 1,
-                "seriesId": 10,
-                "seasonNumber": 2,
-                "episodeNumber": 1,
-                "series": {"id": 10, "title": "Silo"},
-            },
-            {
-                "id": 2,
-                "seriesId": 10,
-                "seasonNumber": 2,
-                "episodeNumber": 2,
-                "series": {"id": 10, "title": "Silo"},
-            },
-        ]
-        self.assertEqual(ws.housekeep(), 0)
-        seasons = [
-            item for item in self.state.arr_commands if item.get("name") == "SeasonSearch"
-        ]
-        self.assertEqual(len(seasons), 1, self.state.arr_commands)
-        self.assertEqual(seasons[0].get("seriesId"), 10)
-        self.assertEqual(seasons[0].get("seasonNumber"), 2)
-
-    def test_housekeep_rescans_unimported_season_already_at_arr_path(self):
-        os.environ["INDEXER_URL"] = ""
-        os.environ["INDEXER_API_KEY"] = ""
-        root = self.tmp / "stale-scan"
-        show = root / "TV" / "Not Kid Friendly" / "Show"
-        season = show / "Season 02"
-        season.mkdir(parents=True)
-        (season / "Show.S02E01.mkv").write_bytes(b"x" * 80)
-        os.environ["MEDIA_ROOT"] = str(root)
-        self.state.series = [
-            {
-                "id": 10,
-                "title": "Show",
-                "monitored": True,
-                "path": str(show),
-                "statistics": {"episodeCount": 8, "episodeFileCount": 0},
-            }
-        ]
-        self.state.wanted_missing = [
-            {
-                "id": 1,
-                "seriesId": 10,
-                "seasonNumber": 2,
-                "episodeNumber": 1,
-                "series": {"id": 10},
-            },
-            {
-                "id": 2,
-                "seriesId": 10,
-                "seasonNumber": 2,
-                "episodeNumber": 2,
-                "series": {"id": 10},
-            },
-        ]
-        from io import StringIO
-        from contextlib import redirect_stdout
-
-        buf = StringIO()
-        with redirect_stdout(buf):
-            self.assertEqual(ws.housekeep(), 0)
-        self.assertFalse(
-            any(item.get("name") == "SeasonSearch" for item in self.state.arr_commands),
-            self.state.arr_commands,
-        )
-        rescans = [
-            item for item in self.state.arr_commands if item.get("name") == "RescanSeries"
-        ]
-        self.assertEqual(len(rescans), 1, self.state.arr_commands)
-        self.assertIn("already has library video", buf.getvalue())
 
 
 class TestsNeverUseBitTorrent(unittest.TestCase):
