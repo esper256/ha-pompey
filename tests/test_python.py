@@ -296,6 +296,8 @@ class FakeState:
         self.seerr_fail_requests = False
         self.queue: list[dict] = []
         self.sonarr_queue: list[dict] = []
+        self.cancelled_commands: list[dict] = []
+        self.aborted_queue: list[dict] = []
         self.qbit_categories: dict = {}
         self.qbit_torrents: list[dict] = []
         self.qbit_removed: list[dict] = []
@@ -561,6 +563,27 @@ def handler_for(state: FakeState):
                 if path.endswith("/queue") and method == "GET":
                     rows = state.queue if role == "radarr" else state.sonarr_queue
                     return self._send(body={"records": rows, "page": 1, "pageSize": 50})
+                if "/queue/" in path and method == "DELETE":
+                    try:
+                        idx = int(path.rsplit("/", 1)[-1])
+                    except ValueError:
+                        return self._send(404, {"error": path})
+                    rows = state.queue if role == "radarr" else state.sonarr_queue
+                    state.aborted_queue.append(
+                        {
+                            "role": role,
+                            "id": idx,
+                            "removeFromClient": (query.get("removeFromClient") or [""])[0],
+                            "blocklist": (query.get("blocklist") or [""])[0],
+                            "skipRedownload": (query.get("skipRedownload") or [""])[0],
+                        }
+                    )
+                    leftover = [item for item in rows if item.get("id") != idx]
+                    if role == "radarr":
+                        state.queue = leftover
+                    else:
+                        state.sonarr_queue = leftover
+                    return self._send(200, {})
                 if path.endswith("/config/downloadclient") and method == "GET":
                     cfg = state.radarr_dl_config if role == "radarr" else state.sonarr_dl_config
                     return self._send(body=cfg)
@@ -805,6 +828,23 @@ def handler_for(state: FakeState):
                                 state.series[i] = saved
                                 return self._send(body=saved)
                     return self._send(body=body)
+                if "/command/" in path and method == "DELETE":
+                    try:
+                        idx = int(path.rsplit("/", 1)[-1])
+                    except ValueError:
+                        return self._send(404, {"error": path})
+                    queued = (
+                        state.radarr_command_queue
+                        if role == "radarr"
+                        else state.sonarr_command_queue
+                    )
+                    state.cancelled_commands.append({"role": role, "id": idx})
+                    leftover = [item for item in queued if item.get("id") != idx]
+                    if role == "radarr":
+                        state.radarr_command_queue = leftover
+                    else:
+                        state.sonarr_command_queue = leftover
+                    return self._send(200, {})
                 if path.endswith("/command") and method == "GET":
                     queued = (
                         state.radarr_command_queue
@@ -1514,6 +1554,7 @@ PersistentKeepalive = 25
     def test_wire_keeps_housekeeping_hidden_qbit(self):
         wire = (ROOT / "pompey/rootfs/etc/services.d/wire/run").read_text()
         self.assertIn("housekeep", wire)
+        self.assertIn("closeout", wire)
         src = (ROOT / "pompey/rootfs/usr/local/bin/wire-stack").read_text()
         self.assertIn('"deleteFiles": "false"', src)
         self.assertNotIn('"deleteFiles": "true"', src)
@@ -4961,7 +5002,7 @@ class WireStack(unittest.TestCase):
         ]
         self.assertEqual(ws.housekeep(), 0)
         self.assertTrue(self.state.movies[0]["monitored"])
-        self.assertTrue(self.state.movies[1]["monitored"])
+        self.assertFalse(self.state.movies[1]["monitored"])
 
         self.state.seerr_requests = []
         from io import StringIO
@@ -4971,8 +5012,166 @@ class WireStack(unittest.TestCase):
         with redirect_stdout(buf):
             self.assertEqual(ws.housekeep(), 0)
         self.assertFalse(self.state.movies[0]["monitored"])
-        self.assertTrue(self.state.movies[1]["monitored"])
+        self.assertFalse(self.state.movies[1]["monitored"])
         self.assertIn("stopped looking for a better copy of Open Anime", buf.getvalue())
+
+    def test_closeout_unmonitors_without_remembered_upgrade_ids(self):
+        os.environ["INDEXER_URL"] = ""
+        os.environ["INDEXER_API_KEY"] = ""
+        self.state.seerr_has_admin = True
+        self.state.seerr_requests = []
+        self.state.movies = [
+            {"id": 99, "title": "Arr Only", "monitored": True, "hasFile": True, "tmdbId": 111},
+        ]
+        self.assertEqual(ws.closeout(), 0)
+        self.assertFalse(self.state.movies[0]["monitored"])
+
+    def test_removed_request_does_not_season_search_same_cycle(self):
+        os.environ["INDEXER_URL"] = ""
+        os.environ["INDEXER_API_KEY"] = ""
+        self.state.seerr_has_admin = True
+        self.state.seerr_requests = []
+        self.state.series = [
+            {
+                "id": 10,
+                "title": "Silo",
+                "monitored": True,
+                "monitorNewItems": "all",
+                "path": "/media/TV/Not Kid Friendly/Silo",
+                "seasons": [
+                    {"seasonNumber": 1, "monitored": True},
+                    {"seasonNumber": 2, "monitored": True},
+                ],
+            }
+        ]
+        self.state.wanted_missing = [
+            {
+                "id": 1,
+                "seriesId": 10,
+                "seasonNumber": 2,
+                "episodeNumber": 1,
+                "series": {"id": 10, "title": "Silo"},
+            },
+            {
+                "id": 2,
+                "seriesId": 10,
+                "seasonNumber": 2,
+                "episodeNumber": 2,
+                "series": {"id": 10, "title": "Silo"},
+            },
+        ]
+        from io import StringIO
+        from contextlib import redirect_stdout
+
+        buf = StringIO()
+        with redirect_stdout(buf):
+            self.assertEqual(ws.housekeep(), 0)
+        self.assertFalse(self.state.series[0]["monitored"])
+        self.assertEqual(self.state.series[0].get("monitorNewItems"), "none")
+        self.assertFalse(any(season.get("monitored") for season in self.state.series[0]["seasons"]))
+        self.assertFalse(
+            any(
+                item.get("name") in {"SeasonSearch", "EpisodeSearch", "SeriesSearch"}
+                for item in self.state.arr_commands
+            ),
+            self.state.arr_commands,
+        )
+        self.assertIn("stopped looking for a better copy of Silo", buf.getvalue())
+
+    def test_closeout_unmonitors_seasons_and_cancels_inflight_search(self):
+        os.environ["INDEXER_URL"] = ""
+        os.environ["INDEXER_API_KEY"] = ""
+        self.state.seerr_has_admin = True
+        self.state.seerr_requests = []
+        self.state.series = [
+            {
+                "id": 10,
+                "title": "Silo",
+                "monitored": False,
+                "monitorNewItems": "all",
+                "seasons": [
+                    {"seasonNumber": 1, "monitored": False},
+                    {"seasonNumber": 2, "monitored": True},
+                ],
+            }
+        ]
+        self.state.sonarr_command_queue = [
+            {
+                "id": 44,
+                "name": "SeasonSearch",
+                "status": "started",
+                "body": {"name": "SeasonSearch", "seriesId": 10, "seasonNumber": 2},
+            },
+            {
+                "id": 45,
+                "name": "RefreshSeries",
+                "status": "queued",
+                "body": {"name": "RefreshSeries", "seriesId": 10},
+            },
+        ]
+        self.state.sonarr_queue = [
+            {"id": 7, "seriesId": 10, "title": "Silo.S02E01"},
+            {"id": 8, "seriesId": 99, "title": "Other"},
+        ]
+        self.assertEqual(ws.closeout(), 0)
+        show = self.state.series[0]
+        self.assertFalse(show["monitored"])
+        self.assertEqual(show.get("monitorNewItems"), "none")
+        self.assertFalse(any(season.get("monitored") for season in show["seasons"]))
+        self.assertEqual(self.state.cancelled_commands, [{"role": "sonarr", "id": 44}])
+        self.assertEqual(
+            [item["id"] for item in self.state.sonarr_command_queue],
+            [45],
+        )
+        self.assertEqual(
+            self.state.aborted_queue,
+            [
+                {
+                    "role": "sonarr",
+                    "id": 7,
+                    "removeFromClient": "true",
+                    "blocklist": "false",
+                    "skipRedownload": "true",
+                }
+            ],
+        )
+        self.assertEqual([item["id"] for item in self.state.sonarr_queue], [8])
+        self.assertFalse(
+            any(
+                item.get("name") in {"SeasonSearch", "EpisodeSearch"}
+                for item in self.state.arr_commands
+            )
+        )
+
+    def test_closeout_keeps_open_seerr_request_hunting(self):
+        os.environ["INDEXER_URL"] = ""
+        os.environ["INDEXER_API_KEY"] = ""
+        self.state.seerr_has_admin = True
+        self.state.movies = [
+            {"id": 99, "title": "Open Anime", "monitored": True, "hasFile": False, "tmdbId": 111},
+        ]
+        self.state.seerr_requests = [
+            {
+                "id": 7,
+                "status": 5,
+                "media": {"mediaType": "movie", "tmdbId": 111, "externalServiceId": 99},
+            }
+        ]
+        self.state.radarr_command_queue = [
+            {
+                "id": 3,
+                "name": "MoviesSearch",
+                "status": "started",
+                "body": {"name": "MoviesSearch", "movieIds": [99]},
+            }
+        ]
+        self.state.queue = [{"id": 1, "movieId": 99, "title": "Open Anime"}]
+        self.assertEqual(ws.closeout(), 0)
+        self.assertTrue(self.state.movies[0]["monitored"])
+        self.assertEqual(self.state.cancelled_commands, [])
+        self.assertEqual(self.state.aborted_queue, [])
+        self.assertEqual(len(self.state.radarr_command_queue), 1)
+        self.assertEqual(len(self.state.queue), 1)
 
     def test_seerr_request_read_failure_does_not_unmonitor(self):
         os.environ["INDEXER_URL"] = ""

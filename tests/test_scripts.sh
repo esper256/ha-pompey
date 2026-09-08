@@ -686,6 +686,11 @@ test -x "${BIN}/pompey-log-emit"
 test -x "${BIN}/prowlarr-arr-proxy"
 grep -q '127.0.0.1:9698/ping' "${svc}/wire/run"
 grep -q 'wire-stack housekeep' "${svc}/wire/run"
+grep -q 'wire-stack closeout' "${svc}/wire/run"
+if ! grep -q 'sleep 15' "${svc}/wire/run"; then
+  echo "wire/run must close out removed Seerr requests faster than housekeep" >&2
+  exit 1
+fi
 if ! grep -q 'wire-stack" housekeep' "${ROOT}/tests/integration.sh"; then
   echo "integration.sh must keep ticking housekeep so downloads/ can drain" >&2
   exit 1

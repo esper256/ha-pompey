@@ -47,9 +47,17 @@ until [[ -f "${POMPEY_READY}/seerr-arr" ]]; do
   python3 /usr/local/bin/wire-stack >/dev/null || true
 done
 
-# qBittorrent stays hidden. Stop finished torrents so Arr can rename into the
-# library, forget rows whose files already moved, and keep scanning complete/.
+# Search is up. Stop Arr hunting as soon as a Seerr request is removed
+# (unmonitor, cancel searches, drop the Arr queue). Housekeep still imports
+# leftover files on a slower tick.
+python3 /usr/local/bin/wire-stack closeout || true
+n=0
 while true; do
-  sleep 300
-  python3 /usr/local/bin/wire-stack housekeep || true
+  sleep 15
+  python3 /usr/local/bin/wire-stack closeout || true
+  n=$((n + 1))
+  if [[ "${n}" -ge 20 ]]; then
+    n=0
+    python3 /usr/local/bin/wire-stack housekeep || true
+  fi
 done
