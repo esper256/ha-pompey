@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.54
+
+- Back-catalog titles Sonarr cannot parse are a **Prowlarr Search → Grab**, not another SeasonSearch. Prowlarr’s qBittorrent category now saves into **`downloads/manual`** (not `downloads/complete`, and not a Movies/TV root). Housekeeping was the remaining foot-gun: a human Grab sat next to Arr’s completed downloads, Arr called it “Not a wanted quality,” and the next missing-search grabbed a second pack. Import a Grab when Arr already has that title (Seerr request, or a leftover unmonitored row after you deleted the files), even if Default/Max would reject it. Do not SeasonSearch that title while the matching file is still in `complete/` or `manual/`. A Grab with no Arr title still sits in `downloads/manual` — request it in search first so the Kid / Not Kid folder exists; we still do not guess from the filename. If the library already has that `SxxExx` / movie, the leftover copy is removed (delete the library file first if you meant to replace it). Removing the Seerr request (Requests page, not Clear Data) is the close-out: a ~15s loop unmonitors the Radarr/Sonarr row (TV seasons and `monitorNewItems` too), cancels in-flight SeasonSearch/MoviesSearch, and drops that title from the Arr queue so the next housekeep tick cannot start a phantom grab. The Arr row stays so a later Prowlarr Grab still has a folder. Rebuild so the banner says **0.2.54**.
+
 ## 0.2.53
 
 - Dual Subs is two subtitle tracks, not Dual Audio. The +15 Default/Max tie-break treated the word `DUAL` as Dual Audio, so `1080p.Dual.Subs` and `[Dual Subs]` could beat or tie a real Dual-Audio release. Score only Dual-Audio / `[DUAL]` / JA+EN, and add a required “not Dual Subs” rule to our CF and to TRaSH Anime Dual Audio after Recyclarr rewrites it. Rebuild so the banner says **0.2.53**.

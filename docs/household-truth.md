@@ -45,9 +45,11 @@ Everything else (Proton, Prowlarr, Recyclarr, qBittorrent) stays a tool behind t
 
 ## Path forward (in this order)
 
-**Now — stop the grab, then reconcile.** If a season is downloading again: remove the Seerr request so cutoff/missing pokes stop; pause or remove the qBittorrent season torrent; leave the good files where they are. **0.2.52** points Sonarr at the one sibling Kid / Not Kid / By Rating folder that already has the video (`moveFiles: false`) and posts `RescanSeries` instead of `SeasonSearch`. If both libraries still have files, we do not guess — we refuse to search and log it. Empty the leftover Plex library so the show is in one place.
+**Now — stop the grab, then reconcile.** If a season is downloading again: remove the Seerr request so cutoff/missing pokes stop; pause or remove the qBittorrent season torrent; leave the good files where they are. **0.2.54** notices the removed request within about 15 seconds, unmonitors the Sonarr row (seasons and `monitorNewItems` too), cancels in-flight `SeasonSearch`, and drops that title from the Arr queue. **0.2.52** points Sonarr at the one sibling Kid / Not Kid / By Rating folder that already has the video (`moveFiles: false`) and posts `RescanSeries` instead of `SeasonSearch`. If both libraries still have files, we do not guess — we refuse to search and log it. Empty the leftover Plex library so the show is in one place.
 
 Do not drag library folders between Kid and Not Kid in the file manager. Pick the root on the Seerr request, or let By Rating sort. Housekeeping still will not guess Kid vs Not Kid from a filename.
+
+**Manual Grab for catalogs Sonarr cannot parse.** Request the title first (that is the folder identity). Then Prowlarr Search → Grab. Those torrents land in `downloads/manual`, not `downloads/complete` and not a library root. Housekeep imports them onto the leftover Arr path even if quality would reject, and does not SeasonSearch while that file is still in the drop. A Grab with no Arr row stays in `manual/` until you request it.
 
 **Next — fewer truths, not fewer logos.** Operator status in the sidebar (roadmap 4) should say “files are on disk, Sonarr path is wrong” instead of only “wanted/missing.” That is product. Stealing search (Pompey → Prowlarr, Arr still imports) is still the right move if query policy is the pain. It does not fix this bug; the accountant was correct given a stale path.
 
