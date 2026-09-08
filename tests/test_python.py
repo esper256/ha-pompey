@@ -1528,6 +1528,7 @@ PersistentKeepalive = 25
                 "/media/dlna/downloads/complete",
                 "/media/dlna/downloads/complete/radarr",
                 "/media/dlna/downloads/complete/sonarr",
+                "/media/dlna/downloads/manual",
             ],
         )
         self.assertEqual(
@@ -1535,6 +1536,7 @@ PersistentKeepalive = 25
             [
                 "/media/dlna/downloads/complete",
                 "/media/dlna/downloads/complete/radarr",
+                "/media/dlna/downloads/manual",
             ],
         )
         self.assertEqual(
@@ -1542,6 +1544,7 @@ PersistentKeepalive = 25
             [
                 "/media/dlna/downloads/complete",
                 "/media/dlna/downloads/complete/sonarr",
+                "/media/dlna/downloads/manual",
             ],
         )
         os.environ.pop("MEDIA_ROOT", None)
@@ -1573,11 +1576,15 @@ PersistentKeepalive = 25
         with tempfile.TemporaryDirectory() as raw:
             base = Path(raw)
             complete = base / "downloads" / "complete"
+            manual = base / "downloads" / "manual"
             movies = base / "Movies" / "Not Kid Friendly" / "Silo"
             complete.mkdir(parents=True)
+            manual.mkdir(parents=True)
             movies.mkdir(parents=True)
             leftover = complete / "Silo.S03E01.mkv"
             leftover.write_bytes(b"copy")
+            grab = manual / "Show.S01E01.mkv"
+            grab.write_bytes(b"human")
             library = movies / "Silo.S03E01.mkv"
             library.write_bytes(b"library")
             old = {key: os.environ.get(key) for key in ("MEDIA_ROOT", "MEDIA_MOVIES")}
@@ -1585,7 +1592,9 @@ PersistentKeepalive = 25
             os.environ["MEDIA_MOVIES"] = "Movies/Not Kid Friendly"
             try:
                 self.assertTrue(ws.safe_to_delete_complete_path(str(leftover)))
+                self.assertTrue(ws.safe_to_delete_complete_path(str(grab)))
                 self.assertFalse(ws.safe_to_delete_complete_path(str(complete)))
+                self.assertFalse(ws.safe_to_delete_complete_path(str(manual)))
                 self.assertFalse(ws.safe_to_delete_complete_path(str(library)))
                 self.assertFalse(ws.safe_to_delete_complete_path(str(movies)))
                 self.assertTrue(ws.path_is_library(str(library)))
@@ -1595,6 +1604,7 @@ PersistentKeepalive = 25
                 os.environ["MEDIA_MOVIES"] = "downloads/complete"
                 self.assertTrue(ws.complete_overlaps_library())
                 self.assertFalse(ws.safe_to_delete_complete_path(str(leftover)))
+                self.assertTrue(ws.safe_to_delete_complete_path(str(grab)))
                 ws.remove_complete_leftover(str(leftover), "overlap")
                 self.assertTrue(leftover.is_file())
             finally:
@@ -1862,6 +1872,16 @@ PersistentKeepalive = 25
         self.assertTrue(ws.is_expected_cross_kind_reject("Unknown Series"))
         self.assertTrue(ws.is_expected_cross_kind_reject("Unknown Movie"))
         self.assertFalse(ws.is_expected_cross_kind_reject("Not a wanted quality"))
+        self.assertTrue(ws.is_hard_import_reject("Unknown Series"))
+        self.assertTrue(ws.is_hard_import_reject("Sample"))
+        self.assertTrue(ws.is_hard_import_reject("File is a sample"))
+        self.assertFalse(ws.is_hard_import_reject("Not a wanted quality for Default"))
+        self.assertFalse(
+            ws.is_hard_import_reject("Custom Format score of 0 does not meet minimum of 10")
+        )
+        self.assertFalse(
+            ws.is_hard_import_reject("Existing file is of equal or higher quality")
+        )
         os.environ["MEDIA_ROOT"] = "/media/dlna"
         self.assertEqual(
             ws.release_dir_under_complete(
@@ -1871,6 +1891,16 @@ PersistentKeepalive = 25
         )
         self.assertEqual(
             ws.release_dir_under_complete("/media/dlna/downloads/complete/file.mp4"),
+            "",
+        )
+        self.assertEqual(
+            ws.release_dir_under_complete(
+                "/media/dlna/downloads/manual/www.UIndex.org - Title/file.mp4"
+            ),
+            "/media/dlna/downloads/manual/www.UIndex.org - Title",
+        )
+        self.assertEqual(
+            ws.release_dir_under_complete("/media/dlna/downloads/manual/file.mp4"),
             "",
         )
         os.environ.pop("MEDIA_ROOT", None)
@@ -2458,7 +2488,7 @@ class WireStack(unittest.TestCase):
         self.assertEqual(prow_fields.get("tvCategory"), "prowlarr")
         self.assertEqual(self.state.qbit_categories.get("radarr"), "/media/downloads/complete")
         self.assertEqual(self.state.qbit_categories.get("sonarr"), "/media/downloads/complete")
-        self.assertEqual(self.state.qbit_categories.get("prowlarr"), "/media/downloads/complete")
+        self.assertEqual(self.state.qbit_categories.get("prowlarr"), "/media/downloads/manual")
         prefs_body = self.state.qbit_prefs
         self.assertIsInstance(prefs_body, dict)
         raw = prefs_body.get("json")
@@ -3148,6 +3178,12 @@ class WireStack(unittest.TestCase):
             {
                 "path": str(blocked),
                 "movieId": 1,
+                "movie": {
+                    "id": 1,
+                    "title": "Matched",
+                    "path": dest,
+                    "hasFile": False,
+                },
                 "quality": quality,
                 "rejections": [{"reason": "Not a wanted quality for Default"}],
             },
@@ -3170,14 +3206,23 @@ class WireStack(unittest.TestCase):
         self.assertEqual(len(manuals), 1)
         self.assertEqual(manuals[0].get("importMode"), "Move")
         paths = [row.get("path") for row in manuals[0].get("files") or []]
-        self.assertEqual(paths, [str(wanted)])
+        self.assertEqual(paths, [str(wanted), str(blocked)])
         out = buf.getvalue()
-        self.assertIn("will not import remux.mkv: Not a wanted quality for Default", out)
-        self.assertIn(f"importing matched.mkv into {dest} (Arr record from Seerr, not the filename)", out)
         self.assertIn(
-            "no library match for random-file.mkv (not guessing Kid vs Not Kid from the name)",
+            f"importing remux.mkv into {dest} despite Not a wanted quality for Default "
+            "(manual grab; Arr already has this title)",
             out,
         )
+        self.assertIn(
+            f"importing matched.mkv into {dest} (Arr title folder, not a guess from the filename)",
+            out,
+        )
+        self.assertIn(
+            "no library match for random-file.mkv (request it in search first so Arr "
+            "has a Kid / Not Kid folder; leaving it in complete/)",
+            out,
+        )
+        self.assertTrue(unknown.is_file())
 
     def test_housekeep_does_not_delete_torrent_data(self):
         os.environ["INDEXER_URL"] = ""
@@ -3612,9 +3657,224 @@ class WireStack(unittest.TestCase):
             [str(wanted)],
         )
         self.assertIn(
-            f"importing Show.S01E02.mkv into {dest} (Arr record from Seerr, not the filename)",
+            f"importing Show.S01E02.mkv into {dest} (Arr title folder, not a guess from the filename)",
             buf.getvalue(),
         )
+
+    def test_housekeep_imports_prowlarr_grab_from_downloads_manual(self):
+        os.environ["INDEXER_URL"] = ""
+        os.environ["INDEXER_API_KEY"] = ""
+        root = self.tmp / "manual-import"
+        manual = root / "downloads" / "manual"
+        manual.mkdir(parents=True)
+        wanted = manual / "Show.S01E02.mkv"
+        wanted.write_bytes(b"ok")
+        os.environ["MEDIA_ROOT"] = str(root)
+        dest = str(root / "TV" / "Not Kid Friendly" / "Show (2024)")
+        quality = {"quality": {"id": 4, "name": "WEBDL-1080p"}, "revision": {"version": 1}}
+        self.state.sonarr_manual_import = [
+            {
+                "path": str(wanted),
+                "seriesId": 10,
+                "episodeIds": [12],
+                "series": {"id": 10, "title": "Show", "path": dest, "hasFile": False},
+                "episodes": [{"id": 12, "hasFile": False}],
+                "quality": quality,
+                "languages": [{"id": 1, "name": "English"}],
+                "rejections": [{"reason": "Not a wanted quality for Default"}],
+            }
+        ]
+        from io import StringIO
+        from contextlib import redirect_stdout
+
+        buf = StringIO()
+        with redirect_stdout(buf):
+            rc = ws.housekeep()
+        self.assertEqual(rc, 0)
+        manuals = [
+            item for item in self.state.arr_commands if item.get("name") == "ManualImport"
+        ]
+        self.assertEqual(len(manuals), 1)
+        self.assertEqual(manuals[0].get("importMode"), "Move")
+        self.assertEqual(
+            [row.get("path") for row in manuals[0].get("files") or []],
+            [str(wanted)],
+        )
+        self.assertIn(
+            f"importing Show.S01E02.mkv into {dest} despite Not a wanted quality for Default "
+            "(manual grab; Arr already has this title)",
+            buf.getvalue(),
+        )
+        movie_paths = {
+            item.get("path")
+            for item in self.state.arr_commands
+            if item.get("name") == "DownloadedMoviesScan"
+        }
+        episode_paths = {
+            item.get("path")
+            for item in self.state.arr_commands
+            if item.get("name") == "DownloadedEpisodesScan"
+        }
+        self.assertIn(str(manual), movie_paths)
+        self.assertIn(str(manual), episode_paths)
+
+    def test_housekeep_imports_manual_grab_onto_unmonitored_empty_folder(self):
+        """Deleted-on-disk leftover Arr row: Prowlarr Grab still lands in that folder."""
+        os.environ["INDEXER_URL"] = ""
+        os.environ["INDEXER_API_KEY"] = ""
+        root = self.tmp / "ghost-row"
+        complete = root / "downloads" / "complete"
+        complete.mkdir(parents=True)
+        grab = complete / "Show.S01E01.mkv"
+        grab.write_bytes(b"human")
+        os.environ["MEDIA_ROOT"] = str(root)
+        dest = root / "TV" / "Not Kid Friendly" / "Show (2024)"
+        dest.mkdir(parents=True)
+        quality = {"quality": {"id": 4, "name": "HDTV-720p"}, "revision": {"version": 1}}
+        self.state.series = [
+            {
+                "id": 10,
+                "title": "Show",
+                "monitored": False,
+                "path": str(dest),
+                "statistics": {"episodeFileCount": 1, "episodeCount": 1},
+            }
+        ]
+        self.state.episodes = [
+            {"id": 11, "seriesId": 10, "hasFile": True, "title": "Pilot"},
+        ]
+        self.state.sonarr_manual_import = [
+            {
+                "path": str(grab),
+                "seriesId": 10,
+                "episodeIds": [11],
+                "series": {"id": 10, "title": "Show", "path": str(dest)},
+                "quality": quality,
+                "languages": [{"id": 1, "name": "English"}],
+                "rejections": [{"reason": "Not a wanted quality for Default"}],
+            }
+        ]
+        from io import StringIO
+        from contextlib import redirect_stdout
+
+        buf = StringIO()
+        with redirect_stdout(buf):
+            self.assertEqual(ws.housekeep(), 0)
+        manuals = [
+            item for item in self.state.arr_commands if item.get("name") == "ManualImport"
+        ]
+        self.assertEqual(len(manuals), 1)
+        self.assertEqual(
+            [row.get("path") for row in manuals[0].get("files") or []],
+            [str(grab)],
+        )
+        self.assertTrue(grab.is_file())
+        out = buf.getvalue()
+        self.assertIn("does not have this video; importing leftover", out)
+        self.assertIn(
+            f"importing Show.S01E01.mkv into {dest} despite Not a wanted quality for Default "
+            "(manual grab; Arr already has this title)",
+            out,
+        )
+
+    def test_housekeep_skips_season_search_while_matching_grab_sits_in_complete(self):
+        os.environ["INDEXER_URL"] = ""
+        os.environ["INDEXER_API_KEY"] = ""
+        root = self.tmp / "pending-grab"
+        manual = root / "downloads" / "manual"
+        manual.mkdir(parents=True)
+        grab = manual / "Silo.S02E01.mkv"
+        grab.write_bytes(b"human")
+        show = root / "TV" / "Not Kid Friendly" / "Silo"
+        show.mkdir(parents=True)
+        os.environ["MEDIA_ROOT"] = str(root)
+        self.state.series = [
+            {
+                "id": 10,
+                "title": "Silo",
+                "monitored": True,
+                "path": str(show),
+                "statistics": {"episodeCount": 20, "episodeFileCount": 0},
+            }
+        ]
+        self.state.wanted_missing = [
+            {
+                "id": 1,
+                "seriesId": 10,
+                "seasonNumber": 2,
+                "episodeNumber": 1,
+                "series": {"id": 10, "title": "Silo"},
+            },
+            {
+                "id": 2,
+                "seriesId": 10,
+                "seasonNumber": 2,
+                "episodeNumber": 2,
+                "series": {"id": 10, "title": "Silo"},
+            },
+        ]
+        from io import StringIO
+        from contextlib import redirect_stdout
+
+        buf = StringIO()
+        with redirect_stdout(buf):
+            self.assertEqual(ws.housekeep(), 0)
+        self.assertFalse(
+            any(
+                item.get("name") in {"SeasonSearch", "EpisodeSearch"}
+                for item in self.state.arr_commands
+            ),
+            self.state.arr_commands,
+        )
+        self.assertTrue(grab.is_file())
+        self.assertIn(
+            "not searching Silo; a matching file is still in complete/ or manual/ "
+            "(manual grab, not a new SeasonSearch)",
+            buf.getvalue(),
+        )
+
+    def test_housekeep_still_searches_when_complete_file_is_a_different_title(self):
+        os.environ["INDEXER_URL"] = ""
+        os.environ["INDEXER_API_KEY"] = ""
+        root = self.tmp / "other-complete"
+        complete = root / "downloads" / "complete"
+        complete.mkdir(parents=True)
+        (complete / "Unrelated.Movie.2024.mkv").write_bytes(b"x" * 40)
+        show = root / "TV" / "Not Kid Friendly" / "Silo"
+        show.mkdir(parents=True)
+        os.environ["MEDIA_ROOT"] = str(root)
+        self.state.series = [
+            {
+                "id": 10,
+                "title": "Silo",
+                "monitored": True,
+                "path": str(show),
+                "statistics": {"episodeCount": 20, "episodeFileCount": 0},
+            }
+        ]
+        self.state.wanted_missing = [
+            {
+                "id": 1,
+                "seriesId": 10,
+                "seasonNumber": 2,
+                "episodeNumber": 1,
+                "series": {"id": 10, "title": "Silo"},
+            },
+            {
+                "id": 2,
+                "seriesId": 10,
+                "seasonNumber": 2,
+                "episodeNumber": 2,
+                "series": {"id": 10, "title": "Silo"},
+            },
+        ]
+        self.assertEqual(ws.housekeep(), 0)
+        seasons = [
+            item for item in self.state.arr_commands if item.get("name") == "SeasonSearch"
+        ]
+        self.assertEqual(len(seasons), 1, self.state.arr_commands)
+        self.assertEqual(seasons[0].get("seriesId"), 10)
+        self.assertEqual(seasons[0].get("seasonNumber"), 2)
 
     def test_housekeep_does_not_log_unknown_movie_for_an_episode_file(self):
         os.environ["INDEXER_URL"] = ""
@@ -3659,7 +3919,7 @@ class WireStack(unittest.TestCase):
             rc = ws.housekeep()
         self.assertEqual(rc, 0)
         out = buf.getvalue()
-        self.assertIn("removed 1 leftover complete/ folder(s)", out)
+        self.assertIn("removed 1 leftover complete/manual folder(s)", out)
         self.assertFalse(folder.exists())
         self.assertNotIn("still in complete/:", out)
         self.assertNotIn("English.srt", out)

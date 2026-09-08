@@ -49,6 +49,8 @@ Everything else (Proton, Prowlarr, Recyclarr, qBittorrent) stays a tool behind t
 
 Do not drag library folders between Kid and Not Kid in the file manager. Pick the root on the Seerr request, or let By Rating sort. Housekeeping still will not guess Kid vs Not Kid from a filename.
 
+**Manual Grab for catalogs Sonarr cannot parse.** Request the title first (that is the folder identity). Then Prowlarr Search → Grab. Those torrents land in `downloads/manual`, not `downloads/complete` and not a library root. Housekeep imports them onto the leftover Arr path even if quality would reject, and does not SeasonSearch while that file is still in the drop. A Grab with no Arr row stays in `manual/` until you request it.
+
 **Next — fewer truths, not fewer logos.** Operator status in the sidebar (roadmap 4) should say “files are on disk, Sonarr path is wrong” instead of only “wanted/missing.” That is product. Stealing search (Pompey → Prowlarr, Arr still imports) is still the right move if query policy is the pain. It does not fix this bug; the accountant was correct given a stale path.
 
 **Not next — replace Arr so we have one database.** That is a new product, larger than today’s glue, and we become the matcher. Keep Arr as the filename accountant until we are willing to own matching bugs. The design note for that cost lives beside this file if we write it; the decision is the same: shape Arr, steal search if needed, do not become the engine to fix a path split.
