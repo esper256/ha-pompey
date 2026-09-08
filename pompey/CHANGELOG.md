@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.53
+
+- Dual Subs is two subtitle tracks, not Dual Audio. The +15 Default/Max tie-break treated the word `DUAL` as Dual Audio, so `1080p.Dual.Subs` and `[Dual Subs]` could beat or tie a real Dual-Audio release. Score only Dual-Audio / `[DUAL]` / JA+EN, and add a required “not Dual Subs” rule to our CF and to TRaSH Anime Dual Audio after Recyclarr rewrites it. Rebuild so the banner says **0.2.53**.
+
 ## 0.2.52
 
 - A file-manager move between Kid Friendly and Not Kid Friendly updates Plex and Seerr, not Sonarr’s stored path. Housekeeping then `SeasonSearch`ed the “missing” season and grabbed it again. Point Arr at the one sibling root that already has the video (`moveFiles: false`), rescan, and do not search that season. If both libraries still have files, do not guess — log and skip the grab. Remove the Seerr request to stop a torrent that already started. Do not drag library folders by hand; pick the root on the request. Why this is denormalized “have it,” not a reason to replace Arr: [docs/household-truth.md](../docs/household-truth.md). Rebuild so the banner says **0.2.52**.

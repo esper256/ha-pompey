@@ -1383,6 +1383,14 @@ PROFILE_NAMES = (PROFILE_DEFAULT, PROFILE_MAX, PROFILE_ANYTHING)
 LEGACY_DEFAULT_NAMES = ("HD", "Any")
 DUAL_AUDIO = "Pompey Dual Audio"
 DUAL_AUDIO_SCORE = 15
+# Dual Audio is two audio tracks (JA+EN). Dual Subs is two subtitle tracks.
+# Bare DUAL is an anime [DUAL] / .DUAL. tag — not Dual Subs / Dual Subtitles.
+DUAL_AUDIO_RE = (
+    r"(?:Dual[-_. ]?Audio|DualAudio|Multi[-_. ]?Audio|JA[-+&/]+EN|EN[-+&/]+JA|"
+    r"[(\[]DUAL[)\]]|(?<![A-Za-z])DUAL(?![A-Za-z]|[-_. ]?Subs?))"
+)
+DUAL_SUBS_RE = r"dual[-_. ]?subs?(?:titles?)?"
+DUAL_SUBS_SPEC_NAME = "Not Dual Subs"
 # Title CFs. Scores are per-profile; -10000 is a hard reject.
 CUSTOM_FORMATS = (
     (
@@ -1401,10 +1409,7 @@ CUSTOM_FORMATS = (
         "Pompey Prefer lossless audio",
         r"\b(TrueHD|TRUEHD|DTS[-_. ]?HD(?:MA)?|DTS[-_. ]?X|Atmos|ATMOS|FLAC|LPCM)\b",
     ),
-    (
-        DUAL_AUDIO,
-        r"\b(Dual[-_. ]?Audio|DUAL[-_. ]?AUDIO|DualAudio|Multi[-_. ]?Audio|DUAL|JA[-+&/]+EN|EN[-+&/]+JA)\b",
-    ),
+    (DUAL_AUDIO, DUAL_AUDIO_RE),
 )
 
 # Arr language id -2 is the title's original audio (TMDB / series metadata).
@@ -1512,19 +1517,112 @@ def rebuild_profile_items(
 
 
 def title_custom_format(name: str, regex: str) -> dict:
+    specs = [
+        {
+            "name": name,
+            "implementation": "ReleaseTitleSpecification",
+            "negate": False,
+            "required": True,
+            "fields": [{"name": "value", "value": regex}],
+        }
+    ]
+    if name == DUAL_AUDIO:
+        specs.append(dual_subs_negate_spec())
     return {
         "name": name,
         "includeCustomFormatWhenRenaming": False,
-        "specifications": [
-            {
-                "name": name,
-                "implementation": "ReleaseTitleSpecification",
-                "negate": False,
-                "required": True,
-                "fields": [{"name": "value", "value": regex}],
-            }
-        ],
+        "specifications": specs,
     }
+
+
+def dual_subs_negate_spec() -> dict:
+    return {
+        "name": DUAL_SUBS_SPEC_NAME,
+        "implementation": "ReleaseTitleSpecification",
+        "negate": True,
+        "required": True,
+        "fields": [{"name": "value", "value": DUAL_SUBS_RE}],
+    }
+
+
+def is_dual_audio_format_name(name: str) -> bool:
+    return "dual audio" in (name or "").lower()
+
+
+def spec_fields_value(spec: dict) -> str:
+    fields = spec.get("fields")
+    if isinstance(fields, dict):
+        return str(fields.get("value") or "")
+    if isinstance(fields, list):
+        for item in fields:
+            if isinstance(item, dict) and item.get("name") == "value":
+                return str(item.get("value") or "")
+    return ""
+
+
+def spec_is_dual_subs_negate(spec: dict) -> bool:
+    if not isinstance(spec, dict) or spec.get("negate") is not True:
+        return False
+    if "dual sub" in str(spec.get("name") or "").lower():
+        return True
+    value = spec_fields_value(spec).lower()
+    return "dual" in value and "sub" in value
+
+
+def format_excludes_dual_subs(item: dict) -> bool:
+    specs = item.get("specifications")
+    if not isinstance(specs, list):
+        return False
+    return any(spec_is_dual_subs_negate(spec) for spec in specs)
+
+
+def with_dual_subs_negate(item: dict) -> dict:
+    """Copy a Dual Audio CF and require the title not be Dual Subs."""
+    saved = json.loads(json.dumps(item))
+    specs = saved.get("specifications")
+    if not isinstance(specs, list):
+        specs = []
+    if not any(spec_is_dual_subs_negate(spec) for spec in specs if isinstance(spec, dict)):
+        specs.append(dual_subs_negate_spec())
+    saved["specifications"] = specs
+    return saved
+
+
+def exclude_dual_subs_from_dual_audio_formats(base: str, api_key: str) -> int:
+    """TRaSH Anime Dual Audio also treats 1080p…DUAL as a hit, including Dual Subs.
+
+    Recyclarr rewrites that CF from the guide. Re-apply a required negate so
+    Dual Subs does not get the +15 Dual Audio tie-break.
+    """
+    try:
+        rows = as_list(http("GET", f"{base}/customformat", headers=arr_headers(api_key)))
+    except RuntimeError as exc:
+        log(f"dual-audio formats: {exc}", "WARNING")
+        return 0
+    patched = 0
+    for item in rows:
+        if not isinstance(item, dict) or not is_dual_audio_format_name(str(item.get("name") or "")):
+            continue
+        if format_excludes_dual_subs(item):
+            continue
+        ident = item.get("id")
+        if ident is None:
+            continue
+        payload = with_dual_subs_negate(item)
+        payload["id"] = ident
+        try:
+            http(
+                "PUT",
+                f"{base}/customformat/{ident}",
+                payload,
+                headers=arr_headers(api_key),
+            )
+        except RuntimeError as exc:
+            log(f"custom format {item.get('name')}: {exc}", "WARNING")
+            continue
+        patched += 1
+        log(f"{item.get('name')} ignores Dual Subs (not Dual Audio)")
+    return patched
 
 
 def not_original_language_format() -> dict:
@@ -1603,6 +1701,7 @@ def ensure_custom_formats(base: str, api_key: str) -> list[dict]:
                 by_name[name] = stored
         except RuntimeError as exc:
             log(f"custom format {name}: {exc}", "WARNING")
+    exclude_dual_subs_from_dual_audio_formats(base, api_key)
     try:
         latest = as_list(http("GET", f"{base}/customformat", headers=arr_headers(api_key)))
         if latest:
@@ -4856,6 +4955,8 @@ def housekeep() -> int:
     sonarr = arr_api_root(sonarr_url(), sk)
     radarr = arr_api_root(radarr_url(), rk)
     run_recyclarr()
+    for _kind, base, key in each_arr(radarr, rk, sonarr, sk):
+        exclude_dual_subs_from_dual_audio_formats(base, key)
     import_finished_downloads(radarr, rk, sonarr, sk)
     tickle_seerr_availability()
     if replaced:

@@ -4499,10 +4499,58 @@ class WireStack(unittest.TestCase):
         pattern = next(rx for name, rx in ws.CUSTOM_FORMATS if name == ws.DUAL_AUDIO)
         rx = re.compile(pattern, re.I)
         self.assertTrue(rx.search("Show.S01E01.Dual-Audio.1080p"))
+        self.assertTrue(rx.search("Show.S01E01.Dual.Audio.1080p"))
         self.assertTrue(rx.search("[SubsPlease] Title - 01 (1080p) [DUAL]"))
         self.assertTrue(rx.search("Title.JA+EN.WEB"))
         self.assertTrue(rx.search("Title.Multi-Audio.Bluray"))
+        self.assertTrue(rx.search("Show.S01.DUAL.1080p"))
         self.assertFalse(rx.search("Title.1080p.WEB-DL.x265"))
+        self.assertFalse(rx.search("Show.S01.Dual.Subs.1080p"))
+        self.assertFalse(rx.search("Show.S01.Dual Subs.1080p"))
+        self.assertFalse(rx.search("Show.S01-S03.1080p.Dual.Subs-GROUP"))
+        self.assertFalse(rx.search("[Group] Show - S01-S03 (1080p) [Dual Subs]"))
+        self.assertFalse(rx.search("Show Dual Subtitles 1080p"))
+        subs = re.compile(ws.DUAL_SUBS_RE, re.I)
+        self.assertTrue(subs.search("Show.S01-S03.1080p.Dual.Subs-GROUP"))
+        self.assertTrue(subs.search("[Group] Show (1080p) [Dual Subs]"))
+        self.assertTrue(subs.search("Show Dual Subtitles 1080p"))
+        self.assertFalse(subs.search("Show.S01.Dual-Audio.1080p"))
+        self.assertFalse(subs.search("[SubsPlease] Title - 01 (1080p) [DUAL]"))
+
+    def test_pompey_dual_audio_format_requires_not_dual_subs(self):
+        payload = next(
+            item for item in ws.household_custom_formats() if item.get("name") == ws.DUAL_AUDIO
+        )
+        self.assertTrue(ws.format_excludes_dual_subs(payload))
+
+    def test_housekeep_adds_dual_subs_negate_to_trash_dual_audio(self):
+        os.environ["INDEXER_URL"] = ""
+        os.environ["INDEXER_API_KEY"] = ""
+        trash = {
+            "id": 40,
+            "name": "Anime Dual Audio",
+            "includeCustomFormatWhenRenaming": False,
+            "specifications": [
+                {
+                    "name": "Dual Audio",
+                    "implementation": "ReleaseTitleSpecification",
+                    "negate": False,
+                    "required": True,
+                    "fields": [{"name": "value", "value": r"dual[ ._-]?(audio)|\\bDUAL\\b"}],
+                }
+            ],
+        }
+        self.state.sonarr_formats = [json.loads(json.dumps(trash))]
+        self.state.radarr_formats = [json.loads(json.dumps(trash))]
+        self.assertEqual(ws.housekeep(), 0)
+        sonarr = next(
+            item for item in self.state.sonarr_formats if item.get("name") == "Anime Dual Audio"
+        )
+        radarr = next(
+            item for item in self.state.radarr_formats if item.get("name") == "Anime Dual Audio"
+        )
+        self.assertTrue(ws.format_excludes_dual_subs(sonarr))
+        self.assertTrue(ws.format_excludes_dual_subs(radarr))
 
     def test_cutoff_unmet_searches_open_seerr_requests_when_sources_change(self):
         os.environ["INDEXER_URL"] = ""
