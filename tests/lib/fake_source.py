@@ -777,6 +777,7 @@ def _as_list(value):
 
 
 def prowlarr_ensure_qbit(prowlarr: str, api_key: str, user: str, password: str) -> None:
+    """Integration fallback. wire-stack now posts this client (category prowlarr)."""
     hdrs = {"X-Api-Key": api_key, "Content-Type": "application/json"}
     existing = _as_list(http_json("GET", f"{prowlarr}/api/v1/downloadclient", headers=hdrs))
     if any(item.get("implementation") == "QBittorrent" for item in existing):
@@ -799,13 +800,15 @@ def prowlarr_ensure_qbit(prowlarr: str, api_key: str, user: str, password: str) 
             field["value"] = user
         elif name == "password":
             field["value"] = password
-        elif name in {"category", "movieCategory", "tvCategory"}:
-            field["value"] = "radarr"
+        elif name in {"category", "movieCategory", "tvCategory", "musicCategory", "bookCategory"}:
+            field["value"] = "prowlarr"
         elif name == "useSsl":
             field["value"] = False
     client["name"] = "qBittorrent"
     client["enable"] = True
     client["priority"] = 1
+    client["removeCompletedDownloads"] = False
+    client["removeFailedDownloads"] = True
     http_json("POST", f"{prowlarr}/api/v1/downloadclient", client, headers=hdrs)
 
 

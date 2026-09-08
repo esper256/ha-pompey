@@ -220,6 +220,7 @@ class FakeState:
         self.download_clients: list[dict] = []
         self.radarr_clients: list[dict] = []
         self.sonarr_clients: list[dict] = []
+        self.prowlarr_clients: list[dict] = []
         radarr_q = any_quality_bundle(1, "Any")
         sonarr_q = any_quality_bundle(1, "Any")
         self.radarr_profiles: list[dict] = [radarr_q["profile"]]
@@ -820,6 +821,29 @@ def handler_for(state: FakeState):
                 if path.endswith("/indexer") and method == "GET":
                     listed = state.radarr_indexers if role == "radarr" else state.sonarr_indexers
                     return self._send(body=listed)
+                if "/indexer/" in path and method == "GET":
+                    listed = state.radarr_indexers if role == "radarr" else state.sonarr_indexers
+                    try:
+                        idx = int(path.rsplit("/", 1)[-1])
+                    except ValueError:
+                        return self._send(404, {"error": path})
+                    for item in listed:
+                        if item.get("id") == idx:
+                            return self._send(body=item)
+                    return self._send(404, {"error": path})
+                if "/indexer/" in path and method == "PUT":
+                    listed = state.radarr_indexers if role == "radarr" else state.sonarr_indexers
+                    try:
+                        idx = int(path.rsplit("/", 1)[-1])
+                    except ValueError:
+                        return self._send(404, {"error": path})
+                    for i, item in enumerate(listed):
+                        if item.get("id") == idx:
+                            saved = dict(body or item)
+                            saved["id"] = idx
+                            listed[i] = saved
+                            return self._send(body=saved)
+                    return self._send(404, {"error": path})
                 return self._send(404, {"error": path})
             if role == "prowlarr":
                 if path == "/ping":
@@ -893,6 +917,48 @@ def handler_for(state: FakeState):
                             "records": state.history,
                         }
                     )
+                if path == "/api/v1/downloadclient" and method == "GET":
+                    return self._send(body=state.prowlarr_clients)
+                if path == "/api/v1/downloadclient/schema":
+                    return self._send(
+                        body=[
+                            {
+                                "implementation": "QBittorrent",
+                                "fields": [
+                                    {"name": n}
+                                    for n in (
+                                        "host",
+                                        "port",
+                                        "username",
+                                        "password",
+                                        "movieCategory",
+                                        "tvCategory",
+                                        "musicCategory",
+                                        "bookCategory",
+                                        "category",
+                                        "useSsl",
+                                    )
+                                ],
+                            }
+                        ]
+                    )
+                if path == "/api/v1/downloadclient" and method == "POST":
+                    posted = dict(body or {})
+                    posted.setdefault("id", len(state.prowlarr_clients) + 1)
+                    state.prowlarr_clients.append(posted)
+                    return self._send(201, posted)
+                if path.startswith("/api/v1/downloadclient/") and method == "PUT":
+                    try:
+                        idx = int(path.rsplit("/", 1)[-1])
+                    except ValueError:
+                        return self._send(404, {"error": path})
+                    for i, item in enumerate(state.prowlarr_clients):
+                        if item.get("id") == idx:
+                            saved = dict(body or item)
+                            saved["id"] = idx
+                            state.prowlarr_clients[i] = saved
+                            return self._send(body=saved)
+                    return self._send(404, {"error": path})
                 return self._send(404, {"error": path})
             if role == "seerr":
                 if path == "/api/v1/settings/public":
@@ -1321,6 +1387,11 @@ class Helpers(unittest.TestCase):
         self.assertIn("debug/radarr/", html)
         self.assertIn("debug/sonarr/", html)
         self.assertIn("debug/qbittorrent/", html)
+        self.assertIn("Interactive Search", html)
+        shim = (ROOT / "pompey/rootfs/usr/share/pompey/debug-shim.js").read_text()
+        self.assertIn("window.fetch", shim)
+        self.assertIn("XMLHttpRequest", shim)
+        self.assertIn('url.charAt(0) === "/"', shim)
         self.assertIn("data.debug", html)
         self.assertIn("search_port", html)
         self.assertIn("sources_port", html)
@@ -1567,6 +1638,24 @@ PersistentKeepalive = 25
         os.environ["SIMULTANEOUS_DOWNLOADS"] = "nope"
         self.assertEqual(ws.simultaneous_downloads(), 8)
         os.environ.pop("SIMULTANEOUS_DOWNLOADS", None)
+
+    def test_qbit_client_values_keep_arr_and_prowlarr_apart(self):
+        secrets = {"qbit_user": "pompey", "qbit_password": "secret"}
+        radarr_cat, radarr = ws.qbit_client_values(secrets, "radarr")
+        sonarr_cat, sonarr = ws.qbit_client_values(secrets, "sonarr")
+        prow_cat, prow = ws.qbit_client_values(secrets, "prowlarr")
+        self.assertEqual(radarr_cat, "radarr")
+        self.assertEqual(sonarr_cat, "sonarr")
+        self.assertEqual(prow_cat, "prowlarr")
+        self.assertEqual(radarr["movieCategory"], "radarr")
+        self.assertEqual(sonarr["tvCategory"], "sonarr")
+        self.assertEqual(prow["category"], "prowlarr")
+        self.assertEqual(prow["movieCategory"], "prowlarr")
+        self.assertEqual(prow["tvCategory"], "prowlarr")
+        self.assertNotIn("musicCategory", radarr)
+        self.assertEqual(prow["musicCategory"], "prowlarr")
+        with self.assertRaises(ValueError):
+            ws.qbit_client_values(secrets, "sabnzbd")
 
     def test_qbit_queue_preferences_ignore_slow_and_total_cap(self):
         prefs = ws.qbit_queue_preferences(3)
@@ -2324,8 +2413,19 @@ class WireStack(unittest.TestCase):
             self.assertTrue(client.get("removeFailedDownloads"))
             fields = {f["name"]: f.get("value") for f in client.get("fields") or []}
             self.assertIn(fields.get("movieCategory") or fields.get("tvCategory"), {"radarr", "sonarr"})
+            self.assertNotEqual(fields.get("movieCategory"), "prowlarr")
+            self.assertNotEqual(fields.get("tvCategory"), "prowlarr")
+        self.assertEqual(len(self.state.prowlarr_clients), 1)
+        prow_client = self.state.prowlarr_clients[0]
+        self.assertFalse(prow_client.get("removeCompletedDownloads"))
+        self.assertTrue(prow_client.get("removeFailedDownloads"))
+        prow_fields = {f["name"]: f.get("value") for f in prow_client.get("fields") or []}
+        self.assertEqual(prow_fields.get("category"), "prowlarr")
+        self.assertEqual(prow_fields.get("movieCategory"), "prowlarr")
+        self.assertEqual(prow_fields.get("tvCategory"), "prowlarr")
         self.assertEqual(self.state.qbit_categories.get("radarr"), "/media/downloads/complete")
         self.assertEqual(self.state.qbit_categories.get("sonarr"), "/media/downloads/complete")
+        self.assertEqual(self.state.qbit_categories.get("prowlarr"), "/media/downloads/complete")
         prefs_body = self.state.qbit_prefs
         self.assertIsInstance(prefs_body, dict)
         raw = prefs_body.get("json")
@@ -3960,6 +4060,85 @@ class WireStack(unittest.TestCase):
             f["name"]: f.get("value") for f in self.state.sonarr_clients[0].get("fields") or []
         }
         self.assertEqual(sonarr_fields.get("tvCategory"), "sonarr")
+
+    def test_rewrites_prowlarr_qbit_off_the_radarr_category(self):
+        os.environ["INDEXER_URL"] = ""
+        os.environ["INDEXER_API_KEY"] = ""
+        self.state.prowlarr_clients = [
+            {
+                "id": 3,
+                "name": "qBittorrent",
+                "implementation": "QBittorrent",
+                "enable": True,
+                "removeCompletedDownloads": True,
+                "removeFailedDownloads": True,
+                "fields": [
+                    {"name": "host", "value": "127.0.0.1"},
+                    {"name": "port", "value": 8080},
+                    {"name": "category", "value": "radarr"},
+                    {"name": "movieCategory", "value": "radarr"},
+                    {"name": "tvCategory", "value": "sonarr"},
+                ],
+            }
+        ]
+        rc = ws.main()
+        self.assertEqual(rc, 0)
+        self.assertEqual(len(self.state.prowlarr_clients), 1)
+        client = self.state.prowlarr_clients[0]
+        self.assertEqual(client["id"], 3)
+        self.assertFalse(client.get("removeCompletedDownloads"))
+        self.assertTrue(client.get("removeFailedDownloads"))
+        fields = {f["name"]: f.get("value") for f in client.get("fields") or []}
+        self.assertEqual(fields.get("category"), "prowlarr")
+        self.assertEqual(fields.get("movieCategory"), "prowlarr")
+        self.assertEqual(fields.get("tvCategory"), "prowlarr")
+        self.assertEqual(len(self.state.download_clients), 2)
+        for arr_client in self.state.download_clients:
+            arr_fields = {f["name"]: f.get("value") for f in arr_client.get("fields") or []}
+            self.assertIn(arr_fields.get("movieCategory") or arr_fields.get("tvCategory"), {"radarr", "sonarr"})
+
+    def test_turns_on_arr_interactive_search_flags(self):
+        os.environ["INDEXER_URL"] = ""
+        os.environ["INDEXER_API_KEY"] = ""
+        flags = {
+            "enableRss": True,
+            "enableAutomaticSearch": True,
+            "enableInteractiveSearch": True,
+        }
+        self.state.indexers = [
+            {"id": 1, "name": "Tracker A", "enable": True, **flags},
+        ]
+        self.state.radarr_indexers = [
+            {
+                "id": 1,
+                "name": "Tracker A",
+                "enable": True,
+                "enableRss": True,
+                "enableAutomaticSearch": True,
+                "enableInteractiveSearch": False,
+            }
+        ]
+        self.state.sonarr_indexers = [
+            {"id": 1, "name": "Tracker A", "enable": True},
+        ]
+        rc = ws.main()
+        self.assertEqual(rc, 0)
+        self.assertTrue(self.state.radarr_indexers[0]["enableInteractiveSearch"])
+        self.assertTrue(self.state.sonarr_indexers[0]["enableRss"])
+        self.assertTrue(self.state.sonarr_indexers[0]["enableAutomaticSearch"])
+        self.assertTrue(self.state.sonarr_indexers[0]["enableInteractiveSearch"])
+        radarr_puts = [
+            call
+            for call in self.state.calls
+            if call[0] == "radarr" and call[1] == "PUT" and str(call[2]).endswith("/indexer/1")
+        ]
+        sonarr_puts = [
+            call
+            for call in self.state.calls
+            if call[0] == "sonarr" and call[1] == "PUT" and str(call[2]).endswith("/indexer/1")
+        ]
+        self.assertTrue(radarr_puts)
+        self.assertTrue(sonarr_puts)
 
     def test_media_management_skips_nas_free_space_check(self):
         os.environ["INDEXER_URL"] = ""

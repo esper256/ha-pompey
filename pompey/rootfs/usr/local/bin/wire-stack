@@ -3,8 +3,9 @@
 
 Required (must succeed or this process exits non-zero so s6 retries, and
 the wait screen does not claim search is ready): qBittorrent categories, Arr root
-folders and download clients, Prowlarr↔Radarr/Sonarr apps, the operator
-source indexer when a URL is configured, Seerr process up (GET /settings/public).
+folders and download clients, Prowlarr's own qBittorrent client (Search → Grab),
+Prowlarr↔Radarr/Sonarr apps, the operator source indexer when a URL is
+configured, Seerr process up (GET /settings/public).
 Seerr→Radarr/Sonarr is required after Seerr is initialized. Before that, the
 Plex wizard has not created user id 1, so the API key 403s; we still mark
 search ready (Seerr is on the published port, Ingress stays Pompey).
@@ -804,8 +805,15 @@ def sync_cats_for(impl: str) -> list[int]:
 
 
 def qbit_client_values(secrets: dict, kind: str) -> tuple[str, dict]:
-    cat = "radarr" if kind == "radarr" else "sonarr"
-    return cat, {
+    if kind == "radarr":
+        cat = "radarr"
+    elif kind == "sonarr":
+        cat = "sonarr"
+    elif kind == "prowlarr":
+        cat = "prowlarr"
+    else:
+        raise ValueError(f"unknown download client kind {kind!r}")
+    values = {
         "host": "127.0.0.1",
         "port": 8080,
         "username": secrets["qbit_user"],
@@ -815,6 +823,11 @@ def qbit_client_values(secrets: dict, kind: str) -> tuple[str, dict]:
         "category": cat,
         "useSsl": False,
     }
+    if kind == "prowlarr":
+        # Prowlarr Search → Grab picks a category from the release type.
+        values["musicCategory"] = cat
+        values["bookCategory"] = cat
+    return cat, values
 
 
 def download_client_ready(item: dict, cat: str, remove: bool) -> bool:
@@ -864,6 +877,39 @@ def ensure_download_client(base: str, api_key: str, secrets: dict, kind: str) ->
     client["priority"] = 1
     http("POST", f"{base}/downloadclient", client, headers=arr_headers(api_key))
     log(f"{kind} download client category={cat} after_download={after_download()} remove={remove}")
+
+
+def ensure_prowlarr_download_client(prowlarr: str, pkey: str, secrets: dict) -> None:
+    """Prowlarr Search → Grab. Separate qbit category so Arr CDH cannot mis-import.
+
+    Arr Interactive Search uses Radarr/Sonarr's own clients (radarr / sonarr).
+    Reusing those categories here would let Radarr claim a TV grab. Prowlarr is
+    not the importer — leave completed torrents in qbit so housekeep/Arr can
+    see the files. Same save path as Arr: downloads/complete.
+    """
+    remove = False
+    cat, values = qbit_client_values(secrets, "prowlarr")
+    existing = as_list(http("GET", f"{prowlarr}/api/v1/downloadclient", headers=arr_headers(pkey)))
+    for item in existing:
+        if item.get("implementation") != "QBittorrent" or item.get("id") is None:
+            continue
+        if download_client_ready(item, cat, remove):
+            return
+        updated = apply_download_client(item, values, remove)
+        http(
+            "PUT",
+            f"{prowlarr}/api/v1/downloadclient/{item['id']}",
+            updated,
+            headers=arr_headers(pkey),
+        )
+        log(f"prowlarr download client category={cat} removeCompleted={remove}")
+        return
+    schema = http("GET", f"{prowlarr}/api/v1/downloadclient/schema", headers=arr_headers(pkey))
+    client = apply_download_client(schema_impl(schema, "QBittorrent"), values, remove)
+    client["name"] = "qBittorrent"
+    client["priority"] = 1
+    http("POST", f"{prowlarr}/api/v1/downloadclient", client, headers=arr_headers(pkey))
+    log(f"prowlarr download client category={cat} removeCompleted={remove}")
 
 
 # Sonarr (and current Radarr) reject 0: "must be greater than or equal to 100".
@@ -2297,6 +2343,50 @@ def log_arr_vs_prowlarr_indexers(
             )
         if extra:
             log(f"{kind} extra indexer(s) not in Prowlarr: {', '.join(extra)}")
+
+
+def ensure_arr_indexer_search(base: str, api_key: str, kind: str) -> None:
+    """Debug Interactive Search uses Arr's indexer rows, not Prowlarr's UI.
+
+    Prowlarr ApplicationIndexerSync usually copies enableInteractiveSearch.
+    If a source landed with search off, the Debug magnifying glass is empty.
+    """
+    try:
+        indexers = as_list(http("GET", f"{base}/indexer", headers=arr_headers(api_key)))
+    except RuntimeError as exc:
+        log(f"{kind} indexers: {exc}", "WARNING")
+        return
+    for item in indexers:
+        if item.get("enable") is False or item.get("id") is None:
+            continue
+        if all(item.get(key) is True for key in SEARCH_FLAGS):
+            continue
+        detail = item
+        try:
+            fetched = http(
+                "GET",
+                f"{base}/indexer/{item['id']}",
+                headers=arr_headers(api_key),
+            )
+            if isinstance(fetched, dict) and fetched.get("id") is not None:
+                detail = fetched
+        except RuntimeError:
+            pass
+        if all(detail.get(key) is True for key in SEARCH_FLAGS):
+            continue
+        for key in SEARCH_FLAGS:
+            detail[key] = True
+        name = detail.get("name") or item.get("name") or "unnamed"
+        try:
+            http(
+                "PUT",
+                f"{base}/indexer/{item['id']}",
+                detail,
+                headers=arr_headers(api_key),
+            )
+            log(f"{kind} source {name} search flags turned on")
+        except RuntimeError as exc:
+            log(f"{kind} source {name} could not enable search: {exc}", "WARNING")
 
 
 def history_data_map(record: dict) -> dict[str, str]:
@@ -4145,10 +4235,12 @@ def main() -> int:
     apply_qbit_queue()
     qbit_category("sonarr", complete)
     qbit_category("radarr", complete)
+    qbit_category("prowlarr", complete)
     sync_root_folders(sonarr, sk, "sonarr")
     sync_root_folders(radarr, rk, "radarr")
     ensure_download_client(sonarr, sk, secrets, "sonarr")
     ensure_download_client(radarr, rk, secrets, "radarr")
+    ensure_prowlarr_download_client(prowlarr, pk, secrets)
     # Recyclarr writes Default/Max before we create name stubs, so a successful
     # sync is not overwritten by a stock Arr clone. Quality still runs before
     # import settings so a Sonarr media-management 400 cannot leave Seerr on
@@ -4164,6 +4256,8 @@ def main() -> int:
     ensure_indexer(prowlarr, pk)
     sync_prowlarr_indexers(prowlarr, pk)
     log_arr_vs_prowlarr_indexers(radarr, rk, sonarr, sk, prowlarr, pk)
+    for kind, base, key in each_arr(radarr, rk, sonarr, sk):
+        ensure_arr_indexer_search(base, key, kind)
     import_finished_downloads(radarr, rk, sonarr, sk)
     log_recent_prowlarr_searches(prowlarr, pk)
 
