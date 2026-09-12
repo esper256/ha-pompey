@@ -47,7 +47,7 @@ We already fetch from the same official channels a first boot uses:
 - Prowlarr / Radarr: `*.servarr.com/v1/update/master/updatefile`
 - Sonarr: `services.sonarr.tv/v1/download/main/latest`
 - qBittorrent-nox: `userdocs/qbittorrent-nox-static` GitHub `latest`
-- Recyclarr: GitHub `latest` musl tarball (their Docker world floats a major tag; we are on the binary path)
+- Recyclarr: GitHub `latest` tarball (`linux-musl-*` on HAOS, self-contained `linux-*` on glibc). The musl artifact is a .NET apphost; we also fetch Microsoft’s linux-musl runtime and set `DOTNET_ROOT`. Their Docker world floats a major tag; we stay on the binary path.
 - Seerr: `crane export ghcr.io/seerr-team/seerr:latest`
 
 First boot already takes `latest`. Auto-update is making later boots as current as a new install, on a timer, without a Pompey version bump. Presence is not a skip; identity (ETag / filename / digest) is.
@@ -160,7 +160,8 @@ Unattended `latest` can break the house overnight. Mitigations: keep the previou
 | Leftover profile DELETE after rehoming `qualityProfileId` onto Default | `rehome_titles_off_profile` + `drop_extra_quality_profiles` | Arr refuses DELETE while a title still uses the profile. PUT movie/series shape change leaves HD-1080p in the Seerr dropdown. |
 | Language CF: `LanguageSpecification` with value `-2` (Original), negate | `not_original_language_format` | Original-audio scoring stops; dubs win on Default/Max. Recyclarr’s TRaSH Original is the preferred owner on movies; Sonarr uses TRaSH Language: Not Original. This CF is the fallback when Recyclarr is missing. |
 | Dual Audio trash ids + score 15 on Default/Max | `recyclarr-sync` `render_config` | Guide rename/split: Recyclarr exits or Dual-Audio stops winning ties. Stub score on `Pompey Dual Audio` still applies before the first sync. |
-| `GET /api/v1/request` + unmonitor PUT + `DELETE /command/{id}` + `DELETE /queue/{id}` | `unmonitor_closed_seerr_requests` / `closeout` | Seerr request list 403/shape change: we skip (no unmonitor). Arr-only rows stay monitored until Seerr is readable. Command/queue DELETE rename leaves an already-posted SeasonSearch running until it finishes. |
+| `GET /api/v1/request` + unmonitor PUT + `DELETE /command/{id}` + `DELETE /queue/{id}` | `unmonitor_closed_seerr_requests` / `closeout` | Seerr request list 403/shape change: we skip (no unmonitor). Arr-only rows stay monitored until Seerr is readable. Command/queue DELETE rename leaves an already-posted SeasonSearch running until it finishes. Declined still counts as open; we POST a new request then DELETE the declined row (Seerr will not approve/retry declined). |
+| Seerr Radarr/Sonarr `syncEnabled: false` | `configure_seerr` | Re-enabling Arr library-scan brings back orphan-decline of in-flight requests. Plex recently-added is the availability source. |
 | Custom format `fields: [{name, value}]` | `ensure_custom_formats` | Arr has flipped between `{name,value}` and a dict more than once. |
 | Root-folder POST `{path}` | `ensure_root_folder` | Kid vs Not Kid folders fail to register; Seerr routes into the wrong library. |
 | `UpdateAutomatically=False` restamped every boot | `write-engine-configs` `pin_arr_docker_updates` | A Prowlarr UI change or an Arr rewrite can turn BuiltIn back on between boots. Re-stamp is the mitigation. |
@@ -188,6 +189,7 @@ Unattended `latest` can break the house overnight. Mitigations: keep the previou
 | Assumption | Where | If it moves |
 | --- | --- | --- |
 | Binary CLI: `RECYCLARR_CONFIG_DIR` + `RECYCLARR_DATA_DIR` + `recyclarr sync -c` (v8 dropped `--app-data`) | `recyclarr-sync` | Already broke once. Next CLI rename leaves Default/Max as name stubs (stock Arr clone) until Recyclarr can sync. |
+| Musl Recyclarr GitHub tarball is framework-dependent (`recyclarr.runtimeconfig.json` `framework`, no `includedFrameworks`) | `fetch-engines` `ensure_dotnet_for_recyclarr` + `DOTNET_ROOT` | Missing runtime exits 131 (`.NET location: Not found`). Microsoft `Runtime/{channel}/latest.version` or RID rename leaves TRaSH on stubs until the next fetch. Glibc tarballs stay self-contained. |
 | Quality-profile **trash_ids** (`d1d67249…` HD, `64fb5f98…` UHD, Sonarr WEB-1080p / WEB-2160p) | `recyclarr-sync` | Guide rename/split: Recyclarr exits non-zero; we log and keep stale profiles. |
 | Recyclarr YAML `name: Default` / `Max` with `reset_unmatched_scores` | generated `recyclarr.yml` | Reset is correct for Default/Max (TRaSH owns scores). A YAML that named Anything would wipe CAM-allowed scores. |
 | `delete_old_custom_formats: false` | YAML | `true` would delete Anything’s formats or leftover household CFs. |

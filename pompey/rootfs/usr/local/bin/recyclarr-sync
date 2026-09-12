@@ -61,6 +61,24 @@ def recyclarr_bin() -> str:
     return root
 
 
+def dotnet_root() -> str:
+    override = env("POMPEY_DOTNET_ROOT")
+    if override:
+        return override
+    return os.path.join(env("POMPEY_ENGINES", "/data/engines"), "dotnet")
+
+
+def apply_dotnet_env(child_env: dict) -> None:
+    """Musl Recyclarr is a .NET apphost; glibc tarballs ship the runtime beside it."""
+    root = dotnet_root()
+    launcher = os.path.join(root, "dotnet")
+    if not os.path.isfile(launcher):
+        return
+    child_env["DOTNET_ROOT"] = root
+    child_env["DOTNET_ROOT_X64"] = root
+    child_env["DOTNET_ROOT_ARM64"] = root
+
+
 def load_secrets() -> dict:
     with open(secrets_path(), encoding="utf-8") as fh:
         data = json.load(fh)
@@ -223,6 +241,7 @@ def main() -> int:
     child_env["RECYCLARR_DATA_DIR"] = data
     child_env["NO_COLOR"] = "1"
     child_env.pop("RECYCLARR_APP_DATA", None)
+    apply_dotnet_env(child_env)
     try:
         proc = subprocess.run(
             cmd,

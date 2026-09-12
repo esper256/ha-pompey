@@ -487,8 +487,10 @@ def seerr_permission_update(user: dict) -> dict | None:
     return {"permissions": perms | SEERR_REQUEST_ADVANCED}
 
 
-# Seerr MediaRequestStatus. Declined stays in the list; Available/Completed stay
-# open until the household removes the request (the ticket, not Clear Data).
+# Seerr MediaRequestStatus. Available/Completed stay open until the household
+# removes the request (the ticket, not Clear Data). Declined stays listed too:
+# Seerr's Radarr/Sonarr scan can decline a brand-new auto-approved request as
+# "orphaned" before Arr has accepted it. Removing the row is the close-out.
 SEERR_REQUEST_DECLINED = 3
 
 
@@ -2877,11 +2879,10 @@ def seerr_request_headers() -> dict | None:
     return {"X-API-Key": key, "Content-Type": "application/json"}
 
 
-def load_open_seerr_requests() -> list[dict] | None:
-    """Seerr request rows that still want a better file. None if Seerr cannot be read.
+def fetch_seerr_request_rows() -> list[dict] | None:
+    """All Seerr request rows. None if Seerr cannot be read.
 
-    Removing the request (Requests page) is the household close-out. Declined
-    stays listed but is closed. Fail closed: a 403/5xx must not unmonitor.
+    Fail closed: a 403/5xx must not unmonitor.
     """
     headers = seerr_request_headers()
     if not headers:
@@ -2908,15 +2909,112 @@ def load_open_seerr_requests() -> list[dict] | None:
         else:
             log("seerr requests: unexpected payload; not closing or upgrading", "WARNING")
             return None
-        for item in batch:
-            status = parse_int(item.get("status"))
-            if status == SEERR_REQUEST_DECLINED:
-                continue
-            rows.append(item)
+        rows.extend(item for item in batch if isinstance(item, dict))
         if len(batch) < take:
             return rows
         skip += take
     return rows
+
+
+def load_open_seerr_requests() -> list[dict] | None:
+    """Seerr request rows that still want a better file. None if Seerr cannot be read.
+
+    Removing the request (Requests page) is the household close-out. Declined
+    stays listed and still counts — Seerr's Arr scan can decline a brand-new
+    auto-approved request as orphaned before Radarr/Sonarr has accepted it.
+    Fail closed: a 403/5xx must not unmonitor.
+    """
+    return fetch_seerr_request_rows()
+
+
+def seerr_request_media(item: dict) -> dict:
+    media = item.get("media")
+    return media if isinstance(media, dict) else {}
+
+
+def seerr_request_label(item: dict) -> str:
+    media = seerr_request_media(item)
+    title = str(media.get("title") or item.get("title") or "").strip()
+    if title:
+        return title
+    tmdb = parse_int(media.get("tmdbId") or item.get("mediaId"))
+    if tmdb is not None:
+        return f"tmdb {tmdb}"
+    rid = parse_int(item.get("id"))
+    return f"request {rid}" if rid is not None else "request"
+
+
+def seerr_rerequest_body(item: dict) -> dict | None:
+    media = seerr_request_media(item)
+    tmdb = parse_int(media.get("tmdbId") or item.get("mediaId"))
+    media_type = str(media.get("mediaType") or item.get("type") or "").lower()
+    if tmdb is None:
+        return None
+    if media_type in {"movie", "movies"}:
+        kind = "movie"
+    elif media_type in {"tv", "series"}:
+        kind = "tv"
+    else:
+        return None
+    body: dict = {
+        "mediaId": tmdb,
+        "mediaType": kind,
+        "is4k": bool(item.get("is4k")),
+    }
+    if kind == "tv":
+        seasons: list[int] = []
+        for raw in item.get("seasons") or []:
+            if isinstance(raw, dict):
+                num = parse_int(raw.get("seasonNumber"))
+            else:
+                num = parse_int(raw)
+            if num is not None:
+                seasons.append(num)
+        body["seasons"] = seasons or "all"
+    for key in ("serverId", "profileId", "rootFolder", "languageProfileId"):
+        if item.get(key) not in (None, ""):
+            body[key] = item[key]
+    return body
+
+
+def restore_declined_seerr_requests() -> None:
+    """Seerr will not approve a declined row. Re-request, then drop the declined ticket.
+
+    POST /approve only accepts PENDING. POST /retry only accepts FAILED. Declined
+    is the status that clears the duplicate guard, so a new request is the
+    recovery Seerr documents.
+    """
+    headers = seerr_request_headers()
+    if not headers:
+        return
+    rows = fetch_seerr_request_rows()
+    if rows is None:
+        return
+    for item in rows:
+        if parse_int(item.get("status")) != SEERR_REQUEST_DECLINED:
+            continue
+        rid = parse_int(item.get("id"))
+        body = seerr_rerequest_body(item)
+        label = seerr_request_label(item)
+        if rid is None or body is None:
+            log(f"could not re-request declined {label}: missing tmdb id", "WARNING")
+            continue
+        try:
+            http("POST", f"{seerr_url()}/api/v1/request", body, headers=headers)
+        except RuntimeError as exc:
+            # 409: an approved/pending request already exists (last tick posted
+            # one and could not drop this declined row). Still delete declined.
+            if "409" not in str(exc):
+                log(f"could not re-request declined {label}: {exc}", "WARNING")
+                continue
+        try:
+            http("DELETE", f"{seerr_url()}/api/v1/request/{rid}", headers=headers)
+        except RuntimeError as exc:
+            log(f"could not drop declined Seerr request {rid}: {exc}", "WARNING")
+            continue
+        log(
+            f"re-requested {label} (Seerr had declined it as an orphan during a Radarr/Sonarr scan)"
+        )
 
 
 def open_seerr_upgrade_keys(requests: list[dict]) -> set[str]:
@@ -3182,8 +3280,10 @@ def unmonitor_closed_seerr_requests(
     that is not on an open request is unmonitored (including leftover Arr-only
     rows). TV seasons and monitorNewItems are turned off too — series.monitored
     false with seasons still on still RSS-hunts. Fail closed: a 403/5xx must
-    not unmonitor. Never delete the Arr title row.
+    not unmonitor. Never delete the Arr title row. Declined still counts as
+    open until the row is removed (Seerr can false-decline during an Arr scan).
     """
+    restore_declined_seerr_requests()
     requests = load_open_seerr_requests()
     if requests is None:
         return
@@ -4960,7 +5060,8 @@ def configure_seerr(secrets: dict, radarr_profile, sonarr_profile, sonarr_lang) 
         "isDefault": True,
         "is4k": False,
         "minimumAvailability": "released",
-        "syncEnabled": True,
+        # Plex scan marks available. Arr library-scan declines in-flight requests.
+        "syncEnabled": False,
         "preventSearch": False,
         "tagRequests": True,
         "urlBase": "",
@@ -4980,7 +5081,7 @@ def configure_seerr(secrets: dict, radarr_profile, sonarr_profile, sonarr_lang) 
         "isDefault": True,
         "is4k": False,
         "enableSeasonFolders": True,
-        "syncEnabled": True,
+        "syncEnabled": False,
         "preventSearch": False,
         "tagRequests": True,
         "urlBase": "",
@@ -5011,7 +5112,11 @@ def configure_seerr(secrets: dict, radarr_profile, sonarr_profile, sonarr_lang) 
                     match.get("activeProfileId") != payload.get("activeProfileId")
                     or (match.get("activeProfileName") or "") != (payload.get("activeProfileName") or "")
                 )
-                if server_id is not None and (dir_changed or profile_changed):
+                # Seerr's Radarr/Sonarr scan declines in-flight requests as
+                # "orphaned" when the add has not landed yet. Availability
+                # comes from Plex; keep Arr library-scan off.
+                sync_changed = match.get("syncEnabled") != payload.get("syncEnabled")
+                if server_id is not None and (dir_changed or profile_changed or sync_changed):
                     update = dict(match)
                     update.update(payload)
                     # Seerr OpenAPI marks id read-only; it belongs in the URL.
@@ -5021,6 +5126,8 @@ def configure_seerr(secrets: dict, radarr_profile, sonarr_profile, sonarr_lang) 
                         log(f"seerr {kind} directory {want}")
                     if profile_changed:
                         log(f"seerr {kind} profile {payload.get('activeProfileName')}")
+                    if sync_changed:
+                        log(f"seerr {kind} library scan off")
                 return True
             s.call("POST", path, payload)
             log(f"seerr {kind}")

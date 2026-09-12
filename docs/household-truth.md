@@ -36,7 +36,7 @@ Replacing Arr would not delete that problem. We would own `hasFile`. Plex would 
 
 The household contract is already in the guide. Make it the only contract:
 
-1. **The Seerr request is the ticket.** Open means “keep looking.” Remove the request (not Clear Data) means “stop.”
+1. **The Seerr request is the ticket.** Open means “keep looking.” Remove the request (not Clear Data) means “stop.” A **Declined** row is not a household close-out — Seerr’s Arr scan can mark a brand-new auto-approved request as orphaned before Radarr has accepted it. Delete the row to stop; Pompey re-requests a false decline.
 2. **One library folder per title.** Kid Friendly *or* Not Kid Friendly *or* By Rating-in-flight. Not two Plex libraries for the same files.
 3. **Sonarr’s path is that folder.** Disk moves go through Arr’s editor, or Pompey retargets and rescans when it can see the files on a sibling root.
 4. **Plex and Seerr are projections.** They are allowed to lag. They are not allowed to be a second source of truth that we search against.

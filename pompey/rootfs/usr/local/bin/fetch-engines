@@ -43,7 +43,15 @@ prowlarr_url="${POMPEY_PROWLARR_URL:-https://prowlarr.servarr.com/v1/update/mast
 sonarr_url="${POMPEY_SONARR_URL:-https://services.sonarr.tv/v1/download/main/latest?version=4&os=${servarr_os}&arch=${servarr_arch}}"
 radarr_url="${POMPEY_RADARR_URL:-https://radarr.servarr.com/v1/update/master/updatefile?os=${servarr_os}&runtime=netcore&arch=${servarr_arch}}"
 qbit_url="${POMPEY_QBIT_URL:-https://github.com/userdocs/qbittorrent-nox-static/releases/latest/download/${qbit_arch}-qbittorrent-nox}"
-recyclarr_url="${POMPEY_RECYCLARR_URL:-https://github.com/recyclarr/recyclarr/releases/latest/download/recyclarr-linux-musl-${servarr_arch}.tar.xz}"
+# GitHub musl tarball is framework-dependent (~3MB apphost). glibc is self-contained.
+if [[ "${servarr_os}" == "linuxmusl" ]]; then
+  recyclarr_rid="linux-musl-${servarr_arch}"
+  dotnet_rid="linux-musl-${servarr_arch}"
+else
+  recyclarr_rid="linux-${servarr_arch}"
+  dotnet_rid="linux-${servarr_arch}"
+fi
+recyclarr_url="${POMPEY_RECYCLARR_URL:-https://github.com/recyclarr/recyclarr/releases/latest/download/recyclarr-${recyclarr_rid}.tar.xz}"
 
 if [[ "${1:-}" == "--print-urls" ]]; then
   printf '%s\n' "${prowlarr_url}" "${sonarr_url}" "${radarr_url}" "${qbit_url}" "${recyclarr_url}"
@@ -465,6 +473,108 @@ fetch_tarball() {
   rm -rf "${staging}"
 }
 
+recyclarr_framework_channel() {
+  # Prints major.minor (e.g. 10.0) when the package is framework-dependent.
+  python3 - "$1" <<'PY'
+import json, sys
+try:
+    data = json.load(open(sys.argv[1], encoding="utf-8"))
+except Exception:
+    raise SystemExit(0)
+opts = data.get("runtimeOptions") or {}
+if opts.get("includedFrameworks"):
+    raise SystemExit(0)
+fw = opts.get("framework") or {}
+ver = str(fw.get("version") or "")
+parts = ver.split(".")
+if fw.get("name") and len(parts) >= 2 and parts[0].isdigit() and parts[1].isdigit():
+    print(f"{parts[0]}.{parts[1]}")
+PY
+}
+
+ensure_dotnet_for_recyclarr() {
+  # GitHub's linux-musl Recyclarr tarball is an apphost. Without DOTNET_ROOT it
+  # exits 131 (" .NET location: Not found "). glibc tarballs are self-contained.
+  local package="$1"
+  local cfg="${package}/recyclarr.runtimeconfig.json"
+  if [[ ! -f "${cfg}" ]]; then
+    return 0
+  fi
+  local channel=""
+  channel="$(recyclarr_framework_channel "${cfg}")"
+  if [[ -z "${channel}" ]]; then
+    return 0
+  fi
+  local dest="${POMPEY_ENGINES}/dotnet"
+  local ver_url="${POMPEY_DOTNET_VERSION_URL:-https://builds.dotnet.microsoft.com/dotnet/Runtime/${channel}/latest.version}"
+  local ver=""
+  ver="$(curl -fsSL --retry 3 --retry-delay 2 "${ver_url}" 2>/dev/null | tr -d '[:space:]' || true)"
+  if [[ ! "${ver}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    bashio::log.warning "Could not read .NET ${channel} latest.version for Recyclarr; TRaSH stays on stubs"
+    return 0
+  fi
+  local runtime_url="${POMPEY_DOTNET_URL:-https://builds.dotnet.microsoft.com/dotnet/Runtime/${ver}/dotnet-runtime-${ver}-${dotnet_rid}.tar.gz}"
+  if [[ -x "${dest}/dotnet" ]]; then
+    local identity
+    identity="$(probe_identity "${runtime_url}")"
+    if identity_current dotnet "${dest}" "${identity}"; then
+      bashio::log.info ".NET ${ver} current (${dotnet_rid})"
+      return 0
+    fi
+    if [[ -z "${identity}" || "${identity}" == "||" ]]; then
+      bashio::log.warning ".NET runtime could not check upstream; keeping the installed copy"
+      return 0
+    fi
+  fi
+  bashio::log.info "Downloading .NET ${ver} runtime (${dotnet_rid}) for Recyclarr"
+  local staging unpack archive headers effective filename magic identity
+  staging="${POMPEY_ENGINES}/.partial-dotnet"
+  rm -rf "${staging}"
+  unpack="${staging}/unpack"
+  mkdir -p "${unpack}"
+  archive="${staging}/dotnet-runtime.tar.gz"
+  headers="${staging}/headers.txt"
+  if ! effective="$(
+    curl -fsSL --retry 3 --retry-delay 2 \
+      -D "${headers}" -o "${archive}" -w '%{url_effective}' \
+      "${runtime_url}"
+  )"; then
+    rm -rf "${staging}"
+    bashio::log.warning "Failed to download .NET ${ver}; Recyclarr cannot sync TRaSH until the runtime is on disk"
+    return 0
+  fi
+  filename="$(header_filename "${headers}")"
+  identity="$(identity_from_headers "${headers}" "${effective}")"
+  bashio::log.info ".NET artifact ${filename:-unknown} (${effective})"
+  if [[ -x "${dest}/dotnet" ]] && identity_current dotnet "${dest}" "${identity}"; then
+    rm -rf "${staging}"
+    bashio::log.info ".NET ${ver} current (${dotnet_rid})"
+    return 0
+  fi
+  magic="$(file_magic "${archive}")"
+  if [[ "${magic}" != 1f8b* ]]; then
+    rm -rf "${staging}"
+    bashio::log.warning ".NET runtime is not gzip (magic ${magic}); Recyclarr cannot sync TRaSH"
+    return 0
+  fi
+  if ! tar --no-same-owner --no-same-permissions -xzf "${archive}" -C "${unpack}"; then
+    rm -rf "${staging}"
+    bashio::log.warning "Failed to unpack .NET ${ver}; Recyclarr cannot sync TRaSH"
+    return 0
+  fi
+  if [[ ! -f "${unpack}/dotnet" ]]; then
+    rm -rf "${staging}"
+    bashio::log.warning ".NET runtime tarball had no dotnet launcher; Recyclarr cannot sync TRaSH"
+    return 0
+  fi
+  chmod 755 "${unpack}/dotnet"
+  chmod -R a+rX "${unpack}"
+  if install_staged dotnet "${dest}" "${unpack}" "${identity}" 0; then
+    bashio::log.info ".NET ${ver} ready under ${dest}"
+  fi
+  rm -rf "${staging}"
+}
+
 fetch_recyclarr() {
   if [[ "${POMPEY_SKIP_RECYCLARR:-}" == "1" ]]; then
     bashio::log.info "Skipping Recyclarr (POMPEY_SKIP_RECYCLARR=1)"
@@ -479,17 +589,19 @@ fetch_recyclarr() {
     identity="$(probe_identity "${recyclarr_url}")"
     if identity_current recyclarr "${dest}" "${identity}"; then
       bashio::log.info "Recyclarr current"
+      ensure_dotnet_for_recyclarr "${dest}"
       return 0
     fi
     if [[ -z "${identity}" || "${identity}" == "||" ]]; then
       bashio::log.warning "Recyclarr could not check upstream; keeping the installed copy"
+      ensure_dotnet_for_recyclarr "${dest}"
       return 0
     fi
   elif [[ -f "${dest}" && -x "${dest}" ]]; then
     required=0
     bashio::log.info "Replacing single-file Recyclarr with the full package"
   fi
-  bashio::log.info "Downloading Recyclarr (linux-musl/${servarr_arch})"
+  bashio::log.info "Downloading Recyclarr (${recyclarr_rid})"
   fetch_status fetch "Downloading Recyclarr" 50
   local staging unpack archive headers effective filename magic identity
   staging="${POMPEY_ENGINES}/.partial-recyclarr"
@@ -508,6 +620,7 @@ fetch_recyclarr() {
       bashio::exit.nok "Failed to download Recyclarr"
     fi
     bashio::log.warning "Failed to download Recyclarr; keeping the installed copy"
+    ensure_dotnet_for_recyclarr "${dest}"
     return 0
   fi
   filename="$(header_filename "${headers}")"
@@ -516,6 +629,7 @@ fetch_recyclarr() {
   if [[ -x "${dest}/recyclarr" ]] && identity_current recyclarr "${dest}" "${identity}"; then
     rm -rf "${staging}"
     bashio::log.info "Recyclarr current"
+    ensure_dotnet_for_recyclarr "${dest}"
     return 0
   fi
   magic="$(file_magic "${archive}")"
@@ -526,6 +640,7 @@ fetch_recyclarr() {
       bashio::exit.nok "Recyclarr is not xz (magic ${magic}; ${filename:-${effective}})"
     fi
     bashio::log.warning "Recyclarr upstream was not xz; keeping the installed copy"
+    ensure_dotnet_for_recyclarr "${dest}"
     return 0
   fi
   tar --no-same-owner --no-same-permissions -xJf "${archive}" -C "${unpack}"
@@ -547,11 +662,13 @@ fetch_recyclarr() {
       bashio::exit.nok "Failed to unpack Recyclarr (no recyclarr binary)"
     fi
     bashio::log.warning "Failed to unpack Recyclarr; keeping the installed copy"
+    ensure_dotnet_for_recyclarr "${dest}"
     return 0
   fi
   if ! assert_elf_launcher "${bin}"; then
     rm -rf "${staging}"
     refuse_or_keep recyclarr "${required}" "${bin} is not a Linux ELF launcher"
+    ensure_dotnet_for_recyclarr "${dest}"
     return 0
   fi
   chmod 755 "${bin}"
@@ -564,6 +681,7 @@ fetch_recyclarr() {
     bashio::log.info "Recyclarr ready (ELF) under ${dest}"
   fi
   rm -rf "${staging}"
+  ensure_dotnet_for_recyclarr "${dest}"
 }
 
 fetch_qbit() {
