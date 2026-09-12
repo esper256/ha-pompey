@@ -3004,7 +3004,7 @@ def restore_declined_seerr_requests() -> None:
         except RuntimeError as exc:
             # 409: an approved/pending request already exists (last tick posted
             # one and could not drop this declined row). Still delete declined.
-            if "409" not in str(exc):
+            if " -> 409 " not in f" {exc} ":
                 log(f"could not re-request declined {label}: {exc}", "WARNING")
                 continue
         try:

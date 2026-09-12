@@ -5255,6 +5255,7 @@ class WireStack(unittest.TestCase):
         os.environ["INDEXER_URL"] = ""
         os.environ["INDEXER_API_KEY"] = ""
         self.state.seerr_has_admin = True
+        self.state.series = []
         self.state.movies = [
             {
                 "id": 99,
@@ -5292,13 +5293,14 @@ class WireStack(unittest.TestCase):
         self.assertEqual(self.state.seerr_requests[0]["media"]["tmdbId"], 109424)
         self.assertNotEqual(self.state.seerr_requests[0]["id"], 15)
         self.assertIn("re-requested Captain Phillips", buf.getvalue())
-        self.assertNotIn("stopped looking", buf.getvalue())
+        self.assertNotIn("Captain Phillips (Seerr request removed)", buf.getvalue())
 
     def test_declined_seerr_request_stays_open_if_rerequest_fails(self):
         os.environ["INDEXER_URL"] = ""
         os.environ["INDEXER_API_KEY"] = ""
         self.state.seerr_has_admin = True
         self.state.seerr_fail_create_request = True
+        self.state.series = []
         self.state.movies = [
             {
                 "id": 99,
