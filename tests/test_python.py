@@ -294,6 +294,7 @@ class FakeState:
         self.sonarr_wanted_cutoff: list[dict] = []
         self.seerr_requests: list[dict] = []
         self.seerr_fail_requests = False
+        self.seerr_fail_create_request = False
         self.queue: list[dict] = []
         self.sonarr_queue: list[dict] = []
         self.cancelled_commands: list[dict] = []
@@ -1149,6 +1150,53 @@ def handler_for(state: FakeState):
                             "results": rows,
                         }
                     )
+                if path == "/api/v1/request" and method == "POST":
+                    if state.seerr_fail_create_request:
+                        return self._send(500, {"message": "create failed"})
+                    payload = body if isinstance(body, dict) else {}
+                    existing = []
+                    for item in state.seerr_requests:
+                        try:
+                            existing.append(int(item.get("id")))
+                        except (TypeError, ValueError):
+                            continue
+                    new_id = (max(existing) + 1) if existing else 1
+                    media_type = str(payload.get("mediaType") or "movie")
+                    row = {
+                        "id": new_id,
+                        "status": 2,
+                        "type": media_type,
+                        "is4k": bool(payload.get("is4k")),
+                        "media": {
+                            "mediaType": media_type,
+                            "tmdbId": payload.get("mediaId"),
+                        },
+                    }
+                    for key in ("serverId", "profileId", "rootFolder", "languageProfileId"):
+                        if payload.get(key) not in (None, ""):
+                            row[key] = payload[key]
+                    if payload.get("seasons") is not None:
+                        raw = payload.get("seasons")
+                        if raw == "all":
+                            row["seasons"] = [{"seasonNumber": 1}]
+                        elif isinstance(raw, list):
+                            row["seasons"] = [
+                                {"seasonNumber": n} for n in raw if n is not None
+                            ]
+                    state.seerr_requests.append(row)
+                    return self._send(201, row)
+                if path.startswith("/api/v1/request/") and method == "DELETE":
+                    tail = path.rsplit("/", 1)[-1]
+                    try:
+                        rid = int(tail)
+                    except ValueError:
+                        return self._send(404, {"error": path})
+                    state.seerr_requests = [
+                        item
+                        for item in state.seerr_requests
+                        if item.get("id") != rid
+                    ]
+                    return self._send(204)
                 return self._send(404, {"error": path})
             return self._send(500, {"error": "no role"})
 
@@ -1474,7 +1522,10 @@ class Helpers(unittest.TestCase):
         self.assertNotIn("keep_ingress_as_pompey", (BIN / "wire-stack").read_text())
         seerr_run = (ROOT / "pompey/rootfs/etc/services.d/seerr/run").read_text()
         fetch = (ROOT / "pompey/rootfs/usr/local/bin/fetch-engines").read_text()
-        self.assertIn("recyclarr-linux-musl-", fetch)
+        self.assertIn("linux-musl-${servarr_arch}", fetch)
+        self.assertIn("recyclarr-${recyclarr_rid}", fetch)
+        self.assertIn("builds.dotnet.microsoft.com", fetch)
+        self.assertIn("DOTNET_ROOT", (BIN / "recyclarr-sync").read_text())
         self.assertIn("POMPEY_SKIP_RECYCLARR", fetch)
         self.assertIn("identity_current", fetch)
         self.assertIn("engines-checked", fetch)
@@ -2484,6 +2535,7 @@ class WireStack(unittest.TestCase):
         )
         os.environ.pop("POMPEY_RECYCLARR", None)
         os.environ.pop("POMPEY_RECYCLARR_DATA", None)
+        os.environ.pop("POMPEY_DOTNET_ROOT", None)
         os.environ.pop("POMPEY_FETCH_ENGINES", None)
         os.environ.pop("POMPEY_ENGINE_REFRESH_AGE", None)
         os.environ.pop("POMPEY_HOLD_QBIT", None)
@@ -2593,6 +2645,8 @@ class WireStack(unittest.TestCase):
         self.assertEqual(self.state.seerr_sonarr[0]["activeProfileName"], "Default")
         self.assertEqual(self.state.seerr_radarr[0]["activeDirectory"], "/media/Movies/By Rating")
         self.assertEqual(self.state.seerr_sonarr[0]["activeDirectory"], "/media/TV/By Rating")
+        self.assertFalse(self.state.seerr_radarr[0].get("syncEnabled"))
+        self.assertFalse(self.state.seerr_sonarr[0].get("syncEnabled"))
         self.assertEqual(self.state.seerr_sonarr[0]["activeAnimeDirectory"], "/media/TV/By Rating")
         self.assertTrue(self.state.seerr_sonarr[0].get("enableSeasonFolders"))
         self.assertTrue((self.ready / "seerr-arr").exists())
@@ -3090,6 +3144,30 @@ class WireStack(unittest.TestCase):
         os.environ.pop("POMPEY_RECYCLARR", None)
         self.assertEqual(recyclarr.recyclarr_bin(), str(launcher))
         self.assertEqual(ws.recyclarr_binary(), str(launcher))
+
+    def test_recyclarr_sets_dotnet_root_when_runtime_is_on_disk(self):
+        fake = self.tmp / "recyclarr"
+        fake.write_text("#!/bin/sh\necho DOTNET_ROOT=$DOTNET_ROOT\nexit 0\n")
+        fake.chmod(0o755)
+        runtime = self.tmp / "dotnet-runtime"
+        runtime.mkdir()
+        (runtime / "dotnet").write_text("")
+        os.environ["POMPEY_RECYCLARR"] = str(fake)
+        os.environ["POMPEY_DOTNET_ROOT"] = str(runtime)
+        os.environ["POMPEY_RECYCLARR_DATA"] = str(self.tmp / "recyclarr-data")
+        secrets = {
+            "radarr_api_key": "radarr-secret-key",
+            "sonarr_api_key": "sonarr-secret-key",
+        }
+        (self.tmp / "secrets.json").write_text(json.dumps(secrets))
+        os.environ["POMPEY_SECRETS"] = str(self.tmp / "secrets.json")
+        from io import StringIO
+        from contextlib import redirect_stdout
+
+        buf = StringIO()
+        with redirect_stdout(buf):
+            self.assertEqual(recyclarr.main(), 0)
+        self.assertIn(f"DOTNET_ROOT={runtime}", buf.getvalue())
 
     def test_existing_default_items_are_not_rewritten(self):
         os.environ["INDEXER_URL"] = ""
@@ -5174,6 +5252,79 @@ class WireStack(unittest.TestCase):
         self.assertEqual(len(self.state.radarr_command_queue), 1)
         self.assertEqual(len(self.state.queue), 1)
 
+    def test_declined_seerr_request_is_rerequested_and_keeps_download(self):
+        os.environ["INDEXER_URL"] = ""
+        os.environ["INDEXER_API_KEY"] = ""
+        self.state.seerr_has_admin = True
+        self.state.series = []
+        self.state.movies = [
+            {
+                "id": 99,
+                "title": "Captain Phillips",
+                "monitored": True,
+                "hasFile": False,
+                "tmdbId": 109424,
+            },
+        ]
+        self.state.seerr_requests = [
+            {
+                "id": 15,
+                "status": 3,
+                "type": "movie",
+                "media": {
+                    "mediaType": "movie",
+                    "tmdbId": 109424,
+                    "externalServiceId": 99,
+                    "title": "Captain Phillips",
+                },
+            }
+        ]
+        self.state.queue = [{"id": 1, "movieId": 99, "title": "Captain Phillips"}]
+        from io import StringIO
+        from contextlib import redirect_stdout
+
+        buf = StringIO()
+        with redirect_stdout(buf):
+            self.assertEqual(ws.closeout(), 0)
+        self.assertTrue(self.state.movies[0]["monitored"])
+        self.assertEqual(self.state.aborted_queue, [])
+        self.assertEqual(len(self.state.queue), 1)
+        self.assertEqual(len(self.state.seerr_requests), 1)
+        self.assertEqual(self.state.seerr_requests[0]["status"], 2)
+        self.assertEqual(self.state.seerr_requests[0]["media"]["tmdbId"], 109424)
+        self.assertNotEqual(self.state.seerr_requests[0]["id"], 15)
+        self.assertIn("re-requested Captain Phillips", buf.getvalue())
+        self.assertNotIn("Captain Phillips (Seerr request removed)", buf.getvalue())
+
+    def test_declined_seerr_request_stays_open_if_rerequest_fails(self):
+        os.environ["INDEXER_URL"] = ""
+        os.environ["INDEXER_API_KEY"] = ""
+        self.state.seerr_has_admin = True
+        self.state.seerr_fail_create_request = True
+        self.state.series = []
+        self.state.movies = [
+            {
+                "id": 99,
+                "title": "Captain Phillips",
+                "monitored": True,
+                "hasFile": False,
+                "tmdbId": 109424,
+            },
+        ]
+        self.state.seerr_requests = [
+            {
+                "id": 15,
+                "status": 3,
+                "media": {"mediaType": "movie", "tmdbId": 109424, "externalServiceId": 99},
+            }
+        ]
+        self.state.queue = [{"id": 1, "movieId": 99, "title": "Captain Phillips"}]
+        self.assertEqual(ws.closeout(), 0)
+        self.assertTrue(self.state.movies[0]["monitored"])
+        self.assertEqual(self.state.aborted_queue, [])
+        self.assertEqual(self.state.seerr_requests[0]["status"], 3)
+        self.assertEqual(self.state.seerr_requests[0]["id"], 15)
+
     def test_seerr_request_read_failure_does_not_unmonitor(self):
         os.environ["INDEXER_URL"] = ""
         os.environ["INDEXER_API_KEY"] = ""
@@ -5500,6 +5651,8 @@ class WireStack(unittest.TestCase):
         )
         self.assertEqual(self.state.seerr_radarr[0]["activeProfileName"], "Default")
         self.assertEqual(self.state.seerr_sonarr[0]["activeProfileName"], "Default")
+        self.assertFalse(self.state.seerr_radarr[0].get("syncEnabled"))
+        self.assertFalse(self.state.seerr_sonarr[0].get("syncEnabled"))
         self.assertEqual(
             set(self.state.radarr_folders),
             {
@@ -5531,6 +5684,47 @@ class WireStack(unittest.TestCase):
         ]
         self.assertEqual(sonarr_puts[0][2], "/api/v1/settings/sonarr/0")
         self.assertNotIn("id", sonarr_puts[0][3] or {})
+
+    def test_turns_off_seerr_arr_library_scan_on_existing_row(self):
+        """Existing installs had syncEnabled on; Arr scan declined in-flight requests."""
+        self.state.seerr_has_admin = True
+        self.state.initialized = True
+        self.state.seerr_radarr = [
+            {
+                "id": 0,
+                "name": "Radarr",
+                "hostname": "127.0.0.1",
+                "activeDirectory": "/media/Movies/By Rating",
+                "activeAnimeDirectory": "",
+                "activeProfileId": 1,
+                "activeProfileName": "Default",
+                "syncEnabled": True,
+            }
+        ]
+        self.state.seerr_sonarr = [
+            {
+                "id": 0,
+                "name": "Sonarr",
+                "hostname": "127.0.0.1",
+                "activeDirectory": "/media/TV/By Rating",
+                "activeAnimeDirectory": "/media/TV/By Rating",
+                "activeProfileId": 1,
+                "activeProfileName": "Default",
+                "syncEnabled": True,
+            }
+        ]
+        os.environ["PLEX_URL"] = ""
+        os.environ["PLEX_TOKEN"] = ""
+        rc = ws.main()
+        self.assertEqual(rc, 0)
+        self.assertFalse(self.state.seerr_radarr[0].get("syncEnabled"))
+        self.assertFalse(self.state.seerr_sonarr[0].get("syncEnabled"))
+        radarr_puts = [
+            call
+            for call in self.state.calls
+            if call[0] == "seerr" and call[1] == "PUT" and "/settings/radarr/" in call[2]
+        ]
+        self.assertTrue(radarr_puts, self.state.calls)
 
     def test_marks_ready_before_wizard_without_seerr_api_key(self):
         os.environ["PLEX_URL"] = ""

@@ -590,7 +590,11 @@ test "$(jq -r .vpn.rx_bytes "${POMPEY_READY}/status.json")" = 9000000
 echo "== fetch URL construction (range GET, not a full download) =="
 urls="$(run "${BIN}/fetch-engines" --print-urls)"
 printf '%s\n' "${urls}"
-grep -q 'recyclarr-linux-musl-' <<<"${urls}"
+grep -q 'recyclarr-linux-x64.tar.xz\|recyclarr-linux-arm64.tar.xz' <<<"${urls}"
+if grep -q 'recyclarr-linux-musl-' <<<"${urls}"; then
+  echo "glibc host must not fetch the musl Recyclarr apphost" >&2
+  exit 1
+fi
 grep -q -- '--no-same-owner' "${BIN}/fetch-engines"
 grep -q -- '--no-same-permissions' "${BIN}/fetch-engines"
 grep -q '.partial-' "${BIN}/fetch-engines"
@@ -625,6 +629,7 @@ while IFS= read -r url; do
 done <<<"${urls}"
 musl_urls="$(POMPEY_SERVARR_OS=linuxmusl run "${BIN}/fetch-engines" --print-urls)"
 grep -q 'os=linuxmusl' <<<"${musl_urls}"
+grep -q 'recyclarr-linux-musl-' <<<"${musl_urls}"
 grep -q 'os=linux&' <<<"${urls}" || grep -q 'os=linux$' <<<"${urls}" || grep -q 'os=linux&runtime' <<<"${urls}"
 echo "fetch URLs reachable (glibc here, musl URLs listed for HAOS)"
 
@@ -681,6 +686,8 @@ if grep -q 'tail -n +1' "${BIN}/pompey-log"; then
   exit 1
 fi
 grep -q 'dest}/recyclarr' "${BIN}/fetch-engines"
+grep -q 'builds.dotnet.microsoft.com' "${BIN}/fetch-engines"
+grep -q 'DOTNET_ROOT' "${BIN}/recyclarr-sync"
 test -x "${BIN}/pompey-log"
 test -x "${BIN}/pompey-log-emit"
 test -x "${BIN}/prowlarr-arr-proxy"
