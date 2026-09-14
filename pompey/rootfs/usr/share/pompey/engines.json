@@ -1,0 +1,139 @@
+{
+  "schema": 1,
+  "engines": {
+    "Radarr": {
+      "version": "v6.3.0.10514",
+      "artifacts": {
+        "linux-amd64": {
+          "url": "https://github.com/Radarr/Radarr/releases/download/v6.3.0.10514/Radarr.master.6.3.0.10514.linux-core-x64.tar.gz",
+          "sha256": "41d6455c037ff267c5ad5a0f0de4502cebe8f89ec3d051da97851933d48a4047"
+        },
+        "linuxmusl-amd64": {
+          "url": "https://github.com/Radarr/Radarr/releases/download/v6.3.0.10514/Radarr.master.6.3.0.10514.linux-musl-core-x64.tar.gz",
+          "sha256": "060348c45c10b8810a33710dd86f914f07163071bcec505c788952e3cedaddfa"
+        },
+        "linux-aarch64": {
+          "url": "https://github.com/Radarr/Radarr/releases/download/v6.3.0.10514/Radarr.master.6.3.0.10514.linux-core-arm64.tar.gz",
+          "sha256": "392ee99a358c0cad98db1da4cd394680a9bbd9eff9d293ee5d9cf8ce93a6ba43"
+        },
+        "linuxmusl-aarch64": {
+          "url": "https://github.com/Radarr/Radarr/releases/download/v6.3.0.10514/Radarr.master.6.3.0.10514.linux-musl-core-arm64.tar.gz",
+          "sha256": "cc68133a6a0a3230873784287fe1d5a9ed7178539c4c8069260df71725b0bf35"
+        }
+      }
+    },
+    "Sonarr": {
+      "version": "v4.0.19.2979",
+      "artifacts": {
+        "linux-amd64": {
+          "url": "https://github.com/Sonarr/Sonarr/releases/download/v4.0.19.2979/Sonarr.main.4.0.19.2979.linux-x64.tar.gz",
+          "sha256": "b691b3584c31c0b5514058dee81071c923f63d59a37d19e32f92fa13eaa153db"
+        },
+        "linuxmusl-amd64": {
+          "url": "https://github.com/Sonarr/Sonarr/releases/download/v4.0.19.2979/Sonarr.main.4.0.19.2979.linux-musl-x64.tar.gz",
+          "sha256": "df95aafa363d72620cdce124457e2f17b97fd04eb9f722b6db16a13704df93a4"
+        },
+        "linux-aarch64": {
+          "url": "https://github.com/Sonarr/Sonarr/releases/download/v4.0.19.2979/Sonarr.main.4.0.19.2979.linux-arm64.tar.gz",
+          "sha256": "8d97be4a554b12293c26dbc2a4606f424d7226b522a975048824ecf941a21aa5"
+        },
+        "linuxmusl-aarch64": {
+          "url": "https://github.com/Sonarr/Sonarr/releases/download/v4.0.19.2979/Sonarr.main.4.0.19.2979.linux-musl-arm64.tar.gz",
+          "sha256": "2ffef06bba1c28b50b58af3117de482d250fe20539508f2f3e0303dc55d23495"
+        }
+      }
+    },
+    "Prowlarr": {
+      "version": "v2.5.2.5491",
+      "artifacts": {
+        "linux-amd64": {
+          "url": "https://github.com/Prowlarr/Prowlarr/releases/download/v2.5.2.5491/Prowlarr.master.2.5.2.5491.linux-core-x64.tar.gz",
+          "sha256": "22fe95742869d7af5e16d420c7889185579152ea8324be6c6e4e3cd011f4c37b"
+        },
+        "linuxmusl-amd64": {
+          "url": "https://github.com/Prowlarr/Prowlarr/releases/download/v2.5.2.5491/Prowlarr.master.2.5.2.5491.linux-musl-core-x64.tar.gz",
+          "sha256": "08515cacd944ba801bc7d1a2d932aeac6a08cdcdadfb6065b93a6762abf74c85"
+        },
+        "linux-aarch64": {
+          "url": "https://github.com/Prowlarr/Prowlarr/releases/download/v2.5.2.5491/Prowlarr.master.2.5.2.5491.linux-core-arm64.tar.gz",
+          "sha256": "b01fc29abe067fd4fc03ff071e9834f7c907d1a59c021768228b4e80221d45d6"
+        },
+        "linuxmusl-aarch64": {
+          "url": "https://github.com/Prowlarr/Prowlarr/releases/download/v2.5.2.5491/Prowlarr.master.2.5.2.5491.linux-musl-core-arm64.tar.gz",
+          "sha256": "42960a01413b11e5cd8385290f64a5d5f7727d8a10632102e8a609fd85f6f672"
+        }
+      }
+    },
+    "recyclarr": {
+      "version": "v8.7.2",
+      "artifacts": {
+        "linux-amd64": {
+          "url": "https://github.com/recyclarr/recyclarr/releases/download/v8.7.2/recyclarr-linux-x64.tar.xz",
+          "sha256": "ed36515e12483e20761e743f80f21650e26eb175c348c94622dbe1bc2fdb983f"
+        },
+        "linuxmusl-amd64": {
+          "url": "https://github.com/recyclarr/recyclarr/releases/download/v8.7.2/recyclarr-linux-musl-x64.tar.xz",
+          "sha256": "958baf0033cffa9db9088454eba00160b4113c50259b23eeb41d04bff0e864dc"
+        },
+        "linux-aarch64": {
+          "url": "https://github.com/recyclarr/recyclarr/releases/download/v8.7.2/recyclarr-linux-arm64.tar.xz",
+          "sha256": "cacddabde30d2cb4e21bd143c51b95df088b3e1cfafbc6210124255162c52705"
+        },
+        "linuxmusl-aarch64": {
+          "url": "https://github.com/recyclarr/recyclarr/releases/download/v8.7.2/recyclarr-linux-musl-arm64.tar.xz",
+          "sha256": "48c92e10f15e968669af2f2a56c133184a318886fc27a0b67a499fd24e9441ff"
+        }
+      }
+    },
+    "qbittorrent-nox": {
+      "version": "release-5.2.3_v2.0.14",
+      "artifacts": {
+        "linux-amd64": {
+          "url": "https://github.com/userdocs/qbittorrent-nox-static/releases/download/release-5.2.3_v2.0.14/x86_64-qbittorrent-nox",
+          "sha256": "c1839caf9b7dbddee09e9a4394bb5b17dc70ecd7c3a9b45e84331d5a1389a645"
+        },
+        "linuxmusl-amd64": {
+          "url": "https://github.com/userdocs/qbittorrent-nox-static/releases/download/release-5.2.3_v2.0.14/x86_64-qbittorrent-nox",
+          "sha256": "c1839caf9b7dbddee09e9a4394bb5b17dc70ecd7c3a9b45e84331d5a1389a645"
+        },
+        "linux-aarch64": {
+          "url": "https://github.com/userdocs/qbittorrent-nox-static/releases/download/release-5.2.3_v2.0.14/aarch64-qbittorrent-nox",
+          "sha256": "de4239e0c8683e26b970c25e1fe27fb6336635300553f8f0bda2d60299f60ed1"
+        },
+        "linuxmusl-aarch64": {
+          "url": "https://github.com/userdocs/qbittorrent-nox-static/releases/download/release-5.2.3_v2.0.14/aarch64-qbittorrent-nox",
+          "sha256": "de4239e0c8683e26b970c25e1fe27fb6336635300553f8f0bda2d60299f60ed1"
+        }
+      }
+    },
+    "seerr": {
+      "version": "v3.4.1",
+      "image": "ghcr.io/seerr-team/seerr@sha256:f4768de5f616248d723e05891f3345a1402123775d03bf0890dbfedc0831bda1"
+    },
+    "dotnet": {
+      "version": "10.0.12",
+      "artifacts": {
+        "linux-amd64": {
+          "url": "https://builds.dotnet.microsoft.com/dotnet/Runtime/10.0.12/dotnet-runtime-10.0.12-linux-x64.tar.gz",
+          "sha512": "58388fdde4f13bd703c7a6f7defb3300b17e42ba5fe8bca50066f80f64ac7406620dcdfb4acc1eff7992750c8cc5cff8369dd12d09730c8a9e8760d6032f7f6e"
+        },
+        "linuxmusl-amd64": {
+          "url": "https://builds.dotnet.microsoft.com/dotnet/Runtime/10.0.12/dotnet-runtime-10.0.12-linux-musl-x64.tar.gz",
+          "sha512": "0a532fb8b91fd7e3458a414a83b9b0a8904374fb459de8df8a988e81ac1ac56b8f56f68a62803b77b9afed5bbdebac0b21aa4d0007fbc6ae6900be4893b4f2cf"
+        },
+        "linux-aarch64": {
+          "url": "https://builds.dotnet.microsoft.com/dotnet/Runtime/10.0.12/dotnet-runtime-10.0.12-linux-arm64.tar.gz",
+          "sha512": "ac1e0090391085ba70c7457adaaa8f6cc20dc216b9b368b4227a427de271708d783380c7b955b7be4897ff24849fbe5c3b7ec1cb1c38345a725de9a3812280eb"
+        },
+        "linuxmusl-aarch64": {
+          "url": "https://builds.dotnet.microsoft.com/dotnet/Runtime/10.0.12/dotnet-runtime-10.0.12-linux-musl-arm64.tar.gz",
+          "sha512": "8f369a9ff84e06b570b91baf11038d6751a223500131477080f03e473bb5d3c75d39f3b83a5af7949ef838468d7e1beb46529cd654702e4d98e17e34b4038744"
+        }
+      }
+    }
+  },
+  "resources": {
+    "trash_guides": "08fcf06b67122cfa813802f7931cded652ebfad8",
+    "config_templates": "69ff2fac3e82a80565bd9be044592833757337e2"
+  }
+}

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Local WireGuard client + server. No Proton. No BitTorrent.
+# Local WireGuard client + server. No VPN. No BitTorrent.
 #
-# Always: apply-vpn-config on a Proton-shaped .conf, then prove the runtime
+# Always: apply-vpn-config on a VPN-shaped .conf, then prove the runtime
 # file is something `wg addconf` will accept (catches Table=off after [Peer]).
 # When this VM has sudo + kernel WireGuard: bring wg0 up in a netns against a
 # generated peer, with the same PATH helpers HAOS needs (read-only sysctl,
@@ -35,13 +35,8 @@ export POMPEY_RESOLV="${WORK}/etc/resolv.conf"
 export MEDIA_ROOT="${WORK}/media"
 export IPTABLES_LOG="${WORK}/iptables.log"
 mkdir -p "${WORK}/bin" "${POMPEY_WG_ETC}" "${POMPEY_CONFIG}/wireguard" "${MEDIA_ROOT}"
-cp "${ROOT}/tests/stubs/iptables" "${WORK}/bin/iptables"
-cp "${ROOT}/tests/stubs/iptables" "${WORK}/bin/ip6tables"
-cp "${ROOT}/tests/stubs/iptables" "${WORK}/bin/iptables-nft"
-cp "${ROOT}/tests/stubs/iptables" "${WORK}/bin/ip6tables-nft"
-cp "${ROOT}/tests/stubs/iptables" "${WORK}/bin/iptables-legacy"
-cp "${ROOT}/tests/stubs/iptables" "${WORK}/bin/ip6tables-legacy"
-chmod +x "${WORK}/bin/"* "${ROOT}/tests/with-bashio"
+# Only rendering is exercised here. Real firewall packets have their own test.
+export POMPEY_FAKE_VPN=1
 for f in "${BIN}"/*; do
   [[ -f "${f}" ]] || continue
   cmd="$(basename "${f}")"
@@ -72,7 +67,7 @@ fi
 
 can_live=1
 if ! command -v wg >/dev/null 2>&1 || ! command -v wg-quick >/dev/null 2>&1; then
-  echo "skip live handshake: install wireguard-tools to exercise wg-quick without Proton"
+  echo "skip live handshake: install wireguard-tools to exercise wg-quick without VPN"
   can_live=0
 fi
 if [[ "${can_live}" -eq 1 ]] && ! sudo -n true 2>/dev/null; then
@@ -89,11 +84,12 @@ if [[ "${can_live}" -eq 1 ]]; then
 fi
 
 if [[ "${can_live}" -ne 1 ]]; then
+  [[ "${POMPEY_REQUIRE_NETWORK_TESTS:-0}" != "1" ]] || exit 1
   echo "wg-quick contract ok (no live handshake on this VM)"
   exit 0
 fi
 
-echo "== generated WireGuard server + client handshake (not Proton) =="
+echo "== generated WireGuard server + client handshake (not VPN) =="
 umask 077
 srv_priv="$(wg genkey)"
 cli_priv="$(wg genkey)"
@@ -169,4 +165,4 @@ if [[ -z "${hs}" || "${hs}" == "0" ]]; then
   echo "WireGuard handshake did not complete against the generated server" >&2
   exit 1
 fi
-echo "generated WireGuard handshake ok (not Proton)"
+echo "generated WireGuard handshake ok (not VPN)"

@@ -399,6 +399,7 @@ class FakeState:
                         "content_path": item.get("content_path") or "",
                         "size": item.get("size") or 0,
                         "completion_on": item.get("completion_on") or 0,
+                        "ratio_limit": -2, "seeding_time_limit": -1, "inactive_seeding_time_limit": -1,
                     }
                 )
             return rows
@@ -550,13 +551,16 @@ def qbit_handler(state: FakeState):
 
         def do_GET(self) -> None:
             path = urlparse(self.path).path
-            if path.endswith("/version") or path.endswith("/webapiVersion"):
-                return self._send(200, "5.0.4")
+            if path.endswith("/version"):
+                return self._send(200, "v5.2.3")
+            if path.endswith("/webapiVersion"):
+                return self._send(200, "2.11.4")
             if path.endswith("/preferences"):
                 return self._send(
                     200,
                     {
                         "current_network_interface": "wg0",
+                        "max_ratio_enabled": True, "max_ratio": 0, "max_ratio_act": 0,
                         "listen_port": 0,
                         "save_path": str(state.complete),
                         "temp_path": str(state.incomplete),
@@ -777,7 +781,7 @@ def _as_list(value):
 
 
 def prowlarr_ensure_qbit(prowlarr: str, api_key: str, user: str, password: str) -> None:
-    """Integration fallback. wire-stack now posts this client (category prowlarr)."""
+    """Integration fallback. wire_stack.py now posts this client (category prowlarr)."""
     hdrs = {"X-Api-Key": api_key, "Content-Type": "application/json"}
     existing = _as_list(http_json("GET", f"{prowlarr}/api/v1/downloadclient", headers=hdrs))
     if any(item.get("implementation") == "QBittorrent" for item in existing):

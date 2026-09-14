@@ -3,8 +3,8 @@
 
 This is a report, not an installer playhead. Opening Ingress only reads
 status.json — it must not look like boot is still running because a later
-service called pompey-status fetch/start/wire. Once search is wired, keep
-the dashboard (Open search + Proton graph) unless Proton is explicitly needed
+service called pompey_status.py fetch/start/wire. Once search is wired, keep
+the dashboard (Open search + VPN graph) unless VPN is explicitly needed
 again.
 """
 from __future__ import annotations
@@ -21,9 +21,9 @@ if not STATUS_PATH:
     STATUS_PATH = os.path.join(READY, "status.json")
 
 STEPS = (
-    ("vpn", "Proton tunnel"),
-    ("fetch", "Download household UI and engines"),
-    ("start", "Start hidden engines"),
+    ("vpn", "VPN tunnel"),
+    ("fetch", "Download apps"),
+    ("start", "Start apps"),
     ("wire", "Connect search to your library"),
     ("ready", "Ready"),
 )
@@ -62,7 +62,7 @@ def default_status(*, search: bool) -> dict:
             "label": "Ready",
             "percent": 100,
             "error": "",
-            "need_proton": False,
+            "need_vpn": False,
             "search": True,
             "search_port": seerr,
             "sources_port": sources,
@@ -115,7 +115,7 @@ def is_dashboard(data: dict) -> bool:
     return (
         data.get("step") == "ready"
         and bool(data.get("search"))
-        and not data.get("need_proton")
+        and not data.get("need_vpn")
         and percent == 100
     )
 
@@ -139,9 +139,9 @@ def save(data: dict) -> None:
         raise last
 
 
-def _need_proton_flag(current: bool) -> tuple[bool, str]:
-    """Return (need_proton, explicit) where explicit is 'on', 'off', or ''."""
-    raw = os.environ.get("POMPEY_STATUS_NEED_PROTON", "").strip().lower()
+def _need_vpn_flag(current: bool) -> tuple[bool, str]:
+    """Return (need_vpn, explicit) where explicit is 'on', 'off', or ''."""
+    raw = os.environ.get("POMPEY_STATUS_NEED_VPN", "").strip().lower()
     if raw in {"1", "true", "yes", "on"}:
         return True, "on"
     if raw in {"0", "false", "no", "off"}:
@@ -157,7 +157,7 @@ def mark_steps_done(data: dict) -> None:
 
 def main(argv: list[str]) -> int:
     if len(argv) < 3:
-        print("usage: pompey-status STEP LABEL [PERCENT] [error message]", file=sys.stderr)
+        print("usage: pompey_status.py STEP LABEL [PERCENT] [error message]", file=sys.stderr)
         return 2
     step, label = argv[1], argv[2]
     percent = None
@@ -173,7 +173,7 @@ def main(argv: list[str]) -> int:
     fd = lock_status()
     try:
         data, dirty = load()
-        need, explicit = _need_proton_flag(bool(data.get("need_proton")))
+        need, explicit = _need_vpn_flag(bool(data.get("need_vpn")))
         wired = search_is_up()
         vpn = data.get("vpn") if isinstance(data.get("vpn"), dict) else None
 
@@ -186,9 +186,9 @@ def main(argv: list[str]) -> int:
                 save(healed)
             except OSError as exc:
                 stamp = time.strftime("%H:%M:%S")
-                print(f"[{stamp}] WARNING: pompey-status: could not write {STATUS_PATH}: {exc}", file=sys.stderr)
+                print(f"[{stamp}] WARNING: pompey_status.py: could not write {STATUS_PATH}: {exc}", file=sys.stderr)
 
-        # While Proton is missing, ignore engine/wire chatter so the paste
+        # While VPN is missing, ignore engine/wire chatter so the paste
         # textarea does not flicker. Ready must still land: search can be up
         # after a paste, and the dashboard must not stay on the installer.
         if (
@@ -207,11 +207,11 @@ def main(argv: list[str]) -> int:
                 persist_dashboard()
             return 0
         if explicit == "on":
-            data["need_proton"] = True
+            data["need_vpn"] = True
         elif explicit == "off" or step == "ready" or wired:
-            data["need_proton"] = False
+            data["need_vpn"] = False
         else:
-            data["need_proton"] = need
+            data["need_vpn"] = need
         data["updated"] = int(time.time())
         data["step"] = step
         data["label"] = label
@@ -248,7 +248,7 @@ def main(argv: list[str]) -> int:
             save(data)
         except OSError as exc:
             stamp = time.strftime("%H:%M:%S")
-            print(f"[{stamp}] WARNING: pompey-status: could not write {STATUS_PATH}: {exc}", file=sys.stderr)
+            print(f"[{stamp}] WARNING: pompey_status.py: could not write {STATUS_PATH}: {exc}", file=sys.stderr)
         return 0
     finally:
         try:

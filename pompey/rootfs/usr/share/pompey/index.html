@@ -56,7 +56,7 @@
     }
 
     /* Installer chrome is first-boot only. Once search is up, this page is
-       a dashboard (Open search / Proton graph), not a fake progress playhead. */
+       a dashboard (Open search / VPN graph), not a fake progress playhead. */
     body.is-ready .bar,
     body.is-ready #steps {
       display: none;
@@ -111,11 +111,11 @@
       margin-top: 0.75rem;
     }
 
-    #proton {
+    #vpn {
       margin-top: 1.25rem;
     }
 
-    #proton label {
+    #vpn label {
       display: block;
       font-family: ui-sans-serif, system-ui, sans-serif;
       font-size: 0.95rem;
@@ -123,7 +123,7 @@
       margin-bottom: 0.5rem;
     }
 
-    #proton textarea {
+    #vpn textarea {
       width: 100%;
       min-height: 11rem;
       margin: 0 0 0.75rem;
@@ -138,7 +138,7 @@
       resize: vertical;
     }
 
-    #proton button {
+    #vpn button {
       font-family: ui-sans-serif, system-ui, sans-serif;
       font-size: 0.95rem;
       background: var(--focus);
@@ -149,7 +149,7 @@
       cursor: pointer;
     }
 
-    #proton button:disabled {
+    #vpn button:disabled {
       opacity: 0.6;
       cursor: wait;
     }
@@ -292,30 +292,29 @@
     <h1><img src="logo.png" width="1983" height="793" alt="Pompey"></h1>
     <div class="bar" aria-hidden="true"><span id="fill"></span></div>
     <ol id="steps"></ol>
-    <p class="now" id="now">Bringing the fleet to heel…</p>
-    <form id="proton" hidden>
-      <label for="wg">Paste the Proton WireGuard file you downloaded (.conf). Pompey reads Endpoint and keys from that file.</label>
+    <p class="now" id="now">Starting Pompey…</p>
+    <form id="vpn" hidden>
+      <label for="wg">Paste your VPN WireGuard configuration (.conf).</label>
       <textarea id="wg" name="config" spellcheck="false" autocomplete="off" autocapitalize="off"></textarea>
-      <button type="submit" id="wg-go">Start the tunnel</button>
+      <button type="submit" id="wg-go">Connect VPN</button>
     </form>
     <div id="open-search" hidden>
       <a id="open-search-btn" href="#" target="_blank" rel="noopener">Open search</a>
       <a id="open-sources-btn" href="#" target="_blank" rel="noopener">Open sources</a>
       <p class="hint" id="open-search-url"></p>
     </div>
-    <section id="debug-consoles" hidden aria-label="Debug engine consoles">
-      <div class="debug-head">Debug consoles</div>
+    <section id="debug-consoles" hidden aria-label="Troubleshooting">
+      <div class="debug-head">Troubleshooting</div>
       <div class="debug-links">
         <a id="debug-radarr-btn" href="#" target="_blank" rel="noopener">Radarr</a>
         <a id="debug-sonarr-btn" href="#" target="_blank" rel="noopener">Sonarr</a>
         <a id="debug-qbit-btn" href="#" target="_blank" rel="noopener">qBittorrent</a>
       </div>
-      <p class="hint">Hidden movie, TV, and download UIs. Interactive Search in Radarr or Sonarr is how you pick a specific release for a title already requested in search. Still inside this sidebar’s Ingress — not published on the LAN. Turn Debug off in the app configuration when you are done.</p>
     </section>
-    <section id="vpn-bw" hidden aria-label="Proton tunnel bandwidth">
+    <section id="vpn-bw" hidden aria-label="VPN tunnel bandwidth">
       <div class="vpn-head">
-        <span>Proton tunnel</span>
-        <span class="vpn-iface" id="vpn-iface">wg0</span>
+        <span>VPN</span>
+        <span class="vpn-iface" id="vpn-iface">Connected</span>
       </div>
       <div class="vpn-rates">
         <div class="vpn-col down">
@@ -334,9 +333,9 @@
         <path id="vpn-down-line" fill="none" stroke="#d4af37" stroke-width="1.6"></path>
         <path id="vpn-up-line" fill="none" stroke="#8aa0b4" stroke-width="1.4"></path>
       </svg>
-      <p class="vpn-axis" id="vpn-axis">Last two minutes on the VPN adapter</p>
+      <p class="vpn-axis" id="vpn-axis">Last two minutes</p>
     </section>
-    <p id="file-hint" hidden>This file is only the wait screen. On Home Assistant it lives in the sidebar after Proton is up. In this repo run <code>python3 tests/preview.py</code> to watch progress here.</p>
+    <p id="file-hint" hidden>Open Pompey from the Home Assistant sidebar.</p>
     <p class="error" id="err" hidden></p>
   </main>
   <script>
@@ -345,7 +344,7 @@
     const now = document.getElementById("now");
     const err = document.getElementById("err");
     const stepsEl = document.getElementById("steps");
-    const proton = document.getElementById("proton");
+    const vpn = document.getElementById("vpn");
     const wg = document.getElementById("wg");
     const wgGo = document.getElementById("wg-go");
     const openSearch = document.getElementById("open-search");
@@ -367,7 +366,7 @@
     const vpnUpLine = document.getElementById("vpn-up-line");
     const vpnAxis = document.getElementById("vpn-axis");
     const marks = { pending: "·", active: "›", done: "✓", error: "!" };
-    let protonSubmitted = false;
+    let vpnSubmitted = false;
     let lastSig = "";
     const vpnHist = [];
     const VPN_KEEP_MS = 120000;
@@ -384,7 +383,7 @@
     }
 
     function isDashboard(data) {
-      if (data.need_proton) return false;
+      if (data.need_vpn) return false;
       if (data.search) {
         sawDashboard = true;
         return true;
@@ -423,8 +422,8 @@
     }
 
     function renderVpn(data) {
-      const showForm = !protonSubmitted && (
-        Boolean(data.need_proton) || document.activeElement === wg
+      const showForm = !vpnSubmitted && (
+        Boolean(data.need_vpn) || document.activeElement === wg
       );
       const vpn = data.vpn;
       if (showForm || !vpn || vpn.up !== true) {
@@ -455,7 +454,7 @@
         vpnHist.shift();
       }
       vpnBw.hidden = false;
-      vpnIface.textContent = vpn.iface || "wg0";
+      vpnIface.textContent = "Connected";
       vpnDownRate.textContent = vpnHist.length > 1 ? fmtRate(downBps) : "—";
       vpnUpRate.textContent = vpnHist.length > 1 ? fmtRate(upBps) : "—";
       vpnDownTotal.textContent = fmtBytes(rx) + " in";
@@ -469,8 +468,8 @@
       vpnUpLine.setAttribute("d", linePath(ups, 320, 68, max));
       const span = vpnHist.length ? (nowMs - vpnHist[0].t) / 1000 : 0;
       vpnAxis.textContent = span < 20
-        ? "Rates fill in as traffic crosses the VPN"
-        : "Last two minutes on the VPN adapter";
+        ? "Measuring speed…"
+        : "Last two minutes";
     }
 
     if (location.protocol === "file:") {
@@ -480,15 +479,15 @@
     function render(data) {
       const dashboard = isDashboard(data);
       document.body.classList.toggle("is-ready", dashboard);
-      const showForm = !protonSubmitted && (
-        Boolean(data.need_proton) || document.activeElement === wg
+      const showForm = !vpnSubmitted && (
+        Boolean(data.need_vpn) || document.activeElement === wg
       );
-      proton.hidden = !showForm;
+      vpn.hidden = !showForm;
       const sig = JSON.stringify([
         data.percent,
         data.label,
         data.error,
-        data.need_proton,
+        data.need_vpn,
         data.search,
         data.search_port,
         data.sources_port,
@@ -501,7 +500,7 @@
       }
       lastSig = sig;
       fill.style.width = Math.max(0, Math.min(100, data.percent || 0)) + "%";
-      now.textContent = data.label || "Bringing the fleet to heel…";
+      now.textContent = data.label || "Starting Pompey…";
       if (data.error && !dashboard) {
         err.hidden = false;
         err.textContent = data.error;
@@ -528,11 +527,11 @@
         const sourcesPort = lastPorts.sources;
         const url = "http://" + location.hostname + ":" + port + "/";
         const sourcesUrl = "http://" + location.hostname + ":" + sourcesPort + "/";
-        now.textContent = "Search is ready. This sidebar stays Pompey; open search on port " + port + ".";
+        now.textContent = "Ready";
         openSearch.hidden = false;
         openSearchBtn.href = url;
         openSourcesBtn.href = sourcesUrl;
-        openSearchUrl.textContent = url + " is search. " + sourcesUrl + " is sources (Prowlarr) — Seerr cannot add indexers. First visit to sources asks you to set a login. If this host is Home Assistant Cloud, use this machine’s LAN IP. Plex is a separate app. Do not put either port on the public internet.";
+        openSearchUrl.textContent = "If these links fail, open Home Assistant using its local address.";
       } else {
         openSearch.hidden = true;
       }
@@ -547,12 +546,12 @@
       }
     }
 
-    proton.addEventListener("submit", async (event) => {
+    vpn.addEventListener("submit", async (event) => {
       event.preventDefault();
       wgGo.disabled = true;
       err.hidden = true;
       try {
-        const res = await fetch("setup/proton", {
+        const res = await fetch("setup/vpn", {
           method: "POST",
           headers: { "Content-Type": "text/plain" },
           body: wg.value,
@@ -560,15 +559,15 @@
         const body = await res.json().catch(() => ({}));
         if (!res.ok || body.ok === false) {
           err.hidden = false;
-          err.textContent = body.error || "Could not use that Proton file.";
+          err.textContent = body.error || "Could not use that VPN file.";
           return;
         }
-        proton.hidden = true;
-        protonSubmitted = true;
-        now.textContent = "Starting the Proton tunnel…";
+        vpn.hidden = true;
+        vpnSubmitted = true;
+        now.textContent = "Connecting VPN…";
       } catch (_exc) {
         err.hidden = false;
-        err.textContent = "Could not send the Proton file. Try again from the sidebar.";
+        err.textContent = "Could not save the VPN configuration. Try again.";
       } finally {
         wgGo.disabled = false;
       }
@@ -582,11 +581,25 @@
         const data = await res.json();
         render(data);
         renderVpn(data);
+        if (data.search) {
+          try {
+            const response = await fetch("health.json", { cache: "no-store" });
+            const health = response.ok ? await response.json() : null;
+            if (!health || Date.now() / 1000 - health.updated > 35) {
+              err.textContent = "Status unavailable. Check the app log.";
+            } else {
+              const down = Object.entries(health.services).filter(([, up]) => !up).map(([name]) => name);
+              const failed = Object.entries(health.jobs).filter(([, job]) => job.failures > 0).map(([name]) => name);
+              err.textContent = down.length ? "Waiting for: " + down.join(", ")
+                : failed.length ? "Retrying: " + failed.join(", ") : (health.attention || []).join(" ");
+            }
+          } catch (_) { err.textContent = "Status unavailable."; }
+        }
       } catch (_exc) {
         // Polling is read-only. A torn status.json must not look like boot
         // started over just because someone opened the sidebar.
         if (!document.body.classList.contains("is-ready")) {
-          now.textContent = "Waiting for the box to start…";
+          now.textContent = "Waiting for Pompey…";
         }
       }
     }

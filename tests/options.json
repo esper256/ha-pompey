@@ -6,5 +6,6 @@
   "tv_kid_folder": "TV/Kid Friendly",
   "after_download": "stop_sharing",
   "simultaneous_downloads": 8,
-  "debug": false
+  "debug": false,
+  "nat_pmp_gateway": ""
 }

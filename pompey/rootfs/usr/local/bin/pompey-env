@@ -12,7 +12,7 @@ POMPEY_CONFIG="${POMPEY_CONFIG:-/config}"
 POMPEY_WG_ETC="${POMPEY_WG_ETC:-/etc/wireguard}"
 POMPEY_WG_CONF="${POMPEY_WG_CONF:-${POMPEY_WG_ETC}/wg0.conf}"
 POMPEY_WG_FILE="${POMPEY_WG_FILE:-${POMPEY_CONFIG}/wireguard/wg0.conf}"
-POMPEY_WG_DNS="${POMPEY_WG_DNS:-10.2.0.1}"
+
 POMPEY_LAN_NETWORKS="${POMPEY_LAN_NETWORKS:-10.0.0.0/8,172.16.0.0/12,192.168.0.0/16}"
 POMPEY_VPN_TMP="${POMPEY_VPN_TMP:-/tmp/vpn}"
 POMPEY_LAN_FILE="${POMPEY_LAN_FILE:-/etc/pompey-lan-networks}"
@@ -26,6 +26,7 @@ if declare -F bashio::config >/dev/null 2>&1; then
   : "${MEDIA_MOVIES_KID:=$(bashio::config 'movies_kid_folder')}"
   : "${MEDIA_TV:=$(bashio::config 'tv_folder')}"
   : "${MEDIA_TV_KID:=$(bashio::config 'tv_kid_folder')}"
+  : "${NAT_PMP_GATEWAY:=$(bashio::config 'nat_pmp_gateway')}"
   : "${AFTER_DOWNLOAD:=$(bashio::config 'after_download')}"
   : "${SIMULTANEOUS_DOWNLOADS:=$(bashio::config 'simultaneous_downloads')}"
   if declare -F bashio::config.true >/dev/null 2>&1 && bashio::config.true debug; then
@@ -34,6 +35,9 @@ if declare -F bashio::config >/dev/null 2>&1; then
     : "${POMPEY_DEBUG:=0}"
   fi
 fi
+NAT_PMP_GATEWAY="${NAT_PMP_GATEWAY:-}"
+[[ "${NAT_PMP_GATEWAY}" != "null" ]] || NAT_PMP_GATEWAY=""
+export NAT_PMP_GATEWAY
 MEDIA_ROOT="${MEDIA_ROOT:-/media/dlna}"
 MEDIA_MOVIES="${MEDIA_MOVIES:-Movies/Not Kid Friendly}"
 MEDIA_MOVIES_KID="${MEDIA_MOVIES_KID:-Movies/Kid Friendly}"
@@ -42,16 +46,9 @@ MEDIA_TV_KID="${MEDIA_TV_KID:-TV/Kid Friendly}"
 AFTER_DOWNLOAD="${AFTER_DOWNLOAD:-stop_sharing}"
 SIMULTANEOUS_DOWNLOADS="${SIMULTANEOUS_DOWNLOADS:-8}"
 POMPEY_DEBUG="${POMPEY_DEBUG:-0}"
-MEDIA_ROOT="${MEDIA_ROOT%/}"
-MEDIA_MOVIES="${MEDIA_MOVIES#/}"
-MEDIA_MOVIES="${MEDIA_MOVIES%/}"
-MEDIA_MOVIES_KID="${MEDIA_MOVIES_KID#/}"
-MEDIA_MOVIES_KID="${MEDIA_MOVIES_KID%/}"
-MEDIA_TV="${MEDIA_TV#/}"
-MEDIA_TV="${MEDIA_TV%/}"
-MEDIA_TV_KID="${MEDIA_TV_KID#/}"
-MEDIA_TV_KID="${MEDIA_TV_KID%/}"
 export MEDIA_ROOT MEDIA_MOVIES MEDIA_MOVIES_KID MEDIA_TV MEDIA_TV_KID AFTER_DOWNLOAD SIMULTANEOUS_DOWNLOADS POMPEY_DEBUG
+
+python3 "$(command -v pompey_config.py)"
 
 mkdir -p \
   "${POMPEY_DATA}" \

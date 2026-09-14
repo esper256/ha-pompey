@@ -3,7 +3,7 @@
 
 Reads /proc/net/dev (or the fake-VPN netns). Does not change boot step fields
 unless search is already wired and a later writer rewound the installer bar —
-then restore the dashboard. Shares the status.json lock with pompey-status.
+then restore the dashboard. Shares the status.json lock with pompey_status.py.
 """
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ import sys
 import time
 
 STEPS = (
-    ("vpn", "Proton tunnel"),
+    ("vpn", "VPN tunnel"),
     ("fetch", "Download household UI and engines"),
     ("start", "Start hidden engines"),
     ("wire", "Connect search to your library"),
@@ -118,7 +118,7 @@ def dashboard_status() -> dict:
         "label": "Ready",
         "percent": 100,
         "error": "",
-        "need_proton": False,
+        "need_vpn": False,
         "search": True,
         "search_port": seerr,
         "sources_port": sources,
@@ -161,7 +161,7 @@ def save_status(data: dict) -> None:
 
 def heal_dashboard(data: dict) -> dict:
     """Once search is wired, do not keep an installer playhead on the sidebar."""
-    if not is_wired() or data.get("need_proton"):
+    if not is_wired() or data.get("need_vpn"):
         return data
     data["search"] = True
     if data.get("step") != "ready":
@@ -235,7 +235,7 @@ def main(argv: list[str]) -> int:
     if argv[1:] == ["loop"]:
         return loop()
     if argv[1:]:
-        print("usage: pompey-vpn-stats [loop]", file=sys.stderr)
+        print("usage: pompey_vpn_stats.py [loop]", file=sys.stderr)
         return 2
     return write_once()
 

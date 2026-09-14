@@ -1,57 +1,21 @@
 # Pompey
 
-Search for a movie or TV show in Home Assistant. Confirm if we need you. It lands in the right library, and Plex notices.
+Pompey runs Seerr, Prowlarr, Radarr, Sonarr and qBittorrent inside one Home Assistant OS add-on, behind a WireGuard VPN. Plex runs separately. The Home Assistant sidebar shows setup and live health; Seerr on port **5055** is the household search interface, and Prowlarr on **9696** manages sources.
 
-Pompey is one Home Assistant OS app. The sidebar is the box: Proton, status, a button to search. Search itself is [Seerr](https://seerr.dev/) on this machine’s port **5055**, not an iframe. Downloads, matching, and the VPN stay inside Pompey. All internet from this app uses Proton WireGuard. If the tunnel is down, internet is dropped. **Plex is a separate Home Assistant app** (or another machine). Pompey does not run Plex.
-
-This is the user guide for the product we are building. It describes the journey as it should feel. [What is not ready yet](#what-is-not-ready-yet) is honest about the current cut (**0.2.55**). The [roadmap](#roadmap) is how we close the gap.
-
-## How a day with it should feel
-
-1. Open **Pompey** in the Home Assistant sidebar (setup and status).
-2. Open **search** on this Home Assistant machine’s port **5055**. Search for a title — posters, “already on Plex?”, the right movie or show.
-3. Request it. For people in the house, that should just go through. Pick **Default** for a 1080p encode, **Max** when the TV and sound system should show off, or **Anything** when the title is obscure and you will take what exists.
-4. Watch it in **Plex** (your Plex app, not Pompey). Kid titles land in the kid libraries. Everything else, including unknown ratings, lands in general. If you are happy with the file, remove the **request** on Seerr’s Requests page — that closes the ticket and we stop looking for a better copy. The movie stays on Plex. Do not use Clear Data.
-
-You should not bookmark Radarr, Sonarr, or qBittorrent. Sources (Prowlarr) are on port **9696** because Seerr cannot add indexers. You should not keep a spreadsheet of quality profiles. Those other programs run inside Pompey. The household face is [Seerr](https://seerr.dev/) on port 5055. Pompey is the box around it: Proton, kill switch, wiring, one sidebar for the box.
-
-Movies and TV use the same search.
-
-## What you need
-
-- **Home Assistant OS** on a 64-bit machine (Intel/AMD or aarch64). Not Home Assistant Container, not Supervised on random Linux, not a 32-bit Pi. This app wants a few GB of RAM on top of Home Assistant.
-- A **Proton** account. You will create a WireGuard certificate and download a `.conf` file. Turn on **NAT-PMP (Port Forwarding)** on that certificate if you want incoming connections for downloads.
-- **Plex** on your LAN as a **separate** Home Assistant app (or another machine), with port **32400** published on a numeric IP. Pompey never installs or runs Plex.
-- **One source** — a tracker or indexer you already have — as a base URL plus API key. You add it in **Open sources** (Prowlarr). Pompey does not ship a catalog of sources.
-- Disk on **`/media`** (or the media share Home Assistant already maps there) for libraries and in-progress downloads. Same filesystem for both; this stack does not copy finished files across disks.
-
-You do not need Docker Hub, a GitHub Container image, or five community add-ons. Supervisor builds Pompey on the machine. After the tunnel is up, Pompey downloads the official search UI and engines itself.
+This is experimental software. Version 0.3.0 replaces the earlier import heuristics and floating engine updates with explicit ownership, verified bundles and recovery tests. Complete the [HAOS acceptance checklist](docs/testing.md) before relying on a new release.
 
 ## Install
 
-### 1. Add this repository
+1. Add `https://github.com/esper256/ha-pompey` to the Home Assistant app store repositories, or copy `pompey/` to `/addons/pompey`.
+2. Install Pompey. Supervisor builds the image locally for amd64 or aarch64. There is no image to publish and no Docker command for the household to run.
+3. Set your media and library folders in the add-on configuration. Start Pompey and open its sidebar.
+4. Paste a full-tunnel WireGuard `.conf` from your VPN provider. Pompey uses its endpoints, addresses and DNS servers. The file must route all IPv4 traffic; IPv6 internet stays blocked unless the file also supplies an IPv6 tunnel. Provider shell hooks are stripped.
+5. Wait for the verified engines to download and start. Open search, complete Seerr’s Plex wizard, and supply a numeric LAN address for your separate Plex server. VPN DNS may not resolve local names.
+6. Open sources and set Prowlarr’s login. Add an indexer you already use. Pompey does not supply sources.
 
-1. In Home Assistant: **Settings → Apps**.
-2. Open **Install app** (the store — not the list of apps you already installed).
-3. ⋮ → **Repositories** → add:
+Keep ports 5055 and 9696 on your LAN. The hidden engines remain on localhost; enabling **Debug** exposes their consoles through authenticated Home Assistant Ingress.
 
-   `https://github.com/esper256/ha-pompey`
-
-4. ⋮ → **Check for updates**. Search the store for **Pompey**. Custom repositories often sit at the **bottom**. It is marked experimental.
-
-If you added that URL while the GitHub repo was still private, remove the repository and add it again. Supervisor keeps the failed clone and will not list Pompey until you do.
-
-You can instead copy the `pompey/` folder onto the machine as `/addons/pompey` (Samba, USB, or SSH) and Check for updates.
-
-Pompey only lists on **amd64** and **aarch64**. If it still does not appear, **Settings → System → Logs → Supervisor** and look for `pompey` / `Can't read`.
-
-### 2. Install the app
-
-Install **Pompey**. Supervisor compiles a thin image (WireGuard, nginx, our scripts). That can take a few minutes. The search UI and the download engines are **not** in that image yet — they arrive on first run, after Proton is up.
-
-### 3. Say where media lives
-
-Open **Settings → Apps → Pompey → Configuration**. The defaults already match this house: a Media network share named `dlna`, with sibling kid / not-kid folders. Change a field only if the share name or a library folder is different.
+## Storage and sharing
 
 | Option | Default |
 | --- | --- |
@@ -60,192 +24,39 @@ Open **Settings → Apps → Pompey → Configuration**. The defaults already ma
 | Kid movies | `Movies/Kid Friendly` |
 | TV | `TV/Not Kid Friendly` |
 | Kid TV | `TV/Kid Friendly` |
-| After a title is in the library | Stop sharing |
+| After download | Stop sharing |
 | Simultaneous downloads | 8 |
+| NAT-PMP gateway | Empty (disabled) |
 | Debug | Off |
 
-Those four library folders must be **siblings** (neither library folder sits inside another). In-progress downloads go in `downloads/` under the media folder. Do not add `downloads` as a Plex library.
+Library paths are relative to the media folder. They must not overlap one another, the `downloads` folder, or the `By Rating` folders alongside the general movie and TV libraries. Traversal and escaping symlinks are rejected before creating folders. Restart after changing add-on options.
 
-**Simultaneous downloads** is how many titles can transfer at once when they have peers. Default **8**. A torrent that is stalled or has no seeds does not use up this number, so one dead grab cannot stop every other request. Raise it if several titles are moving slowly on purpose. Restart after changing.
+Arr owns ordinary imports and upgrades. Pompey does not guess that a new download is a duplicate just because the library already contains a title. Older replaced files go into `downloads/recycle` for seven days. Do not add `downloads` to Plex libraries.
 
-**Debug** stays off for daily use. Turn it on when you need the hidden Radarr, Sonarr, or qBittorrent Web UI — a stuck download, or **Interactive Search** to pick a specific release. The sidebar then offers those three consoles through Ingress (Home Assistant login). They are still not published on the LAN. Restart after changing this, and turn it off when you are done.
+**Stop sharing** stops a completed transfer so Arr can move it into the library. **Share to ratio** keeps sharing until ratio 1.0; **Share one day** keeps sharing for 24 hours of seeding. Sharing uses hardlinks where supported and otherwise needs a copy, so a NAS without hardlink support needs space for both copies until the goal is reached. Arr removes its completed client entries after import and the sharing goal. Stalled transfers do not occupy the active-download limit.
 
-**After a title is in the library** is not a hidden default. Sharing finished torrents uses RAM and CPU in this app. **Stop sharing** (the default) removes the torrent from qBittorrent once the file is in your library. You can instead share until a 1.0 ratio, or for one day. The library file is kept either way.
+Prowlarr’s direct Grab button uses `downloads/manual`. Pompey asks Arr to match finished, stopped files there and submits only accepted matches. Unmatched files, rejected upgrades and ambiguous import attempts stay on disk for review through Debug. Normal imports never use this fallback. Pompey no longer invents episode identities or moves extras into Plex folders.
 
-If you already saved older defaults (`/media` plus `Movies` / `Kid Friendly Movies`), update the five fields and **restart** so engines pick up the folders. **0.2.48** also deletes those leftover Arr roots from Radarr and Sonarr (movies and TV) so Seerr’s Root Folder list is only By Rating / Kid Friendly / Not Kid Friendly.
+## Requests and quality
 
-Then in Plex, scan those same library folders. Adults who should also see kid movies can add the kid movies folder as a **second location** on the adult movie library.
+Recyclarr configures **Default** and **Max** from the release’s pinned TRaSH resources. **Anything** permits lower qualities without automatic upgrades. Pompey waits for real profiles instead of creating empty lookalikes.
 
-Seerr’s first screen asks for a Plex address. Hostnames (`plex.local`, `plex`) will not resolve: Proton’s DNS is `10.2.0.1` and does not know your LAN names. Use a numeric IP.
+Choose **By Rating** for automatic kid/general routing, or choose a specific library. Unknown ratings go to general. Watch through your separate Plex installation.
 
-| Where Plex runs | Address to type in Seerr |
-| --- | --- |
-| Docker on **this** Home Assistant machine, port 32400 published (or host network) | `http://172.30.32.1:32400` (HA host from the add-on network) or the machine’s LAN IP |
-| Docker or Plex on **another** machine on the LAN | `http://192.168.x.x:32400` |
-| Hostname only | Will not work. Switch to the IP. |
+Removing or declining a request stops future monitoring for a title Pompey previously observed as requested. It retains library files and in-flight downloads. An unreadable, truncated or changing request list never triggers cancellation. Requests created directly in Arr are left alone, and declined requests are not silently recreated.
 
-## First run
+## VPN and health
 
-1. **Start** Pompey. It should start on Home Assistant reboot after that (`boot: auto`).
-2. Open **Pompey** in the sidebar. You will get a wait screen, not search, the first time.
-3. **Paste the Proton WireGuard `.conf`** into the box (the whole file, starting with `[Interface]`). That is the file Proton gave you when you created the WireGuard certificate. It is not a Home Assistant option. There is no country dropdown — the file already chose a server. Generate a new certificate in Proton to change region, then paste again (see [Keeping it up to date](#keeping-it-up-to-date)).
-4. Wait. First start downloads several hundred megabytes and can take several minutes. The bar is: tunnel → download → start → connect search. Home Assistant’s own start timeout is 300 seconds; engine download happens **after** the container is up, on this screen.
-5. When the bar finishes, the sidebar stays Pompey and shows **Open search** and **Open sources**. Search is `http://<this-home-assistant>:5055/` (Seerr). Sources is `http://<this-home-assistant>:9696/` (Prowlarr) — Seerr cannot add indexers. Bookmark search. Keep the sidebar for status and later actions.
-6. Seerr’s first screen asks which media server. Choose **Plex**, sign in, and enter the **numeric IP of your Plex app**. That wizard creates the first admin. Pompey then points search at the movie and TV engines in the background.
-7. **Open sources** and set a Prowlarr login on first visit. Add your source there (base URL plus API key). Search cannot find releases until that exists.
-8. Request a title you do not already have. It should be auto-approved for the household.
+Any compatible full-tunnel WireGuard VPN can be used; a particular provider is not required. Port forwarding is optional: supply the numeric **NAT-PMP gateway** only if your provider supports it. Do not infer it from the DNS server. Some providers require enabling forwarding when generating the configuration.
 
-**Success** is: wait screen finishes, **Open search** works, you can find a title and request it, and later that title is on disk in the right folder and Plex notices.
+The firewall is installed as one atomic IPv4/IPv6 transaction. Failure prevents engine downloads and startup. Tunnel loss leaves the drop policy in place, with explicit LAN, loopback, VPN endpoint and UI-reply exceptions. Pasting a replacement file causes the WireGuard service to reconnect.
 
-If the wait screen never gets to Open search, or port 5055 does not load, send the app log (**Settings → Apps → Pompey → Log**) and which step it stuck on. Do not send the Proton private key or a Plex token.
+The sidebar reports current service health and failing background jobs. Configuration, requests, download policy, rating routing and update checks have separate bounded jobs and retry backoff; they continue retrying after a prolonged outage.
 
-## What you open (and what you never open)
+## Releases and recovery
 
-Daily use is two places: **search** (`http://<home-assistant>:5055`) and **Plex** (watching). Adding or rotating a source is **Prowlarr** on port **9696**. The Home Assistant sidebar is the box (Proton, status, Open search, Open sources). Radarr, Sonarr, and qBittorrent stay inside the add-on.
+Engine versions, artifact checksums, Seerr’s image digest and Recyclarr resource commits live in the checked-in [bundle manifest](pompey/rootfs/usr/share/pompey/engines.json). Updates arrive with a tested Pompey release; runtime does not follow upstream `latest`.
 
-| What | Who it is for | Address |
-| --- | --- | --- |
-| Search, posters, requests | Everyone in the house | `http://<this-home-assistant-ip>:5055` — Seerr, on the LAN. Do not put this on the public internet. |
-| Sources (indexers) | Whoever manages what we can grab | `http://<this-home-assistant-ip>:9696` — Prowlarr. Seerr cannot do this. First visit sets a login. Do not put this on the public internet. |
-| Pompey (Proton, status, Open search, Open sources, debug consoles) | Whoever installed the app | Home Assistant sidebar → **Pompey**. Always this UI, never rewritten into Seerr. |
-| Media folders, after-download, simultaneous downloads, and Debug | Whoever installed the app | **Settings → Apps → Pompey → Configuration** |
-| Watching | Everyone | Your Plex apps. On the LAN, Plex itself is typically `http://<plex-ip>:32400`. Pompey does not run Plex. |
-| Proton account / new WireGuard file | Whoever owns the VPN | Proton’s site, then paste into Pompey if you rotate the file |
-| App log | When something is stuck | **Settings → Apps → Pompey → Log** |
+A replacement is staged and verified before stopping services. Pompey snapshots the managed app configurations and databases, swaps binaries, starts services and validates health and wiring. Failure restores binaries, databases and the active manifest. A durable journal recovers interrupted updates on the next attempt. The last snapshot remains under `/data/engines/.rollback`; this is not a substitute for Home Assistant backups. Updates need temporary space for staged engines and the previous configuration.
 
-These run **inside** Pompey. They are not extra Home Assistant sidebar entries. That is deliberate: one container, one VPN.
-
-| Program | Job | Inside the add-on |
-| --- | --- | --- |
-| [Seerr](https://seerr.dev/) | Search and requests | Published as host **5055** |
-| Prowlarr | Your source(s), synced into Radarr and Sonarr | Published as host **9696** |
-| Radarr | Movies: pick a release, land it in the movies / kid movies folders you set | `127.0.0.1:7878` (not published). Sidebar link only when **Debug** is on. |
-| Sonarr | TV, same idea for the TV folders you set | `127.0.0.1:8989` (not published). Sidebar link only when **Debug** is on. |
-| qBittorrent-nox | The download client. Bound to the Proton interface. No Web UI unless **Debug** is on. | `127.0.0.1:8080` (not published). Sidebar link only when **Debug** is on. |
-| Plex | Watching. **Not in this add-on.** | Your other app / machine, usually `:32400` |
-
-Do not publish 7878 / 8989 / 8080 on the Home Assistant host. **Do** leave 5055 and 9696 published (Supervisor maps them by default; you can change the host ports in the app’s network settings). Do not port-forward download peer ports on that host — Proton NAT-PMP is how incoming download ports should appear, on the tunnel, not on your house IP. Do not port-forward 5055 or 9696 to the internet.
-
-If a download is stuck, turn on **Debug** in the app configuration, restart, and use the sidebar links (Radarr / Sonarr / qBittorrent). Interactive Search is on those Arr pages. The log is still the thing to send. Opening those UIs over SSH is a workaround. Adding another source is Prowlarr on :9696.
-
-## Using it after setup
-
-- **Search and request** at `http://<home-assistant>:5055`. The sidebar is the box, not an iframe of search. Household members should not see a ticket queue. Seerr can have more than one user; the first admin is whoever completed the Plex wizard.
-- **Kid vs general** on the Seerr confirm dialog is a **Root Folder** pick. The default is **By Rating** (a real Arr folder, not a Plex library): after the request, Arr/TMDB certification sorts it — G / PG / PG-13 and TV-Y / TV-Y7 / TV-G / TV-PG go to Kid Friendly; anything else, **including TV-14 and unknown**, goes to Not Kid Friendly. Pick **Kid Friendly** or **Not Kid Friendly** to force that library and skip the sort. Seerr shows those path names; we cannot label the default “Auto (TVDB)”. Same three choices for movies and TV (anime uses the same TV folders). Older Arr roots from the 0.2.20 `/media` + `TV` / `Kid Friendly TV` / `Movies` / `Kid Friendly Movies` defaults are removed on restart so they do not sit in that list. Do not drag a show or movie between those folders in the file manager — Plex and Seerr will look fine, and Sonarr will hunt the old path. Pick the root on the request (or leave By Rating) and let the stack move it.
-- **After a title is in the library** is in **Settings → Apps → Pompey → Configuration**. Stop sharing is the default so finished torrents do not sit in RAM. Share to a 1.0 ratio or for one day if you want to give a little back. The library file is kept.
-- **Simultaneous downloads** (same Configuration page) is how many titles can transfer at once when they have peers. Default 8. Stalled or seedless torrents keep trying but do not block the rest of the queue.
-- **Already on Plex** is Seerr’s job. If it is already there, you should see that before you request it.
-- **Confirm if we need you** is for the cases the stack cannot decide — not for every request. Daily use is still Search → request. For a back-catalog title Sonarr cannot parse, **Open sources → Search → Grab** is the escape hatch.
-- **A title that will not grab itself.** Request it in search first so Radarr or Sonarr already has the title and the Kid / Not Kid / By Rating folder. Then **Open sources → Search → Grab** the release you want. Prowlarr talks to the same qBittorrent with a separate **`prowlarr`** category whose save path is **`downloads/manual`** (not `downloads/complete`, and not a Movies/TV root). Housekeeping imports that file into the Arr folder if the title already exists — even when Default/Max would reject the quality — and does not guess Kid vs Not Kid from the filename. Do not Grab a title you never requested; it sits in `downloads/manual`. Debug → Arr **Interactive Search** still uses the `radarr` / `sonarr` categories and `downloads/complete`. Do not edit those download-client settings by hand — a restart rewrites them.
-- **Open sources → History.** Empty Query is not always the Seerr title. Click the row: **top100** (or similar browse) means the source was asked with no name — that is not the request. **Parameters** with IMDb/TMDb is an ID search. The movie name in Query is a title search. RSS is empty Query, empty Parameters, event type RSS. After **0.2.25**, Arr is told to title-search so a request should show the movie name on every source that actually synced into Radarr/Sonarr. A source that fails Prowlarr’s category test (or is blocked by CloudFlare) never becomes an Arr indexer — the app log warns when that happens.
-
-Opening `index.html` as a file on your laptop is only the wait screen. It will never become search.
-
-## Keeping it up to date
-
-Three different things get “old,” and they are not updated the same way.
-
-### Home Assistant and Plex
-
-Update those as you already do. Pompey does not replace Plex’s own updater.
-
-### Pompey (this app)
-
-**Settings → Apps → Check for updates.** When a new Pompey version is in this GitHub repo, Supervisor rebuilds the thin image (WireGuard, nginx, scripts) and restarts the add-on. Your Proton file, source, Plex connection, and libraries stay.
-
-That rebuild is how you get wait-screen fixes, Ingress fixes, and wiring fixes. After an update, glance at the sidebar once and confirm search still loads.
-
-### Search UI and engines (Seerr, Radarr, Sonarr, Prowlarr, qBittorrent)
-
-These are **official upstream binaries**, fetched after the tunnel is up, stored under the add-on’s data directory. A restart checks upstream and skips the download when the on-disk copy is already current. Pompey also re-checks about once a day while the add-on stays up. Updating the Pompey add-on is not how Radarr gets a new version — that clock is separate.
-
-The product keeps those current for you — through the VPN, without you visiting each engine’s “System → Updates” page, and without you running Recyclarr by hand. See [docs/arr-auto-update.md](docs/arr-auto-update.md).
-
-- You should still update **Pompey** when we ship a wrapper fix.
-- You should not open Radarr/Sonarr to click Update, and Arr’s in-app updater stays off.
-- Quality profiles: **0.2.38** puts three choices on the Seerr request: Max, Default, Anything. Recyclarr applies TRaSH Guides to Default and Max (Anything stays ours). **0.2.31** is the cut that can actually apply named profiles on this install (earlier cuts died on a Sonarr free-space field before quality ran).
-
-### Proton
-
-The `.conf` is a certificate, not a password you type every day. To change region, create a new WireGuard certificate in Proton (NAT-PMP on if you still want inbound download ports) and paste the new file. The wait screen asks for Proton when none is configured; replacing a working file is still clumsy — that is on the roadmap too.
-
-Proton DNS stays `10.2.0.1`. LAN to Plex and NAS (RFC1918 plus Supervisor’s `172.30.32.0/23`) stays allowed. Incoming to the wait screen from Home Assistant is not blocked if the tunnel fails; you should still see Pompey, on the wait screen, instead of a dead Ingress.
-
-### Your source
-
-A private tracker with a stable API key is set-and-forget. Prowlarr copies that one source to Radarr and Sonarr; nothing in the Arr stack (and not Recyclarr, which is quality profiles) rotates indexers for you. Public indexers die, change URLs, and hide behind Cloudflare — those are always in flux, and Pompey does not pick replacements. Add or rotate a source in **Open sources** (Prowlarr on :9696). Seerr cannot do this. There is no Home Assistant options field for a source.
-
-## What is not ready yet
-
-The journey above is the target. **0.2.55** is a real Home Assistant OS install of that box, not the finished household app.
-
-| In the guide | On the machine today |
-| --- | --- |
-| Request → file on disk → Plex notices | **0.2.27** imports a finished torrent from `downloads/complete` into the Movies/TV folder Seerr used. **0.2.29** drops the hidden qBittorrent torrent if those files were already moved, so it cannot start downloading them again. **0.2.49** also moves leftover extras and Season 00/specials into Plex’s extra folders (or Specials / existing Season 00) on that same title path. **0.2.50** wires Prowlarr Search → Grab to qBittorrent (category `prowlarr`). **0.2.54** saves those Grabs in `downloads/manual` and imports them when Arr already has the title, including quality-rejected human picks. Automated tests never start the torrent client. |
-| Auto-grab is usually the right quality | **0.2.38** offers **Max** / **Default** / **Anything** on the Seerr request. Default is TRaSH HD (1080p WEB/Bluray). Max is TRaSH UHD (4K encodes, 1080p fallback, no remux). Anything takes CAM if that is all there is. Recyclarr refreshes TRaSH scores after the tunnel is up (and about daily). |
-| Language, subtitles, dual audio | **0.2.41** uses Arr’s original-audio custom format (not Home Assistant options, not a Seerr language picker). Default/Max skip a dub when the original exists, and prefer Dual-Audio as a small tie-break when both exist. **0.2.53** does not treat Dual Subs (two subtitle tracks) as Dual Audio. **0.2.43** will search again for a better copy after you add a source (and when a later Dual-Audio release shows up), until you remove the Seerr request. **0.2.51** season-searches a holey anime season (packs) instead of only `Title 28` episode queries, and turns on Prowlarr’s Anime Standard Format Search so those pack queries actually go out. Anything still takes whatever is left. Missing subtitles after the file lands are later (Bazarr). Playback language is Plex. |
-| “Confirm if we need you” when quality and seeds disagree | Not built. Seerr is not a download console; we will not fork it into one. |
-| Engines stay current for years | **0.2.39** fetches official artifacts on add-on start and about daily, replaces a binary only when upstream has moved, restarts that process, and re-runs wire. Arr’s BuiltIn updater stays off. A failed check keeps the previous copy. Recyclarr still also re-syncs TRaSH JSON through the tunnel. Decision and native-update table: [docs/arr-auto-update.md](docs/arr-auto-update.md). |
-| Add another source from search/settings | **Open sources** (Prowlarr :9696). A Pompey-native source UI is still roadmap. |
-| Replace Proton / change region from the running app | Paste on first wait screen. No later “new .conf” flow. |
-| Household members as first-class users | Seerr supports users; we have not productized invites or permissions beyond “first admin is the Plex wizard” and advanced-request so the quality dropdown shows. |
-| Status when a download is stuck | App log. No in-sidebar job list. Once search is up, the sidebar is a dashboard (Open search / Proton graph), not a first-boot progress bar. **0.2.45** can open the hidden engine Web UIs from the sidebar when **Debug** is on. **0.2.46** lets stalled / seedless torrents keep trying without blocking the rest of the queue (Simultaneous downloads, default 8). **0.2.47** keeps Debug Radarr/Sonarr from loading a hashed `/index-*.js` off the Home Assistant host. **0.2.48** does the same for later webpack chunks (`/640-*.js`). **0.2.48** also makes Seerr’s Root Folder pick real: default **By Rating**, or force Kid / Not Kid Friendly. |
-| Engine Web UIs for operators | **0.2.45** — Radarr/Sonarr/qBittorrent stay localhost and off the LAN. The sidebar exposes them through Ingress when **Debug** is on. **0.2.47** rewrites the entry `/index-*.js`. **0.2.48** rewrites webpack `publicPath` so follow-on chunks stay under Ingress. **0.2.50** keeps Debug Interactive Search on (Arr indexer flags) and connects Prowlarr Grab to qBittorrent without sharing Arr’s `radarr` / `sonarr` categories. Prowlarr is on :9696 for sources. |
-| Cloudflare-protected sources | No challenge solvers. |
-| Jellyfin | Plex only. |
-| Use this from outside the house | Out of scope. Search is on the LAN at :5055. Sources at :9696. Do not port-forward either. |
-
-If search is a blank page on port 5055, or the Plex button on setup does nothing, that is a bug — send the log. Rebuild so the banner says **0.2.55** if a request auto-approved then showed **Declined** (Seerr’s Radarr scan raced the add, and Pompey cancelled the torrent), or if Recyclarr logs `.NET location: Not found`. Rebuild so the banner says **0.2.54** if a Prowlarr Grab sat in `downloads/complete` and housekeeping would not import it (or Sonarr searched again while it was there). Grabs now land in `downloads/manual`; housekeep imports them onto the Arr title folder even when quality would reject. Rebuild so the banner says **0.2.53** if a Dual Subs release was preferred over Dual-Audio (Dual Subs is two subtitle tracks; it must not get the Dual Audio +15). Rebuild to **0.2.52** if Sonarr grabs a season that is already in Plex after you moved the folder between Kid Friendly and Not Kid Friendly (housekeeping should rescan the folder that already has the files; remove the Seerr request to stop a grab that already started, and empty the leftover Plex library so the show is in one place). Rebuild to **0.2.51** if an old anime season is searched episode-by-episode and never asks for a pack (or a Dual-Audio batch that a human finds with `Title Dual`). Rebuild to **0.2.50** if Prowlarr Settings → Download Clients is empty, or Debug Interactive Search lists no indexers. Rebuild to **0.2.49** if extras or Season 00/specials stay in `downloads/complete` after the title is in the library. Rebuild to **0.2.48** if Debug Radarr/Sonarr still 404s webpack chunks (`/640-*.js`), or if Seerr’s Root Folder pick is still overwritten by rating. Rebuild to **0.2.47** if the tab 404s `/index-*.js` (qBittorrent already worked). Rebuild to **0.2.46** if three dead torrents are holding every other request (Simultaneous downloads in Configuration). Rebuild to **0.2.45** to open Radarr / Sonarr / qBittorrent from the sidebar (turn on **Debug** in Configuration). Rebuild to **0.2.44** if PG/PG-13 movies stay in Not Kid Friendly, if Recyclarr never applies TRaSH (`recyclarr.dll` missing), or if the Home Assistant log is mostly Prowlarr HTTP errors. Rebuild to **0.2.43** if a title already on Plex should be reconsidered after you add a source, or if you want removing the Seerr request to stop further upgrades. Rebuild to **0.2.42** if the movie quality list still includes leftover HD-1080p. Rebuild to **0.2.41** so Default/Max prefer Dual-Audio when it exists. Rebuild to **0.2.40** if the sidebar is still filling a progress bar days after search works. Rebuild to **0.2.39** so engines keep current without a Pompey bump per Radarr release. Rebuild to **0.2.38** to drop the Home Assistant language/subtitle options and to let Recyclarr apply TRaSH Default/Max (Anything still takes CAM). Rebuild to **0.2.37** if leftover videos are still sitting loose in `downloads/complete` after the title is in the library. Rebuild to **0.2.34** if leftover torrent *folders* stay after the title is on Plex. Rebuild to **0.2.33** if Seerr never marked a finished title available. Rebuild to **0.2.32** if a finished **video** is still under `downloads/complete`. Rebuild to **0.2.31** if the wait screen says wiring failed (including Sonarr minimum free space ≥ 100) and the request quality list is still Any / HD-720p / Ultra-HD. Rebuild to **0.2.29** if you moved a file by hand and worry qBittorrent will grab it again. Also rebuild if auto-grab picked a huge remux on Default, a Seerr request only title-searched two Prowlarr sources, or you still need tagged app logs, household media-folder defaults, **Open sources**, or an older wait screen.
-
-## Roadmap
-
-Work that turns the current box into the guide above, in the order it unblocks the household. All of it has to fit **one Home Assistant add-on, one container, Proton `wg0`, Seerr as the search face, Prowlarr as the source console.**
-
-1. **Prove request → file → Plex** on a real HAOS install. Until that loop is boring, nothing else is the product. Kid/general folders, Plex libraries, and NAT-PMP are already aimed at this. One title lives in one library folder; Sonarr’s path is that folder; Seerr available is a Plex projection. Why a hand-move looks “done” in Seerr and still re-grabs: [docs/household-truth.md](docs/household-truth.md).
-2. **Engine and Seerr updates.** **0.2.39** is this: Pompey plays the Docker-orchestrator role. It fetches official artifacts (Servarr update APIs, Seerr’s published image, qBittorrent-nox static builds, Recyclarr GitHub releases), replaces on-disk copies when upstream moves, restarts those processes, re-runs wire. Check on add-on start *and* on a timer so a wrapper we do not touch for months still refreshes Radarr. Never require the user to open an engine UI to click Update. Never bump the Pompey add-on version just because Radarr tagged a release. Arr’s BuiltIn updater stays off (Servarr’s own Docker advice). Design, native-update table, rejected options: [docs/arr-auto-update.md](docs/arr-auto-update.md).
-3. **Quality profiles (Recyclarr / TRaSH).** **0.2.38** is Max / Default / Anything on the Seerr request, with Recyclarr applying TRaSH HD to Default and TRaSH UHD (plus 1080p fallback, remux off) to Max. **0.2.41** scores TRaSH Anime Dual Audio on Default/Max (+15) and Language: Not Original on Sonarr. **0.2.43** reconsiders still-requested titles after a source is added, and treats removing the Seerr request as the close-out. **0.2.54** does that close-out every ~15 seconds (unmonitor including TV seasons, cancel in-flight searches) so housekeep cannot start a phantom grab. Anything stays a Pompey profile. Recyclarr’s *binary* updates with the other engines as of **0.2.39**; TRaSH JSON was already a daily sync. **Bazarr** (download missing English subtitles after the file is in the library) is a later engine in the same container — not a Seerr fork, and not a per-request language dropdown (Seerr does not have one; Sonarr language profiles are gone).
-4. **Operator status in the sidebar wait/search chrome** — enough to see “downloading / failed / needs you” without Radarr’s queue. This is ours, not a Seerr fork.
-5. **Confirm when we cannot decide.** A small “this file vs that file” step for the rare case. Not v1 if it means becoming a torrent picker. Not a Cloudflare solver.
-6. **Sources without opening Prowlarr.** Adding a source, rotating a key, and “source is down” should be possible from Pompey. Until then, **Open sources** is Prowlarr on :9696. Still no indexer catalog shipped in the repo, and no Home Assistant options for this.
-7. **Proton file lifecycle.** Replace a working `.conf` (new region, rotated certificate) from the running app. Keep the kill switch. Do not put private keys in a Home Assistant options list.
-8. **Household users.** After the Plex wizard, inviting someone who already uses that Plex server should be enough. Auto-approve for the house; no ticket queue.
-9. **Not this product:** Jellyfin, split tunnel, publishing a Docker image, challenge-solver sidecars, exposing search or sources on the public internet, stuffing Seerr under Ingress (Next.js has no basePath; rewriting `/_next` will keep breaking).
-10. **Optional Radarr/Sonarr consoles** for the few people who want them — **0.2.45** is the Debug flag plus Ingress links, still not a second sidebar app, still not on the LAN.
-
-## Storage
-
-Inside the add-on, the media folder option is the parent (default `/media`). Library folders are relative to it. Downloads are always `downloads/` under that parent:
-
-```text
-<media folder>/<movies folder>
-<media folder>/<kid movies folder>
-<media folder>/<tv folder>
-<media folder>/<kid tv folder>
-<media folder>/downloads/incomplete
-<media folder>/downloads/complete
-```
-
-App config lives in `/addon_configs/<id>_pompey/`. Fetched engines live in the add-on **data** directory (`/data/engines` inside the container), not the config share.
-
-## If it fails
-
-- Wait screen stuck on Proton: the `.conf` is incomplete, or this host cannot create `wg0`. Paste the full file. Check the log for WireGuard, not for Seerr.
-- Sidebar stuck after Proton with no **Open search**: engine download or wiring. Log lines are stamped with a time. Do not send keys.
-- **Open search** / port 5055 does not load: check **Settings → Apps → Pompey → Configuration → Network** that 5055/tcp is mapped. Use this machine’s LAN IP, not Home Assistant Cloud.
-- **Open sources** / port 9696 does not load: same Network page, 9696/tcp. First visit should ask you to set a Prowlarr login.
-- Sidebar used to be a blank Seerr page, or Plex button did nothing: you need **0.2.16** or newer (Ingress used to rewrite Seerr’s JavaScript). Search is now `:5055`, not the iframe.
-- Search warns that `/config/seerr` is not a volume: you need **0.2.17**. The data was already persisted; Seerr was looking at a leftover `DOCKER` sentinel.
-- Search never finds releases: add a source in **Open sources**, and give wiring a minute after the Plex wizard.
-- New titles land on the Home Assistant disk, not the NAS: Media folder should be `/media/<network-storage-name>` (default `/media/dlna`) and the four library fields should be folders Plex already scans. If you installed 0.2.20 with the old `/media` defaults, change Configuration and restart.
-- A TV season searches some episodes in **Open sources** then sits: rebuild to **0.2.36**. Housekeeping no longer posts Refresh/Scan on top of a running EpisodeSearch (those commands jump the queue). Remaining missing episodes get one poke after import. The app log still shows Sonarr’s command queue and wanted/missing first. Send that stretch of the log (not API keys).
-- Download finished but leftover videos are still loose under `downloads/complete` after the title is in Plex: rebuild to **0.2.49** if those leftovers are extras or Season 00/specials (they should land in Plex extra folders or Specials on the show/movie path). Rebuild to **0.2.37** if a leftover *episode or movie* file is still sitting loose after the library already has that title. **0.2.34** only removed leftover torrent folders; a flat `.mkv` in `complete/` was left behind. Housekeeping deletes a leftover episode/movie once the library has that `SxxExx` or title, and it will not delete or re-import a path that is a Plex library folder. Replaced files go to `downloads/recycle`. Do not drag files out of `complete/` yourself. Do not use Seerr’s **Clear Data** / remove-from-Radarr buttons for leftovers — those delete the library file. Removing the **request** on the Requests page is the close-out: the file stays, and **0.2.54** unmonitors Arr (including TV seasons) and cancels in-flight searches within about 15 seconds so housekeep cannot start another grab. Plex only sees files that made it into the library folders.
-- A whole season downloads again even though Plex already has it (and Seerr says available): Sonarr still thinks the files live in the other Kid / Not Kid / By Rating folder. Remove the **request** on Seerr’s Requests page so we stop searching. Rebuild to **0.2.52** so housekeeping points Sonarr at the sibling folder that already has the video and rescans instead of grabbing. If the show is in both Plex libraries, remove it from the leftover one. Do not drag library folders by hand next time.
-- Plex wizard cannot see the server: numeric IP of **your Plex app**, port 32400 published, LAN not blocked. Pompey does not contain Plex.
-
-More Home Assistant-specific notes (Supervisor skip reasons, copy-to-`/addons`): [pompey/DOCS.md](pompey/DOCS.md).
-
-## This repository
-
-We do not publish a container image. `pompey/` is the Home Assistant app. [VISION.md](VISION.md) is why the face is Seerr and the engines stay hidden. [CHANGELOG.md](pompey/CHANGELOG.md) is what each version fixed.
-
-Contributors and cloud agents: [AGENTS.md](AGENTS.md).
+If a bundle download fails during restart, a complete installed bundle can still start. The controller retries the release later. See [architecture and update details](docs/arr-auto-update.md), [Supervisor notes](pompey/DOCS.md) and [testing](docs/testing.md).

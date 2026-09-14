@@ -51,3 +51,9 @@ configuration:
       on the LAN). Use this to see a stuck download, or to run
       Interactive Search on a title you already requested. Turn it off
       when you are done. Restart the app after changing this.
+  nat_pmp_gateway:
+    name: VPN port forwarding gateway
+    description: >-
+      Optional numeric gateway address from a VPN provider that supports
+      NAT-PMP. Leave empty to disable port forwarding. This is separate
+      from the DNS servers in your WireGuard file.

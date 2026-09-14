@@ -23,7 +23,7 @@ log() {
 # Line-buffered stdin → tagged app log. Flush every line so a pipe to the
 # Supervisor log does not sit in a libc buffer.
 emit_py() {
-  python3 "$(command -v pompey-log-emit)" "$@"
+  python3 "$(command -v pompey_log_emit.py)" "$@"
 }
 
 cmd="${1:-}"

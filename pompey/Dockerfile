@@ -2,15 +2,15 @@
 # Pompey — thin local image: supervisor, nginx, WireGuard.
 # Engines and Seerr are fetched at runtime after the tunnel is up.
 
-FROM ghcr.io/home-assistant/base:latest
+FROM ghcr.io/home-assistant/base@sha256:93ef607824e3f27e868f11b10938283a98bf880ed57bcf8eaa81c6c2d521f6f5
 
 ARG BUILD_ARCH
 ARG BUILD_DATE
-ARG BUILD_DESCRIPTION="Search for a movie or show; Proton WireGuard for all internet"
+ARG BUILD_DESCRIPTION="Search for a movie or show; VPN WireGuard for all internet"
 ARG BUILD_NAME="Pompey"
 ARG BUILD_REF
 ARG BUILD_REPOSITORY="esper256/ha-pompey"
-ARG BUILD_VERSION="0.2.50"
+ARG BUILD_VERSION="0.3.0"
 
 RUN apk add --no-cache \
     bind-tools \
@@ -19,8 +19,6 @@ RUN apk add --no-cache \
     git \
     icu-data-full \
     icu-libs \
-    iptables \
-    iptables-legacy \
     nftables \
     iproute2 \
     jq \
@@ -33,7 +31,6 @@ RUN apk add --no-cache \
     sqlite \
     tar \
     tzdata \
-    unzip \
     wireguard-go \
     wireguard-tools \
     xz \

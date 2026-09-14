@@ -11,7 +11,7 @@ WWW="${POMPEY_WWW:-/usr/share/pompey}"
 
 export POMPEY_WWW="${WWW}"
 mkdir -p "$(dirname "${DEBUG_INC}")"
-write-debug-ingress "${DEBUG_INC}"
+write_debug_ingress.py "${DEBUG_INC}"
 sed -i \
   -e "s/%%port%%/${INGRESS_PORT}/g" \
   -e "s|%%debug_inc%%|${DEBUG_INC}|g" \

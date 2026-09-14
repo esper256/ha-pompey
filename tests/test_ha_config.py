@@ -321,6 +321,7 @@ class SupervisorConfigSchema(unittest.TestCase):
                 "tv_kid_folder",
                 "after_download",
                 "simultaneous_downloads",
+                "nat_pmp_gateway",
                 "debug",
             },
         )

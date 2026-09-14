@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run wire-stack against a real Seerr image.
+"""Run wire_stack.py against a real Seerr image.
 
 HTTP fakes of Seerr hid POST /auth/local 403 (login-only) and would hide the
 next contract change too. qBittorrent and Torznab stay fake: tests must not
@@ -13,6 +13,7 @@ import os
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -67,7 +68,7 @@ class RealSeerrWire(unittest.TestCase):
             {
                 "POMPEY_SECRETS": str(self.tmp / "secrets.json"),
                 "POMPEY_READY": str(ready),
-                "MEDIA_ROOT": "/media",
+                "MEDIA_ROOT": str(self.tmp / "media"),
                 "PLEX_URL": "",
                 "PLEX_TOKEN": "",
                 "INDEXER_URL": "",
@@ -100,6 +101,7 @@ class RealSeerrWire(unittest.TestCase):
         with self.assertRaises(urllib.error.HTTPError) as ctx:
             urllib.request.urlopen(req, timeout=10)
         self.assertEqual(ctx.exception.code, 403)
+        ctx.exception.close()
 
         settings = self.seerr.settings()
         key = (settings.get("main") or {}).get("apiKey")
@@ -112,8 +114,11 @@ class RealSeerrWire(unittest.TestCase):
         with self.assertRaises(urllib.error.HTTPError) as arr_ctx:
             urllib.request.urlopen(arr_req, timeout=10)
         self.assertEqual(arr_ctx.exception.code, 403)
+        arr_ctx.exception.close()
 
-        rc = ws.main()
+        # Recyclarr is covered against real Arr in the separate integration suite.
+        with patch.object(ws, "run_recyclarr", return_value=True):
+            rc = ws.main()
         self.assertEqual(rc, 0)
         self.assertTrue((self.ready / "wired").exists())
         self.assertFalse((self.ready / "seerr-arr").exists())

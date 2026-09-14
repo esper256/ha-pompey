@@ -1,6 +1,6 @@
 #!/command/with-contenv bashio
 # shellcheck shell=bash
-# Push Proton's mapped port into qBittorrent (localhost WebUI).
+# Push VPN's mapped port into qBittorrent (localhost WebUI).
 set -euo pipefail
 # shellcheck source=/dev/null
 source "$(command -v pompey-env)"

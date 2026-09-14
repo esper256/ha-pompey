@@ -1,34 +1,68 @@
 name: Test
-
 on:
   pull_request:
-    branches:
-      - main
+    branches: [main]
   push:
-    branches:
-      - main
-
+    branches: [main]
+  workflow_dispatch:
+  schedule:
+    - cron: '17 4 * * 1'
 permissions:
   contents: read
-
 jobs:
-  test:
-    name: options.json tests (no HAOS)
-    runs-on: ubuntu-latest
+  fast:
+    name: Behavioral and network failure contracts
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
     steps:
-      - name: Check out the repository
-        uses: actions/checkout@v7.0.1
+      - uses: actions/checkout@v7.0.1
+      - run: sudo apt-get update && sudo apt-get install -y python3-yaml jq shellcheck nginx wireguard-tools iproute2 nftables iputils-ping
+      - run: bash tests/run.sh
+        env:
+          POMPEY_REQUIRE_NETWORK_TESTS: '1'
 
-      - name: Cache Servarr artifacts
-        uses: actions/cache@v4
+  integration:
+    name: Pinned real engine contracts
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/cache@v4
         with:
           path: ~/.cache/pompey
-          key: pompey-servarr-${{ runner.os }}
+          key: pompey-contracts-${{ runner.os }}-${{ hashFiles('pompey/rootfs/usr/share/pompey/engines.json') }}
+      - run: sudo apt-get update && sudo apt-get install -y python3-yaml ffmpeg libicu74
+      - run: python3 tests/test_engine_artifacts.py -v && python3 tests/test_arr_integration.py -v && python3 tests/test_seerr_real.py -v
+        env:
+          POMPEY_REAL_ENGINES: '1'
+          POMPEY_REAL_SEERR: '1'
 
-      - name: Install WireGuard tools
-        run: sudo apt-get update && sudo apt-get install -y wireguard-tools iproute2
+  runtime:
+    name: Built add-on runtime smoke
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - run: docker build --build-arg BUILD_ARCH=amd64 -t local/pompey:test pompey/
+      # This starts only API/layout fixtures, never s6, the VPN or a torrent client.
+      - run: docker run --rm --entrypoint python3 -v "$PWD/tests/smoke_runtime.py:/smoke.py:ro" local/pompey:test /smoke.py
 
-      # options.json + stubs + real Seerr API + fake-wg0 smoke + real Prowlarr unpack
-      # + generated WireGuard handshake. Never start a torrent client. Never needs Proton.
-      - name: Run tests
-        run: bash tests/run.sh
+  candidate:
+    name: Upstream candidate (never promoted automatically)
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - run: sudo apt-get update && sudo apt-get install -y python3-yaml ffmpeg libicu74
+      - run: python3 tools/build_engine_manifest.py /tmp/candidate.json
+      - run: python3 tests/test_engine_artifacts.py -v && python3 tests/test_arr_integration.py -v && python3 tests/test_seerr_real.py -v
+        env:
+          POMPEY_ENGINE_MANIFEST: /tmp/candidate.json
+          POMPEY_REAL_ENGINES: '1'
+          POMPEY_REAL_SEERR: '1'
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: candidate-manifest
+          path: /tmp/candidate.json

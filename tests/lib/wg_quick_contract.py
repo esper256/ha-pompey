@@ -3,7 +3,7 @@
 
 wg-quick only strips its extra keys from [Interface]. A `Table = off` (or DNS=)
 line after [Peer] is passed to wg, which prints `Line unrecognized` and deletes
-wg0. This check does not need Proton, a tunnel, or even the `wg` binary.
+wg0. This check does not need VPN, a tunnel, or even the `wg` binary.
 """
 from __future__ import annotations
 

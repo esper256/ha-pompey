@@ -66,9 +66,9 @@ until handshake_ok; do
       # Search can already be up; do not rewind the sidebar to 15%.
       if [[ ! -f "${POMPEY_READY}/wired" ]]; then
         if [[ "${POMPEY_FAKE_VPN:-}" == "1" ]]; then
-          pompey-status vpn "Waiting for fake wg0" 15 "POMPEY_FAKE_VPN is set but ${IFACE} is not up. Run pompey-dev-vpn up." || true
+          pompey_status.py vpn "Waiting for fake wg0" 15 "POMPEY_FAKE_VPN is set but ${IFACE} is not up. Run pompey-dev-vpn up." || true
         else
-          pompey-status vpn "Waiting for Proton handshake" 15 "The tunnel is not up yet. Paste the Proton WireGuard .conf on the wait screen." || true
+          pompey_status.py vpn "Waiting for VPN connection" 15 "Check your VPN configuration." || true
         fi
       fi
     fi

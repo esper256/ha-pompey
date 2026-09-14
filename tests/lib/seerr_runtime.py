@@ -16,8 +16,10 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-IMAGE = os.environ.get("POMPEY_SEERR_IMAGE", "ghcr.io/seerr-team/seerr:latest")
-CACHE = Path(os.environ.get("POMPEY_SEERR_CACHE", Path.home() / ".cache/pompey/seerr"))
+MANIFEST = Path(os.environ.get("POMPEY_ENGINE_MANIFEST", Path(__file__).resolve().parents[2] / "pompey/rootfs/usr/share/pompey/engines.json"))
+IMAGE = os.environ.get("POMPEY_SEERR_IMAGE") or json.loads(MANIFEST.read_text())["engines"]["seerr"]["image"]
+import hashlib
+CACHE = Path(os.environ.get("POMPEY_SEERR_CACHE", Path.home() / ".cache/pompey/seerr")) / hashlib.sha256(IMAGE.encode()).hexdigest()
 CRANE_DIR = Path(os.environ.get("POMPEY_CRANE_DIR", Path.home() / ".cache/pompey/bin"))
 CONFIG_NAME = "pompey-test-config"
 

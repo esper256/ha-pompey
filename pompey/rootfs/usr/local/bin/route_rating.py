@@ -7,62 +7,12 @@ import os
 import sys
 import time
 import urllib.request
-
-def secrets_path() -> str:
-    return os.environ.get("POMPEY_SECRETS", "/data/pompey/secrets.json")
-
-
-def media_root() -> str:
-    return os.environ.get("MEDIA_ROOT", "/media/dlna").rstrip("/")
-
-
-def library_dir(env_name: str, default: str) -> str:
-    rel = (os.environ.get(env_name) or default).replace("\\", "/").strip().strip("/")
-    parts = [p for p in rel.split("/") if p]
-    if not parts or any(p == ".." for p in parts):
-        parts = [p for p in default.replace("\\", "/").strip().strip("/").split("/") if p]
-    return f"{media_root()}/{'/'.join(parts)}"
-
-
-def movies_dir() -> str:
-    return library_dir("MEDIA_MOVIES", "Movies/Not Kid Friendly")
-
-
-def movies_kid_dir() -> str:
-    return library_dir("MEDIA_MOVIES_KID", "Movies/Kid Friendly")
-
-
-def tv_dir() -> str:
-    return library_dir("MEDIA_TV", "TV/Not Kid Friendly")
-
-
-def tv_kid_dir() -> str:
-    return library_dir("MEDIA_TV_KID", "TV/Kid Friendly")
+import pompey_state as state
+from pompey_common import as_list, library_dir, media_root, movies_auto_dir, movies_dir, movies_kid_dir, radarr_url, secrets_path, sibling_auto_dir, sonarr_url, tv_auto_dir, tv_dir, tv_kid_dir
 
 
 AUTO_FOLDER = "By Rating"
 
-
-def sibling_auto_dir(library_path: str) -> str:
-    """Staging root Seerr uses for 'sort by rating'. Not a Plex library."""
-    parent = library_path.rstrip("/").rsplit("/", 1)[0]
-    return f"{parent}/{AUTO_FOLDER}"
-
-
-def movies_auto_dir() -> str:
-    return sibling_auto_dir(movies_dir())
-
-
-def tv_auto_dir() -> str:
-    return sibling_auto_dir(tv_dir())
-
-
-def radarr_url() -> str:
-    return os.environ.get("RADARR_URL", "http://127.0.0.1:7878").rstrip("/")
-
-
-def sonarr_url() -> str:
-    return os.environ.get("SONARR_URL", "http://127.0.0.1:8989").rstrip("/")
 
 KID_MOVIE = {"G", "PG", "PG-13"}
 KID_TV = {"TV-Y", "TV-Y7", "TV-G", "TV-PG"}
@@ -70,7 +20,7 @@ KID_TV = {"TV-Y", "TV-Y7", "TV-G", "TV-PG"}
 
 def log(msg: str, level: str = "INFO") -> None:
     stamp = time.strftime("%H:%M:%S")
-    print(f"[{stamp}] {level}: [route-rating] {msg}", flush=True)
+    print(f"[{stamp}] {level}: [route_rating.py] {msg}", flush=True)
 
 
 def http_json(method: str, url: str, body=None, headers=None):
@@ -86,18 +36,6 @@ def http_json(method: str, url: str, body=None, headers=None):
 
 def headers(key: str) -> dict:
     return {"X-Api-Key": key}
-
-
-def as_list(value):
-    if isinstance(value, list):
-        return [item for item in value if isinstance(item, dict)]
-    if isinstance(value, dict):
-        for key in ("results", "records", "data", "items"):
-            inner = value.get(key)
-            if isinstance(inner, list):
-                return as_list(inner)
-        return []
-    return []
 
 
 def kid_cert(cert: str, kid_set: set[str]) -> bool:
@@ -163,7 +101,12 @@ def route_library(
     every minute because the movie body still had path set to the current
     location. Editor takes rootFolderPath + moveFiles and computes the dest.
     """
-    rows = as_list(http_json("GET", list_url, headers=headers(key)))
+    payload = http_json("GET", list_url, headers=headers(key))
+    if not isinstance(payload, list):
+        raise RuntimeError('Invalid Arr routing snapshot')
+    rows = as_list(payload)
+    saved = state.load('routing-' + label)
+    owned = {}
     known_roots = [kid_root, gen_root, auto_root]
     by_dest: dict[str, list] = {}
     labels: dict = {}
@@ -172,10 +115,17 @@ def route_library(
         path = item.get("path") or item.get("rootFolderPath") or ""
         if not path:
             continue
-        # Kid Friendly / Not Kid Friendly are user force picks. Only titles
-        # still in By Rating (Seerr's default) are sorted by certification.
-        if not in_root(str(path), auto_root):
+        token = str(item.get('id'))
+        external = item.get('tmdbId' if label == 'movie' else 'tvdbId')
+        previous = saved.get(token, {})
+        # Remember auto mode after the first move. A manually changed path or
+        # reused Arr ID relinquishes ownership; explicit library choices stay put.
+        if not in_root(str(path), auto_root) and not (
+            previous and previous.get('externalId') == external
+            and str(path).rstrip('/') in previous.get('paths', [])
+        ):
             continue
+        owned[token] = {'externalId': external, 'paths': [str(path).rstrip('/')]}
         want = kid_root if kid_cert(cert, kid_set) else gen_root
         if in_root(path, want):
             continue
@@ -185,8 +135,12 @@ def route_library(
         dest = retarget_path(str(path), want, known_roots)
         if dest.rstrip("/") == str(path).rstrip("/"):
             continue
+        owned[token]["paths"].append(dest.rstrip("/"))
         by_dest.setdefault(want, []).append(ident)
         labels[ident] = (item.get("title"), cert)
+    # Save intent before moving; a crash between editor acknowledgement and
+    # observation must not forget that the title was automatically routed.
+    state.save("routing-" + label, owned)
     if not by_dest:
         return
     id_key = "movieIds" if label == "movie" else "seriesIds"
@@ -202,7 +156,7 @@ def route_library(
                 title, cert = labels[ident]
                 log(f"{label} {title} -> {want} ({cert or 'unknown'})")
         except Exception as exc:  # noqa: BLE001
-            log(f"{label} skip {len(ids)} title(s) -> {want}: {exc}")
+            raise RuntimeError(f"{label} routing failed for {len(ids)} title(s)") from exc
 
 
 def arr_api_root(base: str, api_key: str) -> str:

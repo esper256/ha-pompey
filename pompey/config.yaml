@@ -1,10 +1,10 @@
 # https://developers.home-assistant.io/docs/apps/configuration
 name: Pompey
-version: "0.2.55"
+version: "0.3.0"
 slug: pompey
 description: >-
   Search for a movie or TV show. Confirm if we need you. It lands in the
-  right library and Plex notices. All internet from this app uses Proton
+  right library and Plex notices. All internet from this app uses VPN
   WireGuard; if the tunnel is down, internet is dropped.
 url: https://github.com/esper256/ha-pompey/tree/main/pompey
 arch:
@@ -47,7 +47,7 @@ map:
 # Media parent is the Home Assistant media share (or a Media network
 # storage folder under it). Library fields are relative to that parent.
 # Defaults match this house: share name dlna, sibling kid/not-kid folders.
-# Plex must already scan those same folders. Proton is wait-screen paste.
+# Plex must already scan those same folders. VPN is wait-screen paste.
 # Sources are Prowlarr on :9696. After a title is in the library, stop
 # sharing is the default so qBittorrent does not keep every torrent in RAM.
 # Simultaneous downloads is how many titles with peers can run at once;
@@ -61,6 +61,7 @@ options:
   after_download: stop_sharing
   simultaneous_downloads: 8
   debug: false
+  nat_pmp_gateway: ""
 schema:
   media_folder: str
   movies_folder: str
@@ -70,3 +71,4 @@ schema:
   after_download: list(stop_sharing|share_to_ratio|share_one_day)
   simultaneous_downloads: int(1,20)
   debug: bool
+  nat_pmp_gateway: str

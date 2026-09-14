@@ -4,8 +4,8 @@ set -euo pipefail
 # shellcheck source=/dev/null
 source "$(command -v pompey-env)"
 
-need_proton() {
-  POMPEY_STATUS_NEED_PROTON=1 pompey-status vpn "Paste the Proton WireGuard file you downloaded" 8 || true
+need_vpn() {
+  POMPEY_STATUS_NEED_VPN=1 pompey_status.py vpn "Add your VPN configuration" 8 || true
 }
 
 # Stamp every wg-quick line. Home Assistant's app log otherwise shows a wall
@@ -26,7 +26,7 @@ log_wg_quick() {
 
 # wg-quick will delete wg0 if resolvconf or src_valid_mark fails on HAOS.
 # PATH helpers no-op those two; runtime conf uses Table=off so sysctl is not
-# called. Proton DNS is written after the iface is up.
+# called. VPN DNS is written after the iface is up.
 wg_quick_up() {
   log_wg_quick wg-quick up wg0
 }
@@ -34,7 +34,7 @@ wg_quick_up() {
 bring_up_wg0() {
   wg-quick down wg0 >/dev/null 2>&1 || true
   bashio::log.info "Bringing up wg0"
-  POMPEY_STATUS_NEED_PROTON=0 pompey-status vpn "Bringing up the Proton tunnel" 10 || true
+  POMPEY_STATUS_NEED_VPN=0 pompey_status.py vpn "Connecting VPN" 10 || true
   if wg_quick_up; then
     return 0
   fi
@@ -48,13 +48,14 @@ mark_vpn_up() {
   touch "${POMPEY_READY}/vpn-up"
 }
 
+trap 'rm -f "${POMPEY_READY}/vpn-up"' EXIT
 pompey-log start "WireGuard"
 
 if [[ "${POMPEY_FAKE_VPN:-}" == "1" ]]; then
-  bashio::log.info "Fake wg0 (agent/dev): not Proton"
-  pompey-status vpn "Bringing up fake wg0" 10 || true
+  bashio::log.info "Fake wg0 (agent/dev): not VPN"
+  pompey_status.py vpn "Bringing up fake wg0" 10 || true
   pompey-dev-vpn up
-  POMPEY_STATUS_NEED_PROTON=0 pompey-status vpn "Fake wg0 is up" 15 || true
+  POMPEY_STATUS_NEED_VPN=0 pompey_status.py vpn "Fake wg0 is up" 15 || true
   wait-for-vpn 10
   mark_vpn_up
   while wait-for-vpn 1; do
@@ -66,31 +67,39 @@ fi
 
 # Stay running while we wait. Ingress is Supervisor INPUT (not the kill
 # switch). Exiting used to halt the whole container and take nginx with it.
+# Restore the pre-tunnel resolver for endpoint hostname lookup after a lost
+# tunnel. HAOS's LAN resolver remains allowed by the firewall.
+if [[ -f "${POMPEY_READY}/bootstrap-resolv.conf" ]]; then
+  cp "${POMPEY_READY}/bootstrap-resolv.conf" "${POMPEY_RESOLV}"
+fi
 until apply-vpn-config; do
-  need_proton
+  need_vpn
   sleep 2
 done
 
 until bring_up_wg0; do
-  bashio::log.error "wg-quick could not bring up wg0; Ingress stays up. Retrying. Open the app log (do not send the Proton key)."
-  POMPEY_STATUS_NEED_PROTON=0 pompey-status vpn "Proton tunnel could not start" 10 "WireGuard could not bring up wg0. Open the app log (do not send the Proton key)." || true
+  bashio::log.error "wg-quick could not bring up wg0; Ingress stays up. Retrying. Open the app log (do not send the VPN key)."
+  POMPEY_STATUS_NEED_VPN=0 pompey_status.py vpn "VPN tunnel could not start" 10 "VPN connection failed. Check the app log." || true
   sleep 5
+  exit 1 # Re-read a corrected configuration on the next supervised attempt.
 done
 
-pompey-wg-routes || bashio::log.warning "Could not point the default route at wg0"
-printf 'nameserver %s\n' "${POMPEY_WG_DNS}" >/etc/resolv.conf
+pompey-wg-routes
+
 # Filter tables sometimes appear only after the interface exists. Retry once.
 if [[ "${POMPEY_FAKE_VPN:-}" != "1" ]]; then
-  vpn-killswitch "${POMPEY_WG_CONF}" || bashio::log.warning "Kill switch still not attached after wg0 is up"
+  vpn-killswitch "${POMPEY_WG_CONF}"
 fi
 
-bashio::log.info "Waiting for Proton handshake on wg0"
-pompey-status vpn "Waiting for Proton handshake" 15 || true
+bashio::log.info "Waiting for VPN connection on wg0"
+pompey_status.py vpn "Waiting for VPN connection" 15 || true
 wait-for-vpn 45
 mark_vpn_up
 
+signature="$(sha256sum "${POMPEY_WG_FILE}")"
 while wait-for-vpn 1; do
-  sleep 30
+  [[ "$(sha256sum "${POMPEY_WG_FILE}")" == "${signature}" ]] || exit 1
+  sleep 5
 done
 bashio::log.error "WireGuard handshake lost"
 exit 1

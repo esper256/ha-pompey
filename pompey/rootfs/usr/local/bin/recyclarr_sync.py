@@ -10,6 +10,10 @@ keeps that profile. Secrets are never printed.
 from __future__ import annotations
 
 import json
+import fcntl
+import pty
+import struct
+import termios
 import os
 import subprocess
 import sys
@@ -33,7 +37,7 @@ def env(name: str, default: str = "") -> str:
 
 def log(msg: str, level: str = "INFO") -> None:
     stamp = time.strftime("%H:%M:%S")
-    print(f"[{stamp}] {level}: [recyclarr-sync] {msg}", flush=True)
+    print(f"[{stamp}] {level}: [recyclarr_sync.py] {msg}", flush=True)
 
 
 def secrets_path() -> str:
@@ -222,7 +226,7 @@ def redact(text: str, secrets: dict) -> str:
 def main() -> int:
     binary = recyclarr_bin()
     if not os.path.isfile(binary) or not os.access(binary, os.X_OK):
-        log("Recyclarr binary not on disk; Default/Max stay name stubs until Recyclarr can sync")
+        log("Recyclarr binary not on disk; Default/Max are unavailable until Recyclarr can sync")
         return 2
     secrets = load_secrets()
     radarr_key = str(secrets.get("radarr_api_key") or "")
@@ -234,7 +238,19 @@ def main() -> int:
     sonarr = env("SONARR_URL", "http://127.0.0.1:8989").rstrip("/")
     path = write_config(radarr, radarr_key, sonarr, sonarr_key)
     data = app_data()
-    cmd = [binary, "sync", "-c", path]
+    from pathlib import Path
+    from engine_manager import manifest_path
+    active = Path(env("POMPEY_ENGINES", "/data/engines")) / ".active-manifest.json"
+    manifest = json.loads((active if active.exists() else manifest_path()).read_text())
+    resources = manifest["resources"]
+    providers = [
+        {"name": "pompey-guides", "type": "trash-guides", "clone_url": "https://github.com/TRaSH-Guides/Guides.git", "reference": resources["trash_guides"], "replace_default": True},
+        {"name": "pompey-templates", "type": "config-templates", "clone_url": "https://github.com/recyclarr/config-templates.git", "reference": resources["config_templates"], "replace_default": True},
+    ]
+    # JSON is valid YAML and avoids introducing a runtime YAML dependency.
+    from engine_manager import atomic_json
+    atomic_json(Path(data) / "settings.yml", {"resource_providers": providers})
+    cmd = [binary, "sync", "--log", "info", "-c", path]
     log("syncing TRaSH Default/Max onto Radarr and Sonarr")
     child_env = os.environ.copy()
     child_env["RECYCLARR_CONFIG_DIR"] = data
@@ -242,9 +258,15 @@ def main() -> int:
     child_env["NO_COLOR"] = "1"
     child_env.pop("RECYCLARR_APP_DATA", None)
     apply_dotnet_env(child_env)
+    # Spectre's hidden progress renderer still reads terminal dimensions in log
+    # mode. Supply a sized input terminal on headless s6 (and CI) to avoid its
+    # zero-height crash; stdout/stderr remain captured and redacted below.
+    master, terminal = pty.openpty()
+    fcntl.ioctl(terminal, termios.TIOCSWINSZ, struct.pack("HHHH", 40, 120, 0, 0))
     try:
         proc = subprocess.run(
             cmd,
+            stdin=terminal,
             check=False,
             capture_output=True,
             text=True,
@@ -257,12 +279,15 @@ def main() -> int:
     except OSError as exc:
         log(f"could not start Recyclarr: {exc}", "WARNING")
         return 1
+    finally:
+        os.close(terminal)
+        os.close(master)
     stdout = redact(proc.stdout or "", secrets).strip()
     stderr = redact(proc.stderr or "", secrets).strip()
     if stdout:
         for line in stdout.splitlines()[-40:]:
             log(line)
-    if proc.returncode != 0:
+    if proc.returncode != 0 or "[ERR]" in stdout or "[ERR]" in stderr:
         if stderr:
             for line in stderr.splitlines()[-20:]:
                 log(line, "WARNING")

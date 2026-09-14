@@ -28,7 +28,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 STATIC = ROOT / "pompey/rootfs/usr/share/pompey"
-STATUS_BIN = ROOT / "pompey/rootfs/usr/local/bin/pompey-status"
+STATUS_BIN = ROOT / "pompey/rootfs/usr/local/bin/pompey_status.py"
 
 
 class Handler(SimpleHTTPRequestHandler):
@@ -133,7 +133,7 @@ def write_fake_netdev(path: Path, rx: int, tx: int) -> None:
 
 
 def vpn_demo(env: dict, netdev: Path, stop: threading.Event) -> None:
-    stats = ROOT / "pompey/rootfs/usr/local/bin/pompey-vpn-stats"
+    stats = ROOT / "pompey/rootfs/usr/local/bin/pompey_vpn_stats.py"
     rx, tx = 18_000_000, 1_200_000
     child = env.copy()
     child["POMPEY_NET_DEV"] = str(netdev)
@@ -148,11 +148,11 @@ def vpn_demo(env: dict, netdev: Path, stop: threading.Event) -> None:
 def demo(env: dict, hold_ready: bool, delay: float) -> None:
     sequence = [
         ("vpn", "Starting", "5"),
-        ("vpn", "Bringing up the Proton tunnel", "10"),
-        ("vpn", "Waiting for Proton handshake", "15"),
-        ("fetch", "Downloading hidden engines", "35"),
-        ("fetch", "Downloading the household UI", "55"),
-        ("start", "Starting hidden engines", "70"),
+        ("vpn", "Connecting VPN", "10"),
+        ("vpn", "Waiting for VPN connection", "15"),
+        ("fetch", "Downloading apps", "35"),
+        ("fetch", "Downloading search", "55"),
+        ("start", "Starting apps", "70"),
         ("wire", "Connecting search to your library", "85"),
         ("ready", "Ready", "100"),
     ]
@@ -163,7 +163,7 @@ def demo(env: dict, hold_ready: bool, delay: float) -> None:
     if hold_ready:
         # Same chatter engines/wire emit on restart. Must not rewind the bar.
         while True:
-            status(env, "fetch", "Downloading hidden engines", "30")
+            status(env, "fetch", "Downloading apps", "30")
             time.sleep(30)
 
 

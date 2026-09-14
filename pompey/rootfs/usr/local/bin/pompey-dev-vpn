@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # shellcheck shell=bash
-# Agent/dev stand-in for Proton WireGuard.
+# Agent/dev stand-in for VPN WireGuard.
 #
 # wg0 lives in a netns so it is a real hop. The peer on the host NATs out the
-# default adapter. Same interface name qBittorrent binds. Not Proton.
+# default adapter. Same interface name qBittorrent binds. Not VPN.
 set -euo pipefail
 
 export PATH="/usr/sbin:/sbin:${PATH}"
@@ -131,7 +131,7 @@ up() {
 
   ensure_nat "${def}"
   write_state "${def}" "${host}"
-  log "Fake ${WG_IFACE} up in netns ${NS} (${WG_ADDR}, NAT out ${def}). Not Proton."
+  log "Fake ${WG_IFACE} up in netns ${NS} (${WG_ADDR}, NAT out ${def}). Not VPN."
 }
 
 down() {

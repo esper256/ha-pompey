@@ -136,7 +136,7 @@ def emit(name: str, line: str) -> None:
 
 def main(argv: list[str]) -> int:
     if len(argv) < 2:
-        print("usage: pompey-log-emit NAME [TEXT]", file=sys.stderr)
+        print("usage: pompey_log_emit.py NAME [TEXT]", file=sys.stderr)
         return 2
     name = argv[1]
     if len(argv) > 2:

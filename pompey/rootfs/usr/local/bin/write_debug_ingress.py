@@ -2,7 +2,7 @@
 """Write the Ingress nginx include that exposes hidden engine Web UIs.
 
 When POMPEY_DEBUG is on, /debug/radarr/ /debug/sonarr/ /debug/qbittorrent/
-proxy to the localhost engines. UrlBase stays empty so wire-stack and
+proxy to the localhost engines. UrlBase stays empty so wire_stack.py and
 housekeeping keep talking to /api/v3.
 
 Modern Arr serves Vite bundles at the site root (/index-<hash>.js). A
@@ -151,7 +151,7 @@ def render(*, enabled: bool, www: str) -> str:
 
 def main(argv: list[str]) -> int:
     if len(argv) != 2:
-        print("usage: write-debug-ingress INCLUDE_PATH", file=sys.stderr)
+        print("usage: write_debug_ingress.py INCLUDE_PATH", file=sys.stderr)
         return 2
     dest = argv[1]
     www = os.environ.get("POMPEY_WWW", "/usr/share/pompey").rstrip("/")

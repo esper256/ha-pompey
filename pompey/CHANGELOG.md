@@ -1,263 +1,278 @@
 # Changelog
 
+## 0.3.0
+
+- Support compatible WireGuard VPN providers and optional port forwarding.
+- Improve VPN reconnection and block internet traffic when the tunnel fails.
+- Fix download imports, upgrades, and sharing limits; preserve files that need review.
+- Keep automatic rating sorting while respecting chosen library folders.
+- Preserve files when requests are removed; leave declined requests declined.
+- Restore search connections when settings change.
+- Deliver tested app versions with Pompey updates and improve recovery from failed updates.
+- Keep existing apps available when update downloads fail; block known version downgrades.
+- Show live service health in the sidebar.
+
 ## 0.2.55
 
-- A new Seerr request could auto-approve, hit Radarr, start a torrent, then show **Declined**. That was not an ACL. Seerr’s Radarr/Sonarr library scan lists what Arr already has; a request sent during that scan is “orphaned” (not in the snapshot yet) and Seerr declines it. Pompey then treated declined as “request removed” and cancelled the download. Turn Arr library-scan off (Plex still marks available), keep a declined ticket open until you delete the row, and re-request declined titles so the Requests page matches reality. Rebuild so the banner says **0.2.55**.
-- Recyclarr’s GitHub **musl** tarball is a .NET apphost (no runtime). It logged `.NET location: Not found` and exited 131, so TRaSH never applied. Fetch Microsoft’s linux-musl .NET runtime next to it and set `DOTNET_ROOT`. glibc Recyclarr stays the self-contained tarball.
+- Fix new requests being incorrectly declined and their downloads cancelled.
+- Fix quality presets failing to apply on Home Assistant OS.
 
 ## 0.2.54
 
-- Back-catalog titles Sonarr cannot parse are a **Prowlarr Search → Grab**, not another SeasonSearch. Prowlarr’s qBittorrent category now saves into **`downloads/manual`** (not `downloads/complete`, and not a Movies/TV root). Housekeeping was the remaining foot-gun: a human Grab sat next to Arr’s completed downloads, Arr called it “Not a wanted quality,” and the next missing-search grabbed a second pack. Import a Grab when Arr already has that title (Seerr request, or a leftover unmonitored row after you deleted the files), even if Default/Max would reject it. Do not SeasonSearch that title while the matching file is still in `complete/` or `manual/`. A Grab with no Arr title still sits in `downloads/manual` — request it in search first so the Kid / Not Kid folder exists; we still do not guess from the filename. If the library already has that `SxxExx` / movie, the leftover copy is removed (delete the library file first if you meant to replace it). Removing the Seerr request (Requests page, not Clear Data) is the close-out: a ~15s loop unmonitors the Radarr/Sonarr row (TV seasons and `monitorNewItems` too), cancels in-flight SeasonSearch/MoviesSearch, and drops that title from the Arr queue so the next housekeep tick cannot start a phantom grab. The Arr row stays so a later Prowlarr Grab still has a folder. Rebuild so the banner says **0.2.54**.
+- Import manually selected downloads for requested titles without grabbing duplicate copies.
+- Stop further searches and queued downloads when a request is removed.
 
 ## 0.2.53
 
-- Dual Subs is two subtitle tracks, not Dual Audio. The +15 Default/Max tie-break treated the word `DUAL` as Dual Audio, so `1080p.Dual.Subs` and `[Dual Subs]` could beat or tie a real Dual-Audio release. Score only Dual-Audio / `[DUAL]` / JA+EN, and add a required “not Dual Subs” rule to our CF and to TRaSH Anime Dual Audio after Recyclarr rewrites it. Rebuild so the banner says **0.2.53**.
+- Stop mistaking dual subtitles for dual audio when choosing releases.
 
 ## 0.2.52
 
-- A file-manager move between Kid Friendly and Not Kid Friendly updates Plex and Seerr, not Sonarr’s stored path. Housekeeping then `SeasonSearch`ed the “missing” season and grabbed it again. Point Arr at the one sibling root that already has the video (`moveFiles: false`), rescan, and do not search that season. If both libraries still have files, do not guess — log and skip the grab. Remove the Seerr request to stop a torrent that already started. Do not drag library folders by hand; pick the root on the request. Why this is denormalized “have it,” not a reason to replace Arr: [docs/household-truth.md](../docs/household-truth.md). Rebuild so the banner says **0.2.52**.
+- Avoid downloading titles again after files move between library folders.
 
 ## 0.2.51
 
-- Anime requests were searching every episode on every source (`World Trigger 28`, then `World Trigger` + Season 1 Episode 28) and never asking for a season pack. That is Sonarr’s **Anime** series type: it has no pack concept unless the indexer has **Anime Standard Format Search** *and* the command is a season search. Prowlarr’s Sonarr app was leaving that box off (or an older app row never got it), and housekeeping posted `EpisodeSearch` for the next eight holes — which never queries packs. Turn the official flag on, copy it onto Sonarr indexer rows, and poke a missing/cutoff season once with `SeasonSearch`. Dual-Audio stays a +15 tie-break on whatever was actually found; we do not stuff `Dual` into indexer queries. Rebuild so the banner says **0.2.51**, then restart so Prowlarr re-syncs. A still-open Seerr request gets one season search for a better copy.
+- Search for full anime seasons instead of only individual episodes.
 
 ## 0.2.50
 
-- Prowlarr Settings → Download Clients was empty, so Search → Grab did nothing useful. Wire a qBittorrent client at `127.0.0.1:8080` with category **`prowlarr`** (same `downloads/complete` folder as Arr). Do not reuse `radarr` / `sonarr` — Arr completed-download handling would claim a TV grab as a movie. Prowlarr never removes a completed torrent (it is not the importer). Preferred manual path: request in Seerr first, then Debug → Radarr/Sonarr **Interactive Search**. Prowlarr Grab is the fallback; housekeeping only imports if Arr already has the title. Debug also turns Interactive Search on for Arr indexer rows that landed with it off. Rebuild so the banner says **0.2.50**.
+- Enable direct downloads from Open sources.
+- Enable manual release selection in the troubleshooting consoles.
 
 ## 0.2.49
 
-- After a TV season (or movie) lands, leftover extras in `downloads/complete` are renamed into the Plex extra folders on the Arr title path: **Behind The Scenes**, **Deleted Scenes**, **Featurettes**, **Interviews**, **Scenes**, **Shorts**, **Trailers**, **Other**. Episode-tied extras sit next to that `SxxExx` as `-behindthescenes` / `-featurette` / …. Season 00 and other specials go in **Specials**, or into **Season 00** if that folder already exists, named `Show - S00Exx - Title`. Samples are dropped. Destination is still the Kid / Not Kid folder Seerr stored — housekeeping does not guess from the filename. Rebuild so the banner says **0.2.49**.
+- Organize downloaded extras and specials for Plex; remove sample videos.
 
 ## 0.2.48
 
-- Debug Radarr/Sonarr still 404ed webpack chunks (`/640-<hash>.js`) on the Home Assistant host. `/index-<hash>.js` was rewritten; later chunks use webpack `publicPath = "/"`, which ignores `<base href>`. Rewrite that publicPath and intercept `script.src` before the browser fetches. Rebuild so the banner says **0.2.48**, then hard-refresh the debug tab.
-- Seerr PUT `/api/v1/user/1` 400 (`email` is read-only). Grant advanced-request with `{permissions}` only.
-- Seerr’s Root Folder list was a false choice: both library folders were Arr roots, then `route-rating` overwrote the pick from certification. Default is now **By Rating** (not a Plex library). Leave that selected to sort by Arr/TMDB cert. **Kid Friendly** / **Not Kid Friendly** stay put. Same for movies and TV. Leftover Arr roots from older defaults (`/media/TV`, `/media/Kid Friendly TV`, `/media/Movies`, `/media/Kid Friendly Movies`, and flattened Not Kid paths) are moved off and deleted so the dropdown is only those three. Rebuild so the banner says **0.2.48**.
+- Fix troubleshooting pages failing to load.
+- Fix access to advanced request options.
+- Add By Rating sorting and respect explicit kid or general folder choices.
+- Remove obsolete library choices from requests.
 
 ## 0.2.47
 
-- Debug Radarr/Sonarr were blank: their current UI loads `/index-<hash>.js` from the site root, so the browser asked Home Assistant for that file (404, `text/plain`) instead of Ingress. Rewrite every root-absolute asset/API path (not only `/Content/`). qBittorrent was already fine. Rebuild so the banner says **0.2.47**, then hard-refresh the debug tab.
+- Fix blank Radarr and Sonarr troubleshooting pages.
 
 ## 0.2.46
 
-- Home Assistant **Simultaneous downloads** option (default **8**, range 1–20). qBittorrent’s own default of 3 active downloads counted stalled / seedless torrents against that cap, which froze the rest of the queue. Stalled torrents stay in the client (still worth trying if seeds appear) but no longer occupy a slot: after three minutes below 2 KiB/s they do not count toward the simultaneous-download limit. A higher total-active cap leaves room for those waiting titles. Rebuild so the banner says **0.2.46**, then restart after changing the option.
+- Add a simultaneous download limit, defaulting to eight.
+- Keep stalled downloads from blocking the queue.
 
 ## 0.2.45
 
-- Home Assistant **Debug** option (off by default). When on, the Pompey sidebar offers the hidden **Radarr**, **Sonarr**, and **qBittorrent** Web UIs through Ingress — not published on the LAN. Use that to see a stuck download. Turn it off when you are done and restart. Rebuild so the banner says **0.2.45**.
+- Add optional troubleshooting consoles in the Home Assistant sidebar.
 
 ## 0.2.44
 
-- Kid-rated titles were logged as moving into Kid Friendly every minute, but Radarr was given the current Not Kid Friendly path, so the files never moved. Routing now uses Arr’s editor (`rootFolderPath` + `moveFiles`).
-- Arr/Prowlarr console logs are **warn**, not info. Indexer HTTP flakes (429, CloudFlare, empty category tests) stay in the Prowlarr UI and out of the Home Assistant app log. qBittorrent’s file log is followed from the end so a restart does not replay weeks of history.
-- Recyclarr’s .NET apphost needs its sibling files. The previous single-file copy looked for `/data/engines/recyclarr.dll` and exited 154, so TRaSH never applied.
-- Leftover **HD-1080p**: rehome titles through the editor and import lists before DELETE. Rebuild so the banner says **0.2.44**.
+- Fix kid-rated titles failing to move to the kid library.
+- Reduce log noise and avoid replaying old download logs.
+- Fix quality presets failing to apply and remove obsolete quality choices.
 
 ## 0.2.43
 
-- After a source is added (or on the first pass of this cut), Pompey asks Arr to search **already-available** Default/Max titles that are still below cutoff — so a Dual-Audio copy on the new source can replace the file that already landed. RSS still picks up later announcements. **Anything** still does not upgrade.
-- Closing the Seerr **request** (Requests page, the ticket — not Clear Data) stops that. Pompey unmonitors the title so it is not searched again. The library file stays. A Seerr read failure does not unmonitor anything. Rebuild so the banner says **0.2.43**.
+- Look for better copies of Default and Max titles when sources are added.
+- Stop future searches when a request is removed, keeping library files.
 
 ## 0.2.42
 
-- Leftover Arr quality profiles (stock **HD-1080p**, HD-720p, Ultra-HD) no longer stick in the Seerr request dropdown because a movie or show still used them. Wiring now moves those titles onto **Default**, then deletes the leftover. Seerr cannot change quality on an approved request; the profile lives on Radarr/Sonarr. Rebuild so the banner says **0.2.42**.
+- Remove obsolete quality choices from requests.
 
 ## 0.2.41
 
-- Default and Max now prefer a Dual-Audio release when one exists at the same quality (TRaSH Anime Dual Audio, score +15). Recyclarr applies that on movies and TV. Sonarr also keeps Language: Not Original at −10000 so an English-only dub still loses. Anything is unchanged. No Home Assistant option and no extra Seerr quality name. Rebuild so the banner says **0.2.41**.
+- Prefer dual-audio releases at the same quality for Default and Max.
 
 ## 0.2.40
 
-- The sidebar is a **report**, not an installer that re-runs because you opened it. Opening Ingress only reads `status.json`. After search is wired, engine fetch, WireGuard handshake retries, and the Proton graph sampler cannot rewind the progress bar to 30% or leave Paste Proton up for days while search already works. The bar and step list hide once search is ready; Open search and the Proton graph stay. Rebuild so the banner says **0.2.40**.
+- Keep the sidebar on the ready screen after setup finishes.
+- Hide completed setup steps and progress.
 
 ## 0.2.39
 
-- Hidden engines no longer freeze at first download. After the Proton tunnel is up, Pompey checks the official Prowlarr / Radarr / Sonarr / qBittorrent / Recyclarr / Seerr channels and replaces an on-disk copy only when upstream has moved. That check runs on add-on start and about daily after that. Arr’s in-app updater stays off (Pompey is the updater, the way Docker compose pulls images). A failed check keeps the previous binary and search stays up. qBittorrent is not swapped while a file is still landing in `incomplete/`. Rebuild so the banner says **0.2.39**.
+- Automatically check for app updates at startup and daily.
+- Keep existing apps running when update checks fail.
 
 ## 0.2.38
 
-- Home Assistant no longer has preferred language / anime audio / subtitles options. Those scored release *names* and did not match how Arr or Seerr actually pick audio. Default and Max now use Arr’s original-language custom format (same mechanism as TRaSH Language: Not Original): a French dub of an English title loses; a French film still matches French. Anything still takes whatever exists. Dual-audio stays a small tie-break. Playback language stays in Plex. Leftover “Pompey English dub/subs” custom formats from 0.2.28 stay at score 0.
-- Recyclarr syncs TRaSH Guides onto **Default** (HD Bluray + WEB / 1080p) and **Max** (UHD Bluray + WEB / 4K encodes, with 1080p as a fallback, remux off). **Anything** stays ours so rare titles can still take CAM. Seerr still shows those three names. No Recyclarr UI and no new Home Assistant options. If Recyclarr is missing, Pompey’s fallback profiles stay. Rebuild so the banner says **0.2.38**.
+- Improve Default and Max quality presets using TRaSH Guides.
+- Prefer original-language audio; remove language and subtitle settings.
 
 ## 0.2.37
 
-- Housekeeping will not delete anything that is not a leftover under `downloads/complete`, and it will not scan or import if that folder overlaps a Plex library path. Re-import is skipped whenever the library already has that movie or that `SxxExx` (even if Arr forgot `hasFile`) so a Move cannot recycle-delete the Plex file. Radarr/Sonarr now send replaced files to `downloads/recycle` and do not auto-empty it. qBittorrent still forgets torrents with `deleteFiles=false`. Rebuild so the banner says **0.2.37**.
+- Protect library files from duplicate imports and download cleanup.
+- Keep replaced files in a recovery folder.
 
 ## 0.2.36
 
-- A season that searched 9…4 then sat is no longer starved by housekeeping. Refresh/Scan every five minutes are higher priority than EpisodeSearch, so they ate the rest of the queue. Housekeeping now skips Refresh while a search is running, skips Refresh/Scan when `complete/` has no videos, and pokes remaining wanted/missing episodes *after* import — once per missing-id set, not every cycle.
-- Leftover **loose files** in `downloads/complete` (qBittorrent’s flat save path, not a torrent folder) are removed once the library already has that movie or that `SxxExx`. **0.2.34** only deleted leftover folders, so Silo E04/E07 and a finished movie could sit there after Arr had already copied them. If Arr marks `hasFile` but the library folder does not actually have that episode, the leftover is imported instead of deleted. Do not drag those files out by hand.
+- Fix stalled season searches.
+- Clean up leftover downloads without deleting episodes missing from the library.
 
 ## 0.2.35
 
-- App log now prints Sonarr/Radarr **command queue** and Sonarr **wanted/missing** at the start of each housekeeping pass (before Refresh/Scan). Use that to see whether a season search stalled (started EpisodeSearch stuck, later episodes still queued) or whether `complete/` is empty while scans still run. Does not change grab/import.
-- The same rebuild drops log junk that hid those lines: Seerr debug Plex-scan “already exists”, Arr `NzbDrone` stack traces (that name is Servarr’s internals, not Usenet), ANSI color, API keys and JWTs in exception URLs, and housekeeping repeating the same `complete/` / waiting-title warning every five minutes until something changes. Structured `[Warn]` / `[Error]` stay. Does not skip scans or start extra EpisodeSearch.
-- The sidebar wait screen shows **how much has crossed the Proton tunnel** (totals in and out) and a two-minute graph of recent down/up rates, sampled from the `wg0` adapter. Hidden until the tunnel is up. Rebuild so the banner says **0.2.35**, then send the log around a stuck season (not API keys).
+- Show VPN transfer totals and a recent speed graph.
+- Make stalled downloads easier to diagnose; reduce log noise and hide credentials.
 
 ## 0.2.34
 
-- Arr imports the **video** (and `.srt`, including a `Subs` folder) into the movie or TV folder Seerr stored. It does not relocate the whole torrent directory, so `downloads/complete` can keep `.nfo` / `.txt` after the title is in Plex. **0.2.33** could also re-import a title Arr had already assigned (the manual-import list often omits `hasFile`), which deleted the library file and the subtitle that came with it. Housekeeping now looks the title up on Radarr or Sonarr, skips that second import, and removes leftover `complete/` folders once the library already has the video. A show with season 1 on disk is still treated as waiting if later seasons are missing. Rebuild so the banner says **0.2.34**. Do not drag leftover extras out by hand.
+- Prevent duplicate imports from deleting library files and subtitles.
+- Import subtitles and clean up leftover download folders.
+- Keep incomplete series marked as waiting.
 
 ## 0.2.33
 
-- **0.2.32** did move the movies into the Plex library folder Seerr stored (this house: `Movies/Not Kid Friendly`). Folders left under `downloads/complete` were leftover subtitles and `.nfo` files, not the movie. The app log listed those extras as `still in complete/`, which looked like the import never ran. Housekeeping now warns only when a **video** is still in `complete/`. It also skips re-importing a title Arr already has a file for (re-import was deleting the library copy because there is no recycle bin). New imports bring subtitle files (including a `Subs` folder) into the movie folder with the video — not the whole torrent dump of `.nfo`/`.txt`. After a file lands, Seerr is asked to check Plex and Arr so requests can flip from active to available (Plex recently-added is also every few minutes on its own). Rebuild so the banner says **0.2.33**. Look in the library folders Plex scans, not in `complete/`. Do not drag leftover extras out by hand.
+- Import subtitles alongside videos.
+- Avoid false warnings about leftover non-video files.
+- Refresh request availability after imports.
 
 ## 0.2.32
 
-- Finished files on a NAS share were staying in `downloads/complete` instead of the Plex library folder. qBittorrent never receives that library path — Seerr tells Radarr/Sonarr the Movies/TV folder (Kid vs Not Kid) when you request; that path lives on the Arr title. Housekeeping does **not** guess the folder from the filename. It asks Arr to import only files that already match a title, into that stored path, and logs unmatched names as `not guessing Kid vs Not Kid`. If Arr never starts the import there is no “failed move” line (a 100% torrent still seeding looks like a normal download). Finished torrents in `complete/` are **stopped** so Arr will treat them as ready; import is a same-share rename (hardlinks off). Rebuild so the banner says **0.2.32**.
+- Fix completed downloads remaining outside their selected library folders.
 
 ## 0.2.31
 
-- The wait screen could stay on **Could not finish connecting search** with Sonarr `MinimumFreeSpaceWhenImporting` must be ≥ 100. **0.2.27** set that field to 0 so a NAS that reports no free space would still import; Sonarr rejects 0, and that PUT runs *before* quality profiles, so Max / Default / Anything never applied. The skip-free-space flag stays on (that is what ignores a 0-byte NAS). The number is 100. A media-management 400 no longer fails wiring. Rebuild so the banner says **0.2.31**.
+- Fix setup and quality selection failing on network shares.
 
 ## 0.2.30
 
-- 0.2.28 could leave the wait screen on **Engines started but wiring failed** and the request quality list on Radarr’s stock names (Any, HD-720p, Ultra-HD). Arr rejects a profile whose quality groups have no id, and it requires every custom format on the profile. Wiring now applies Max / Default / Anything on an existing install, keeps leftover stock names until those three exist, and does not treat a quality-profile hiccup as a full wiring failure. Rebuild so the banner says **0.2.30**.
+- Fix Max, Default, and Anything quality choices on existing installations.
 
 ## 0.2.29
 
-- Do not move files out of `downloads/complete` by hand. After a title is in the library (or you already moved it), Pompey drops the qBittorrent torrent **without deleting files**, so a hidden client cannot start downloading the same thing again. It also asks Radarr/Sonarr to import anything still sitting in `complete/`. Rebuild so the banner says **0.2.29**.
+- Clear finished downloads without deleting files.
+- Retry importing completed downloads into the library.
 
 ## 0.2.28
 
-- Search offers three quality choices when you request a title: **Max** (remux / 4K / lossless audio, large files on purpose), **Default** (1080p WEB-DL or BluRay encode, about 2.5–8 GB per 150 minutes; under about 1 GB for two hours is rejected), and **Anything** (obscure titles — take what exists, including CAM). The request dropdown is the Seerr advanced-request control; household users now have that permission. Leftover Arr profiles (Any, HD-720p, Ultra-HD, the old HD name) are removed so the list is those three. Rebuild so the banner says **0.2.28**. Already-queued grabs are not cancelled.
-- Home Assistant options for **preferred language**, **anime audio** (dual audio by default), and **subtitles**. These score the release *name* (Dual Audio, English Dub, advertised English subs). They are not a per-request language picker — Seerr does not have one — and they do not download missing subtitles after the file lands (Bazarr is later).
+- Add Max, Default, and Anything quality choices when requesting titles.
+- Add language, anime audio, and subtitle preferences.
 
 ## 0.2.27
 
-- A finished download sitting in `downloads/complete` is not the library. Radarr/Sonarr now import into the Movies/TV folder Seerr used. Network shares (this house: `/media/dlna`) often report no free space, which used to skip that move. Rebuild retries completed torrents still in qBittorrent. The app log warns if one is stuck.
+- Fix completed downloads failing to import on network shares.
+- Report downloads waiting to enter the library.
 
 ## 0.2.26
 
-- Auto-grab prefers **1080p WEB-DL / BluRay encodes**, not remux or 4K. A 26 GB remux was Radarr’s default ranking, not a bad source. The household profile also prefers x265 and WEB-DL, rejects CAM/TS, and caps 1080p size (about 10–15 GB for a two-hour movie). Already-queued grabs are not cancelled. Search still uses this profile after a rebuild.
-- **After a title is in the library** is a Home Assistant option (default **stop sharing**). Finished torrents are removed from qBittorrent so they do not sit in RAM forever. You can share to a 1.0 ratio or for one day instead. The library file is kept.
+- Prefer smaller 1080p releases and reject low-quality recordings.
+- Add sharing choices: stop, share to a 1:1 ratio, or share for one day.
 
 ## 0.2.25
 
-- Empty Query in Prowlarr History during a Seerr request is often a **top100 browse**, not an IMDb search: Radarr sent an ID (or nothing), the source ignored it, and listed popular torrents. Arr now talks to Prowlarr through a localhost proxy that advertises title search only, so the movie name goes to every source. Open sources stays on port 9696. After wiring, the app log labels History rows as ID, title, RSS, or browse/top100.
-- Prowlarr sources whose list payload omitted RSS/automatic/interactive flags were left unset; those flags are now read from the source detail and turned on.
-- Radarr and Sonarr applications get movie vs TV `syncCategories`. After sync, the app log counts Arr indexers against Prowlarr and warns when a source did not land (category test / CloudFlare). That is why a Seerr movie can title-search only two of five sources.
-- Wiring no longer POSTs Seerr `/auth/local` once the disk API key exists, so the log is not a loop of invalid pompey@local passwords. Sonarr’s deprecated language-profile GET is skipped.
+- Improve title searches on sources with limited search support.
+- Fix missing movie and TV sources.
+- Reduce repeated login errors in the log.
 
 ## 0.2.24
 
-- Enabled Prowlarr sources get RSS, automatic, and interactive search turned on. After wiring, Radarr and Sonarr search titles that still have no file, so a request that hit too few indexers is tried again. You do not wait for the next Arr cycle, and you do not cancel the Seerr request.
+- Enable search on configured sources and retry unfilled requests.
 
 ## 0.2.23
 
-- The app log is the mux for every hidden service (s6 already joins their stdout). Each line is tagged with the service name. You see when a service **starts** and **stops**. qBittorrent’s file log — previously invisible from Home Assistant — is copied in. Radarr, Sonarr, Prowlarr, Seerr, and nginx were already in this log and now carry the same tag so an error is not anonymous. After wiring, the log lists each Prowlarr source and whether search is on.
+- Combine app and download logs with clear service labels.
 
 ## 0.2.22
 
-- Fixed the wait screen getting stuck on **Could not finish connecting search** after a media-folder change. Search already had Radarr; updating the library path is allowed again.
+- Fix setup getting stuck after changing the media folder.
 
 ## 0.2.21
 
-- Media folder defaults match this house: `/media/dlna`, with `Movies/Not Kid Friendly`, `Movies/Kid Friendly`, `TV/Not Kid Friendly`, and `TV/Kid Friendly`. Change the Home Assistant options if a share or library folder is named differently. If you already saved the old `/media` defaults, update Configuration once and restart.
+- Default storage to /media/dlna with separate kid and general movie and TV folders.
 
 ## 0.2.20
 
-- Home Assistant options for **where files go**: media folder (default `/media`) plus movies, kid movies, TV, and kid TV folders relative to it. In-progress downloads use `downloads/` under the media folder. Point Plex at those same library folders. A network Media share is `/media/<the name you gave it>`. Saving the options and restarting the app updates an existing install.
+- Add configurable media and library folders, including network shares.
 
 ## 0.2.19
 
-- Home Assistant no longer has Plex or source fields for this app. Connect Plex in Seerr’s first-run wizard. Add sources with **Open sources** (Prowlarr).
+- Move Plex setup to the search wizard and source setup to Open sources.
 
 ## 0.2.18
 
-- **Open sources** in the sidebar. Prowlarr is on this machine’s port **9696**. First visit asks you to set a login.
-- Radarr, Sonarr, and qBittorrent stay unpublished. Search stays on port **5055**.
-- Updating keeps existing Prowlarr sources.
+- Add Open sources for managing download sources.
+- Preserve sources across updates.
 
 ## 0.2.17
 
-- Seerr no longer warns that `/config/seerr` is not a volume. Search data already persists.
-- Sidebar stays Pompey’s wait and status screen. Search stays on port **5055**.
+- Remove an incorrect warning about search data not being saved.
 
 ## 0.2.16
 
-- Search is on this machine’s port **5055**. The sidebar shows **Open search** when ready; it is not an iframe of Seerr.
-- Plex is a separate app. Pompey does not run Plex.
+- Add Open search in the sidebar, opening search in a separate tab.
 
 ## 0.2.15
 
-- Fixed Plex setup on the search screen doing nothing.
+- Fix unresponsive Plex setup.
 
 ## 0.2.14
 
-- Fixed the wait screen never finishing: search opens for the Plex wizard, then the movie and TV engines connect after the first admin exists.
+- Fix setup getting stuck before Plex connection.
 
 ## 0.2.13
 
-- Fixed the first-run Plex button doing nothing.
-- Plex in Home Assistant options is optional. You can finish Plex in Seerr. Use a numeric IP (Proton DNS will not resolve LAN names).
+- Fix the first-run Plex button.
+- Allow Plex setup through the search wizard.
 
 ## 0.2.12
 
-- Wait screen stays up if search cannot be connected, instead of opening an empty search page.
+- Show setup errors instead of opening an empty search page.
 
 ## 0.2.11
 
-- First start can download the engines on Home Assistant OS (unpack no longer fails).
+- Fix first-time app installation on Home Assistant OS.
 
 ## 0.2.10
 
-- Proton tunnel stays up (WireGuard config is accepted).
+- Fix VPN startup failures.
 
 ## 0.2.9
 
-- Proton tunnel stays up on Home Assistant OS when network sysctl is read-only.
-- App log timestamps WireGuard lines.
-- Engines wait until the VPN handshake exists, not only until the Proton file is saved.
+- Fix VPN startup on Home Assistant OS.
+- Wait for a VPN connection before downloading apps.
+- Add timestamps to VPN logs.
 
 ## 0.2.8
 
-- A failed Proton tunnel no longer takes down the whole app. The wait screen stays up.
+- Keep the sidebar available when the VPN fails.
 
 ## 0.2.7
 
-- App log is quieter and every Pompey line has a time.
+- Reduce log noise and add timestamps.
 
 ## 0.2.5
 
-- Pasting a Proton WireGuard file works on Home Assistant OS.
-- Engines no longer retry the VPN before a Proton file exists.
+- Fix saving VPN configurations on Home Assistant OS.
+- Wait for VPN setup before retrying the connection.
 
 ## 0.2.4
 
-- Proton paste box no longer flickers during startup.
+- Fix the VPN setup box flickering during startup.
 
 ## 0.2.3
 
-- Home Assistant options are Plex address, Plex token, source URL, and source key.
-- Paste the Proton WireGuard file on the wait screen. Missing Proton no longer stops the app.
+- Add Plex and source settings.
+- Accept VPN configuration in the sidebar without stopping the app.
 
 ## 0.2.2
 
-- Pompey appears under **Install app** (start timeout was too high and hid it).
-- Start wait is 300 seconds. Engines still download after the app is up.
+- Fix Pompey missing from Home Assistant's app store.
 
 ## 0.2.1
 
-- First Home Assistant OS build: wait screen, Proton, kill switch, starts on reboot.
-- Proton server hostnames resolve so the tunnel can connect.
-- Use a numeric IP for Plex. LAN names will not resolve through Proton.
-- Titles route to kid or general folders from the rating (unknown goes to general).
-- Store icon and logo.
+- Add Home Assistant OS support and automatic startup.
+- Fix connections to VPN servers specified by hostname.
+- Sort titles into kid or general libraries by rating.
+- Add the app icon and logo.
 
 ## 0.2.0
 
-- After Proton is up, downloads search and the hidden engines and wires them.
-- Wait screen, then search.
-- Kid vs general library folders.
-- NAT-PMP for downloads.
+- Add search and automatic setup after VPN connection.
+- Add separate kid and general libraries.
+- Add VPN port forwarding.
 
 ## 0.1.1
 
-- Named **Pompey**.
-- Supervisor builds the app on the machine. No Docker image to pull.
+- Introduce the Pompey name and local installation through Home Assistant.
 
 ## 0.1.0
 
-- Starting point: Proton WireGuard and kill switch. Search is not connected yet.
+- Initial WireGuard VPN support with internet blocking when disconnected.

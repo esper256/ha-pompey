@@ -8,4 +8,4 @@ pompey-log start "VPN stats"
 until [[ -f "${POMPEY_READY}/status.json" ]]; do
   sleep 1
 done
-exec python3 /usr/local/bin/pompey-vpn-stats loop
+exec python3 /usr/local/bin/pompey_vpn_stats.py loop

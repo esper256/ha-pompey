@@ -1,3 +1,0 @@
-#!/command/with-contenv bashio
-# shellcheck shell=bash
-pompey-log finish "Prowlarr-Arr" "${1:-0}" "${2:-0}"
