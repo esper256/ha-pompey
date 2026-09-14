@@ -2,7 +2,7 @@
 
 ## 0.3.3
 
-- Remove leftover Arr library roots from older installs so Seerr only lists household folders.
+- Unregister unused historical Arr library folders from older installs. Occupied or extra folders stay registered and are reported.
 
 ## 0.3.2
 

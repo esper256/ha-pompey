@@ -74,9 +74,22 @@ def check_receipts(receipts, secrets):
 
 
 def attention():
+    notices = []
+    extra = persist_notices()
+    if extra:
+        notices.extend(extra)
     receipts = state.load('manual-imports')
     pending = sum(r.get('phase') in {'submitting','review'} or (r.get('phase') == 'submitted' and r.get('commandId') is None) for r in receipts.values())
-    return [f'{pending} manual import(s) need review in Debug; files and import receipts were retained.'] if pending else []
+    if pending:
+        notices.append(f'{pending} manual import(s) need review in Debug; files and import receipts were retained.')
+    return notices
+
+
+def persist_notices():
+    extra = state.load('arr-roots').get('notices')
+    if not isinstance(extra, list):
+        return []
+    return [str(item) for item in extra if str(item).strip()]
 
 
 def manual_imports(items, secrets):

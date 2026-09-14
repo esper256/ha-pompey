@@ -544,18 +544,6 @@ def handler_for(state: FakeState):
                         rows.append({"id": state.folder_ids[key], "path": folder_path})
                     return self._send(body=rows)
                 if path.endswith("/rootfolder") and method == "POST":
-                    new = str((body or {}).get("path") or "").rstrip("/")
-                    for folder_path in folders:
-                        old = str(folder_path or "").rstrip("/")
-                        if old and new and (
-                            new == old
-                            or new.startswith(old + "/")
-                            or old.startswith(new + "/")
-                        ):
-                            return self._send(
-                                400,
-                                {"message": f"Folder {new} overlaps {old}"},
-                            )
                     folders.append((body or {}).get("path"))
                     return self._send(201, body)
                 if "/rootfolder/" in path and method == "DELETE":
@@ -567,27 +555,7 @@ def handler_for(state: FakeState):
                     leftover = path_by_id.get(ident)
                     if leftover is None:
                         return self._send(404, {"error": path})
-                    titles = state.movies if role == "radarr" else state.series
-
-                    def uses_root(item) -> bool:
-                        assigned = str(item.get("rootFolderPath") or "").rstrip("/")
-                        if assigned:
-                            return assigned == leftover
-                        path = str(item.get("path") or "").rstrip("/")
-                        if not ws.in_root(path, leftover):
-                            return False
-                        return not any(
-                            ws.in_root(path, wanted)
-                            for wanted in folders
-                            if str(wanted).rstrip("/") not in {"", leftover}
-                        )
-
-                    still = [item for item in titles if uses_root(item)]
-                    if still:
-                        return self._send(
-                            400,
-                            {"message": f"Root folder {leftover} is in use"},
-                        )
+                    # Real Arr can drop a registration even when titles remain.
                     folders[:] = [
                         folder
                         for folder in folders
@@ -1540,6 +1508,7 @@ class WireStack(unittest.TestCase):
             {
                 "POMPEY_SECRETS": str(secrets_path),
                 "POMPEY_READY": str(ready),
+                "POMPEY_DATA": str(self.tmp / "data"),
                 "MEDIA_ROOT": str(self.tmp / "media"),
                 "MEDIA_MOVIES": "Movies/Not Kid Friendly",
                 "MEDIA_MOVIES_KID": "Movies/Kid Friendly",
@@ -1631,26 +1600,61 @@ class WireStack(unittest.TestCase):
         self.assertFalse((self.ready / "arr-wired").exists())
 
 
-    def test_leftover_parent_root_is_pruned_so_household_folders_can_wire(self):
-        media = os.environ["MEDIA_ROOT"]
-        leftover = f"{media}/Movies"
-        auto = f"{media}/Movies/By Rating"
+    def test_unused_legacy_root_is_unregistered_without_moving_media(self):
+        leftover = "/media/Movies"
         self.state.radarr_folders = [leftover]
         self.state.folder_ids = {leftover: 9}
         self.state.next_folder_id = 10
-        self.state.movies = [
-            {"id": 99, "title": "Old Title", "path": f"{leftover}/Old Title"},
-        ]
-        self.state.import_lists = [
-            {"id": 3, "rootFolderPath": leftover},
-        ]
+        self.state.movies = []
+        self.state.import_lists = []
         rc = ws.main()
         self.assertEqual(rc, 0)
-        self.assertNotIn(leftover, [str(p).rstrip("/") for p in self.state.radarr_folders])
-        self.assertIn(auto, [str(p).rstrip("/") for p in self.state.radarr_folders])
-        self.assertEqual(self.state.movies[0]["rootFolderPath"], auto)
-        self.assertEqual(self.state.import_lists[0]["rootFolderPath"], auto)
+        registered = [str(p).rstrip("/") for p in self.state.radarr_folders]
+        self.assertNotIn(leftover, registered)
+        media = os.environ["MEDIA_ROOT"]
+        self.assertIn(f"{media}/Movies/By Rating", registered)
+        self.assertFalse(any(call[1] == "PUT" and "/editor" in str(call[2]) for call in self.state.calls))
         self.assertTrue((self.ready / "wired").exists())
+
+    def test_occupied_legacy_root_stays_registered_and_household_roots_are_added(self):
+        leftover = "/media/Movies"
+        self.state.radarr_folders = [leftover]
+        self.state.folder_ids = {leftover: 9}
+        self.state.next_folder_id = 10
+        self.state.movies = [{"id": 99, "title": "Old Title", "path": f"{leftover}/Old Title"}]
+        self.state.import_lists = [{"id": 3, "rootFolderPath": leftover}]
+        rc = ws.main()
+        self.assertEqual(rc, 0)
+        registered = [str(p).rstrip("/") for p in self.state.radarr_folders]
+        self.assertIn(leftover, registered)
+        media = os.environ["MEDIA_ROOT"]
+        self.assertIn(f"{media}/Movies/By Rating", registered)
+        self.assertEqual(self.state.movies[0]["path"], f"{leftover}/Old Title")
+        self.assertFalse(any(call[1] == "PUT" and "/editor" in str(call[2]) for call in self.state.calls))
+        deletes = [
+            call
+            for call in self.state.calls
+            if call[0] == "radarr" and call[1] == "DELETE" and "/rootfolder/" in str(call[2])
+        ]
+        self.assertFalse(deletes)
+        import pompey_state as persist
+        self.assertTrue(any("still in use" in note for note in persist.load("arr-roots")["notices"]))
+
+    def test_unfamiliar_archive_root_stays_registered(self):
+        archive = f"{os.environ['MEDIA_ROOT']}/Archive"
+        self.state.radarr_folders = [archive]
+        self.state.folder_ids = {archive: 9}
+        self.state.next_folder_id = 10
+        self.state.movies = []
+        rc = ws.main()
+        self.assertEqual(rc, 0)
+        registered = [str(p).rstrip("/") for p in self.state.radarr_folders]
+        self.assertIn(archive, registered)
+        self.assertFalse(
+            any(call[1] == "DELETE" and "/rootfolder/" in str(call[2]) and call[0] == "radarr" for call in self.state.calls)
+        )
+        import pompey_state as persist
+        self.assertTrue(any("Archive" in note for note in persist.load("arr-roots")["notices"]))
 
 
     def test_wires_without_source_url(self):
