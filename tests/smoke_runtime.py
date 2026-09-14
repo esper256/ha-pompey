@@ -15,6 +15,8 @@ import engine_manager as engines
 
 def main():
     manifest=json.loads(engines.manifest_path().read_text())
+    # Supervisor provides /data. A local image run does not.
+    Path('/data').mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix='runtime-',dir='/data') as temp:
         root=Path(temp);procs=[];logs=[]
         try:
