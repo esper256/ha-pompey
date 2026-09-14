@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Write persistent engine configuration before services start."""
 import json, os, re, sys
+from pompey_common import after_download, simultaneous_downloads
 
 secrets = json.load(open(sys.argv[1], encoding="utf-8"))
 media = sys.argv[2].rstrip("/")
@@ -113,25 +114,6 @@ complete = f"{media}/downloads/complete"
 
 
 log_dir = f"{config}/qBittorrent/logs"
-
-
-def after_download_policy() -> str:
-    raw = (os.environ.get("AFTER_DOWNLOAD") or "stop_sharing").strip().lower()
-    raw = raw.replace("-", "_").replace(" ", "_")
-    if raw in {"share_to_ratio", "ratio"}:
-        return "share_to_ratio"
-    if raw in {"share_one_day", "one_day"}:
-        return "share_one_day"
-    return "stop_sharing"
-
-
-def simultaneous_downloads() -> int:
-    raw = (os.environ.get("SIMULTANEOUS_DOWNLOADS") or "8").strip()
-    try:
-        number = int(raw)
-    except ValueError:
-        number = 8
-    return max(1, min(number, 20))
 
 
 def qbit_queue_settings(active: int) -> dict:
@@ -280,7 +262,7 @@ def patch_qbit_paths(text: str) -> str:
     return text
 
 
-seed = qbit_seed_settings(after_download_policy())
+seed = qbit_seed_settings(after_download())
 seed[r"Session\DisableAutoTMMByDefault"] = "true"
 queue = qbit_queue_settings(simultaneous_downloads())
 # Locals: f-string expressions cannot contain backslashes on older Python.

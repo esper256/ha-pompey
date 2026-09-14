@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.3
+
+- Remove leftover Arr library roots from older installs so Seerr only lists household folders.
+
 ## 0.3.2
 
 - Prefer complete TV season packs and allow smaller x265 HD releases.

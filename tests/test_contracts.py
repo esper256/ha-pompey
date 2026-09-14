@@ -481,6 +481,23 @@ class RoutingContracts(Sandbox):
         self.assertEqual(state.load('routing-movie'),{})
 
 
+class LeftoverRootContracts(Sandbox):
+    def test_parent_leftover_does_not_move_titles_already_on_household_roots(self):
+        leftover='/media/Movies'
+        wanted={'/media/Movies/By Rating','/media/Movies/Not Kid Friendly','/media/Movies/Kid Friendly'}
+        self.assertFalse(wire_stack.title_on_leftover_root('/media/Movies/By Rating/Title', leftover, wanted))
+        self.assertTrue(wire_stack.title_on_leftover_root('/media/Movies/Old Title', leftover, wanted))
+        self.assertEqual(
+            wire_stack.leftover_root_dest('/media/Kid Friendly Movies', '/kid', '/gen', '/auto'),
+            '/kid',
+        )
+        self.assertEqual(
+            wire_stack.leftover_root_dest('/media/TV/Not Kid Friendly', '/kid', '/gen', '/auto'),
+            '/gen',
+        )
+        self.assertEqual(wire_stack.leftover_root_dest('/media/TV', '/kid', '/gen', '/auto'), '/auto')
+
+
 class ConfigurationContracts(Sandbox):
     def test_library_traversal_and_overlap_rejected(self):
         import pompey_config

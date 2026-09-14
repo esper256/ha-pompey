@@ -544,6 +544,18 @@ def handler_for(state: FakeState):
                         rows.append({"id": state.folder_ids[key], "path": folder_path})
                     return self._send(body=rows)
                 if path.endswith("/rootfolder") and method == "POST":
+                    new = str((body or {}).get("path") or "").rstrip("/")
+                    for folder_path in folders:
+                        old = str(folder_path or "").rstrip("/")
+                        if old and new and (
+                            new == old
+                            or new.startswith(old + "/")
+                            or old.startswith(new + "/")
+                        ):
+                            return self._send(
+                                400,
+                                {"message": f"Folder {new} overlaps {old}"},
+                            )
                     folders.append((body or {}).get("path"))
                     return self._send(201, body)
                 if "/rootfolder/" in path and method == "DELETE":
@@ -1618,6 +1630,28 @@ class WireStack(unittest.TestCase):
             ws.main()
         self.assertFalse((self.ready / "wired").exists())
         self.assertFalse((self.ready / "arr-wired").exists())
+
+
+    def test_leftover_parent_root_is_pruned_so_household_folders_can_wire(self):
+        media = os.environ["MEDIA_ROOT"]
+        leftover = f"{media}/Movies"
+        auto = f"{media}/Movies/By Rating"
+        self.state.radarr_folders = [leftover]
+        self.state.folder_ids = {leftover: 9}
+        self.state.next_folder_id = 10
+        self.state.movies = [
+            {"id": 99, "title": "Old Title", "path": f"{leftover}/Old Title"},
+        ]
+        self.state.import_lists = [
+            {"id": 3, "rootFolderPath": leftover},
+        ]
+        rc = ws.main()
+        self.assertEqual(rc, 0)
+        self.assertNotIn(leftover, [str(p).rstrip("/") for p in self.state.radarr_folders])
+        self.assertIn(auto, [str(p).rstrip("/") for p in self.state.radarr_folders])
+        self.assertEqual(self.state.movies[0]["rootFolderPath"], auto)
+        self.assertEqual(self.state.import_lists[0]["rootFolderPath"], auto)
+        self.assertTrue((self.ready / "wired").exists())
 
 
     def test_wires_without_source_url(self):

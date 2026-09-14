@@ -9,32 +9,23 @@ import time
 import urllib.request
 import urllib.error
 import urllib.parse
-import shutil
 from pompey_common import (
-    secrets_path,
     ready_dir,
     wait_tries,
     wait_sleep,
     env,
     after_download,
-    simultaneous_downloads,
-    qbit_queue_preferences,
-    qbit_set_preferences_url,
     apply_qbit_queue,
     as_list,
-    media_root,
-    library_dir,
     movies_dir,
     movies_kid_dir,
     tv_dir,
     tv_kid_dir,
-    sibling_auto_dir,
     movies_auto_dir,
     tv_auto_dir,
     downloads_complete,
     downloads_manual,
     downloads_recycle,
-    resolved_path,
     paths_overlap,
     plex_url,
     plex_token,
@@ -47,25 +38,20 @@ from pompey_common import (
     prowlarr_url,
     prowlarr_arr_url,
     seerr_url,
-    seerr_config_dir,
     seerr_api_key_from_disk,
     seerr_permission_update,
     log,
-    _quiet_path,
-    _load_quiet,
-    _save_quiet,
     log_if_new,
     mark_status,
     load_secrets,
     http,
     wait_http,
     arr_headers,
-    AUTO_FOLDER,
     SEERR_HOUSEHOLD_PERMS,
-    SEERR_REQUEST_ADVANCED
+    SEERR_REQUEST_ADVANCED,
 )
 
-def ensure_root_folder(base: str, api_key: str, path: str) -> None:
+def ensure_root_folder(base: str, api_key: str, path: str, *, required: bool = True) -> None:
     if paths_overlap(path, downloads_complete()) or paths_overlap(path, downloads_manual()):
         raise ValueError(f"Arr root overlaps a download folder: {path}")
     existing = as_list(http("GET", f"{base}/rootfolder", headers=arr_headers(api_key)))
@@ -76,7 +62,10 @@ def ensure_root_folder(base: str, api_key: str, path: str) -> None:
     except RuntimeError as exc:
         # A leftover parent root (0.2.20 `/media/TV`) can block a nested
         # household folder until prune_root_folders deletes it.
-        raise RuntimeError(f"Could not create root folder {path}") from exc
+        if required:
+            raise RuntimeError(f"Could not create root folder {path}") from exc
+        log(f"root folder {path}: {exc}", "WARNING")
+        return
     log(f"root folder {path}")
 
 
@@ -87,10 +76,143 @@ def wanted_arr_roots(kind: str) -> tuple[str, str, str]:
     return movies_auto_dir(), movies_dir(), movies_kid_dir()
 
 
+def in_root(path: str, root: str) -> bool:
+    path = (path or "").rstrip("/")
+    root = (root or "").rstrip("/")
+    return bool(root) and (path == root or path.startswith(root + "/"))
+
+
+def leftover_root_dest(path: str, kid: str, gen: str, auto: str) -> str:
+    """Map a stale Arr root onto today's kid / general / By Rating dest.
+
+    0.2.20 used `/media` + `TV` / `Kid Friendly TV` (and `Movies` /
+    `Kid Friendly Movies`). 0.2.21 moved to `/media/dlna` + sibling
+    Kid / Not Kid folders. Seerr lists every Arr root, so those old
+    paths stay in the request dropdown until we delete them.
+    """
+    low = (path or "").rstrip("/").lower()
+    if "not kid" in low:
+        return gen
+    if "kid friendly" in low:
+        return kid
+    return auto
+
+
+def title_on_leftover_root(path: str, leftover: str, wanted: set[str]) -> bool:
+    """True when a title still lives on a stale root, not a current one.
+
+    `/media/Movies/By Rating/Title` is under leftover `/media/Movies`
+    but also under the wanted By Rating root — leave it alone.
+    """
+    if not in_root(path, leftover):
+        return False
+    return not any(in_root(path, root) for root in wanted)
+
+
+def rehome_titles_off_root(
+    base: str, api_key: str, kind: str, leftover: str, dest: str, wanted: set[str]
+) -> int:
+    collection = arr_title_collection(kind)
+    try:
+        rows = as_list(http("GET", f"{base}/{collection}", headers=arr_headers(api_key)))
+    except RuntimeError as exc:
+        log(f"{kind} titles on leftover root {leftover}: {exc}", "WARNING")
+        return 0
+    ids = []
+    for item in rows:
+        if not title_on_leftover_root(title_library_path(item), leftover, wanted):
+            continue
+        tid = title_id_of(item)
+        if tid is not None:
+            ids.append(tid)
+    if not ids:
+        return 0
+    id_key = "movieIds" if kind == "radarr" else "seriesIds"
+    try:
+        http(
+            "PUT",
+            f"{base}/{collection}/editor",
+            {id_key: ids, "rootFolderPath": dest, "moveFiles": True},
+            headers=arr_headers(api_key),
+        )
+        return len(ids)
+    except RuntimeError as exc:
+        log(f"{kind} could not move {len(ids)} title(s) off {leftover}: {exc}", "WARNING")
+        return 0
+
+
+def rehome_import_lists_off_root(
+    base: str, api_key: str, kind: str, leftover: str, dest: str
+) -> int:
+    try:
+        rows = as_list(http("GET", f"{base}/importlist", headers=arr_headers(api_key)))
+    except RuntimeError:
+        return 0
+    moved = 0
+    leftover = leftover.rstrip("/")
+    dest = dest.rstrip("/")
+    for item in rows:
+        have = (item.get("rootFolderPath") or "").rstrip("/")
+        if have != leftover:
+            continue
+        tid = title_id_of(item)
+        if tid is None:
+            continue
+        payload = json.loads(json.dumps(item))
+        payload["rootFolderPath"] = dest
+        try:
+            http(
+                "PUT",
+                f"{base}/importlist/{tid}",
+                payload,
+                headers=arr_headers(api_key),
+            )
+            moved += 1
+        except RuntimeError as exc:
+            log(f"{kind} could not move import list {tid} off {leftover}: {exc}", "WARNING")
+    return moved
+
+
+def prune_root_folders(base: str, api_key: str, kind: str) -> None:
+    """Seerr lists every Arr root. Keep only By Rating + Kid + Not Kid."""
+    auto, gen, kid = wanted_arr_roots(kind)
+    wanted = {auto.rstrip("/"), gen.rstrip("/"), kid.rstrip("/")}
+    try:
+        existing = as_list(http("GET", f"{base}/rootfolder", headers=arr_headers(api_key)))
+    except RuntimeError as exc:
+        log(f"{kind} root folders: {exc}", "WARNING")
+        return
+    for item in existing:
+        path = (item.get("path") or "").rstrip("/")
+        ident = item.get("id")
+        if not path or path in wanted:
+            continue
+        dest = leftover_root_dest(path, kid, gen, auto)
+        moved = rehome_titles_off_root(base, api_key, kind, path, dest, wanted)
+        lists = rehome_import_lists_off_root(base, api_key, kind, path, dest)
+        if moved:
+            log(f"{kind} moved {moved} title(s) from leftover root {path} -> {dest}")
+        if lists:
+            log(f"{kind} moved {lists} import list(s) from leftover root {path} -> {dest}")
+        if ident is None:
+            log(f"{kind} leftover root {path} has no id; leaving it", "WARNING")
+            continue
+        try:
+            http(
+                "DELETE",
+                f"{base}/rootfolder/{ident}",
+                headers=arr_headers(api_key),
+            )
+            log(f"removed leftover root folder {path}")
+        except RuntimeError as exc:
+            log(f"could not remove root folder {path}: {exc}", "WARNING")
+
+
 def sync_root_folders(base: str, api_key: str, kind: str) -> None:
     auto, gen, kid = wanted_arr_roots(kind)
     for path in (auto, gen, kid):
-        ensure_root_folder(base, api_key, path)
+        ensure_root_folder(base, api_key, path, required=False)
+    prune_root_folders(base, api_key, kind)
     for path in (auto, gen, kid):
         ensure_root_folder(base, api_key, path)
 
@@ -607,11 +729,6 @@ def ensure_indexer(prowlarr: str, pkey: str) -> None:
     log("added source")
 
 
-def sync_prowlarr_indexers(prowlarr: str, pkey: str) -> None:
-    """Prowlarr owns ongoing indexer sync and the user's enable/search flags."""
-    return
-
-
 def qbit_category(name: str, save_path: str) -> None:
     data = urllib.parse.urlencode({"category": name, "savePath": save_path}).encode()
     try:
@@ -986,7 +1103,6 @@ def main() -> int:
     ensure_prowlarr_app(prowlarr, pk, "Sonarr", "Sonarr", sonarr_url(), sk)
     ensure_prowlarr_app(prowlarr, pk, "Radarr", "Radarr", radarr_url(), rk)
     ensure_indexer(prowlarr, pk)
-    sync_prowlarr_indexers(prowlarr, pk)
 
     sl = language_profile_id(sonarr, sk)
 

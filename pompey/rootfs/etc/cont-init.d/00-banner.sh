@@ -14,7 +14,7 @@ if [[ ! -f "${POMPEY_READY}/bootstrap-resolv.conf" ]]; then
   cp "${POMPEY_RESOLV}" "${POMPEY_READY}/bootstrap-resolv.conf"
 fi
 
-bashio::log.info "Pompey ${BUILD_VERSION:-0.3.2} starting"
+bashio::log.info "Pompey ${BUILD_VERSION:-0.3.3} starting"
 pompey_status.py vpn "Starting" 5 || true
 
 mkdir -p "${POMPEY_CONFIG}/wireguard" "${POMPEY_WG_ETC}" "${POMPEY_VPN_TMP}" "${POMPEY_NGINX_RUN}"
