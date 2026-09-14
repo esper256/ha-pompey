@@ -68,6 +68,7 @@ class RealSeerrWire(unittest.TestCase):
             {
                 "POMPEY_SECRETS": str(self.tmp / "secrets.json"),
                 "POMPEY_READY": str(ready),
+                "POMPEY_DATA": str(self.tmp / "data"),
                 "MEDIA_ROOT": str(self.tmp / "media"),
                 "PLEX_URL": "",
                 "PLEX_TOKEN": "",

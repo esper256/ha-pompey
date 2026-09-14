@@ -1049,7 +1049,10 @@ def main() -> int:
     qbit_category("prowlarr", manual)
     notices = sync_root_folders(sonarr, sk, "sonarr")
     notices += sync_root_folders(radarr, rk, "radarr")
-    persist.save("arr-roots", {"notices": notices})
+    try:
+        persist.save("arr-roots", {"notices": notices})
+    except OSError as exc:
+        log(f"could not store extra library-folder notices: {exc}", "WARNING")
     ensure_download_client(sonarr, sk, secrets, "sonarr")
     ensure_download_client(radarr, rk, secrets, "radarr")
     ensure_prowlarr_download_client(prowlarr, pk, secrets)
