@@ -8,7 +8,7 @@ import sys
 import time
 import urllib.request
 import pompey_state as state
-from pompey_common import as_list, library_dir, media_root, movies_auto_dir, movies_dir, movies_kid_dir, radarr_url, secrets_path, sibling_auto_dir, sonarr_url, tv_auto_dir, tv_dir, tv_kid_dir
+from pompey_common import arr_api_root, as_list, movies_auto_dir, movies_dir, movies_kid_dir, radarr_url, secrets_path, sonarr_url, tv_auto_dir, tv_dir, tv_kid_dir
 
 
 AUTO_FOLDER = "By Rating"
@@ -157,19 +157,6 @@ def route_library(
                 log(f"{label} {title} -> {want} ({cert or 'unknown'})")
         except Exception as exc:  # noqa: BLE001
             raise RuntimeError(f"{label} routing failed for {len(ids)} title(s)") from exc
-
-
-def arr_api_root(base: str, api_key: str) -> str:
-    """Prefer /api/v3; use /api/v4 when v3 is gone."""
-    host = base.rstrip("/")
-    for ver in ("v3", "v4"):
-        root = f"{host}/api/{ver}"
-        try:
-            http_json("GET", f"{root}/qualityprofile", headers=headers(api_key))
-            return root
-        except Exception:
-            continue
-    return f"{host}/api/v3"
 
 
 def route_movies(key: str) -> None:

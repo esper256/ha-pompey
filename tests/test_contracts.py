@@ -481,6 +481,53 @@ class RoutingContracts(Sandbox):
         self.assertEqual(state.load('routing-movie'),{})
 
 
+class LeftoverRootContracts(Sandbox):
+    def test_known_legacy_names_are_narrow(self):
+        wanted={api.movies_auto_dir(), api.movies_dir(), api.movies_kid_dir()}
+        self.assertTrue(wire_stack.is_known_legacy_root('/media/Movies', wanted))
+        self.assertTrue(wire_stack.is_known_legacy_root('/media/Kid Friendly Movies', wanted))
+        self.assertFalse(wire_stack.is_known_legacy_root(str(Path(api.media_root())/'Archive'), wanted))
+        self.assertFalse(wire_stack.is_known_legacy_root(api.movies_dir(), wanted))
+
+    def test_titles_on_household_roots_do_not_occupy_a_parent_legacy_root(self):
+        leftover='/media/Movies'
+        registered=[leftover, '/media/Movies/By Rating', '/media/Movies/Not Kid Friendly']
+        self.assertFalse(wire_stack.root_is_occupied(leftover, [{'path':'/media/Movies/By Rating/Title'}], [], registered))
+        self.assertTrue(wire_stack.root_is_occupied(leftover, [{'path':'/media/Movies/Old Title'}], [], registered))
+        self.assertTrue(wire_stack.root_is_occupied(leftover, [], [{'rootFolderPath':leftover}], registered))
+
+    def test_occupied_legacy_root_is_not_deleted_even_if_arr_would_allow_it(self):
+        folders=[{'id':9,'path':'/media/Movies'}]
+        deletes=[]
+        def http(method,url,body=None,**kw):
+            if method=='DELETE':
+                deletes.append(url); folders.clear(); return None
+            if url.endswith('/rootfolder'): return folders
+            if url.endswith('/movie'): return [{'id':1,'path':'/media/Movies/Old Title'}]
+            if url.endswith('/importlist'): return []
+            return []
+        with patch.object(wire_stack,'http',side_effect=http):
+            notices=wire_stack.prune_root_folders('http://fake','k','radarr')
+        self.assertEqual(deletes,[])
+        self.assertEqual(folders,[{'id':9,'path':'/media/Movies'}])
+        self.assertTrue(any('still in use' in note for note in notices))
+        self.assertFalse(any('editor' in url for url in deletes))
+
+    def test_unused_legacy_root_is_unregistered(self):
+        folders=[{'id':9,'path':'/media/Movies'}]
+        def http(method,url,body=None,**kw):
+            if method=='DELETE':
+                folders.clear(); return None
+            if url.endswith('/rootfolder'): return folders
+            if url.endswith('/movie'): return []
+            if url.endswith('/importlist'): return []
+            return []
+        with patch.object(wire_stack,'http',side_effect=http):
+            notices=wire_stack.prune_root_folders('http://fake','k','radarr')
+        self.assertEqual(folders,[])
+        self.assertEqual(notices,[])
+
+
 class ConfigurationContracts(Sandbox):
     def test_library_traversal_and_overlap_rejected(self):
         import pompey_config

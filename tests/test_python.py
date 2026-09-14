@@ -555,28 +555,7 @@ def handler_for(state: FakeState):
                     leftover = path_by_id.get(ident)
                     if leftover is None:
                         return self._send(404, {"error": path})
-                    titles = state.movies if role == "radarr" else state.series
-                    still = [
-                        item
-                        for item in titles
-                        if ws.in_root(
-                            str(item.get("path") or item.get("rootFolderPath") or ""),
-                            leftover,
-                        )
-                        and not any(
-                            ws.in_root(
-                                str(item.get("path") or item.get("rootFolderPath") or ""),
-                                wanted,
-                            )
-                            for wanted in folders
-                            if str(wanted).rstrip("/") != leftover
-                        )
-                    ]
-                    if still:
-                        return self._send(
-                            400,
-                            {"message": f"Root folder {leftover} is in use"},
-                        )
+                    # Real Arr can drop a registration even when titles remain.
                     folders[:] = [
                         folder
                         for folder in folders
@@ -1529,6 +1508,7 @@ class WireStack(unittest.TestCase):
             {
                 "POMPEY_SECRETS": str(secrets_path),
                 "POMPEY_READY": str(ready),
+                "POMPEY_DATA": str(self.tmp / "data"),
                 "MEDIA_ROOT": str(self.tmp / "media"),
                 "MEDIA_MOVIES": "Movies/Not Kid Friendly",
                 "MEDIA_MOVIES_KID": "Movies/Kid Friendly",
@@ -1618,6 +1598,63 @@ class WireStack(unittest.TestCase):
             ws.main()
         self.assertFalse((self.ready / "wired").exists())
         self.assertFalse((self.ready / "arr-wired").exists())
+
+
+    def test_unused_legacy_root_is_unregistered_without_moving_media(self):
+        leftover = "/media/Movies"
+        self.state.radarr_folders = [leftover]
+        self.state.folder_ids = {leftover: 9}
+        self.state.next_folder_id = 10
+        self.state.movies = []
+        self.state.import_lists = []
+        rc = ws.main()
+        self.assertEqual(rc, 0)
+        registered = [str(p).rstrip("/") for p in self.state.radarr_folders]
+        self.assertNotIn(leftover, registered)
+        media = os.environ["MEDIA_ROOT"]
+        self.assertIn(f"{media}/Movies/By Rating", registered)
+        self.assertFalse(any(call[1] == "PUT" and "/editor" in str(call[2]) for call in self.state.calls))
+        self.assertTrue((self.ready / "wired").exists())
+
+    def test_occupied_legacy_root_stays_registered_and_household_roots_are_added(self):
+        leftover = "/media/Movies"
+        self.state.radarr_folders = [leftover]
+        self.state.folder_ids = {leftover: 9}
+        self.state.next_folder_id = 10
+        self.state.movies = [{"id": 99, "title": "Old Title", "path": f"{leftover}/Old Title"}]
+        self.state.import_lists = [{"id": 3, "rootFolderPath": leftover}]
+        rc = ws.main()
+        self.assertEqual(rc, 0)
+        registered = [str(p).rstrip("/") for p in self.state.radarr_folders]
+        self.assertIn(leftover, registered)
+        media = os.environ["MEDIA_ROOT"]
+        self.assertIn(f"{media}/Movies/By Rating", registered)
+        self.assertEqual(self.state.movies[0]["path"], f"{leftover}/Old Title")
+        self.assertFalse(any(call[1] == "PUT" and "/editor" in str(call[2]) for call in self.state.calls))
+        deletes = [
+            call
+            for call in self.state.calls
+            if call[0] == "radarr" and call[1] == "DELETE" and "/rootfolder/" in str(call[2])
+        ]
+        self.assertFalse(deletes)
+        import pompey_state as persist
+        self.assertTrue(any("still in use" in note for note in persist.load("arr-roots")["notices"]))
+
+    def test_unfamiliar_archive_root_stays_registered(self):
+        archive = f"{os.environ['MEDIA_ROOT']}/Archive"
+        self.state.radarr_folders = [archive]
+        self.state.folder_ids = {archive: 9}
+        self.state.next_folder_id = 10
+        self.state.movies = []
+        rc = ws.main()
+        self.assertEqual(rc, 0)
+        registered = [str(p).rstrip("/") for p in self.state.radarr_folders]
+        self.assertIn(archive, registered)
+        self.assertFalse(
+            any(call[1] == "DELETE" and "/rootfolder/" in str(call[2]) and call[0] == "radarr" for call in self.state.calls)
+        )
+        import pompey_state as persist
+        self.assertTrue(any("Archive" in note for note in persist.load("arr-roots")["notices"]))
 
 
     def test_wires_without_source_url(self):

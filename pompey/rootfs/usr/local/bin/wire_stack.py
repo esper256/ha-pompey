@@ -9,33 +9,25 @@ import time
 import urllib.request
 import urllib.error
 import urllib.parse
-import shutil
 from pompey_common import (
-    secrets_path,
     ready_dir,
     wait_tries,
     wait_sleep,
     env,
     after_download,
-    simultaneous_downloads,
-    qbit_queue_preferences,
-    qbit_set_preferences_url,
     apply_qbit_queue,
     as_list,
-    media_root,
-    library_dir,
     movies_dir,
     movies_kid_dir,
     tv_dir,
     tv_kid_dir,
-    sibling_auto_dir,
     movies_auto_dir,
     tv_auto_dir,
     downloads_complete,
     downloads_manual,
     downloads_recycle,
-    resolved_path,
     paths_overlap,
+    media_root,
     plex_url,
     plex_token,
     indexer_url,
@@ -47,23 +39,20 @@ from pompey_common import (
     prowlarr_url,
     prowlarr_arr_url,
     seerr_url,
-    seerr_config_dir,
     seerr_api_key_from_disk,
     seerr_permission_update,
     log,
-    _quiet_path,
-    _load_quiet,
-    _save_quiet,
     log_if_new,
     mark_status,
     load_secrets,
     http,
     wait_http,
     arr_headers,
-    AUTO_FOLDER,
     SEERR_HOUSEHOLD_PERMS,
-    SEERR_REQUEST_ADVANCED
+    SEERR_REQUEST_ADVANCED,
 )
+import pompey_state as persist
+
 
 def ensure_root_folder(base: str, api_key: str, path: str) -> None:
     if paths_overlap(path, downloads_complete()) or paths_overlap(path, downloads_manual()):
@@ -74,8 +63,6 @@ def ensure_root_folder(base: str, api_key: str, path: str) -> None:
     try:
         http("POST", f"{base}/rootfolder", {"path": path}, headers=arr_headers(api_key))
     except RuntimeError as exc:
-        # A leftover parent root (0.2.20 `/media/TV`) can block a nested
-        # household folder until prune_root_folders deletes it.
         raise RuntimeError(f"Could not create root folder {path}") from exc
     log(f"root folder {path}")
 
@@ -87,12 +74,111 @@ def wanted_arr_roots(kind: str) -> tuple[str, str, str]:
     return movies_auto_dir(), movies_dir(), movies_kid_dir()
 
 
-def sync_root_folders(base: str, api_key: str, kind: str) -> None:
+LEGACY_ROOT_NAMES = {"tv", "movies", "kid friendly tv", "kid friendly movies"}
+
+
+def in_root(path: str, root: str) -> bool:
+    path = (path or "").rstrip("/")
+    root = (root or "").rstrip("/")
+    return bool(root) and (path == root or path.startswith(root + "/"))
+
+
+def is_known_legacy_root(path: str, wanted: set[str]) -> bool:
+    """True for unused 0.2.20 / 0.2.21 Pompey names, not an arbitrary extra library."""
+    path = (path or "").rstrip("/")
+    if not path or path in wanted:
+        return False
+    name = path.rsplit("/", 1)[-1].lower()
+    if name not in LEGACY_ROOT_NAMES:
+        return False
+    parent = path.rsplit("/", 1)[0] if "/" in path else ""
+    allowed = {media_root().rstrip("/"), "/media"}
+    for household in wanted:
+        folder = household.rstrip("/")
+        if "/" in folder:
+            allowed.add(folder.rsplit("/", 1)[0])
+    return parent in allowed
+
+
+def root_is_occupied(path: str, titles: list, lists: list, registered: list[str]) -> bool:
+    leftover = (path or "").rstrip("/")
+    if not leftover:
+        return False
+    others = [item.rstrip("/") for item in registered if item.rstrip("/") and item.rstrip("/") != leftover]
+    for item in titles:
+        assigned = str(item.get("rootFolderPath") or "").rstrip("/")
+        if assigned == leftover:
+            return True
+        if assigned:
+            continue
+        loc = title_library_path(item)
+        if loc and in_root(loc, leftover) and not any(in_root(loc, other) for other in others):
+            return True
+    for item in lists:
+        if str(item.get("rootFolderPath") or "").rstrip("/") == leftover:
+            return True
+    return False
+
+
+def prune_root_folders(base: str, api_key: str, kind: str) -> list[str]:
+    """Unregister empty historical Pompey roots. Never move media or drop a used library."""
+    auto, gen, kid = wanted_arr_roots(kind)
+    wanted = {auto.rstrip("/"), gen.rstrip("/"), kid.rstrip("/")}
+    notices: list[str] = []
+    try:
+        existing = as_list(http("GET", f"{base}/rootfolder", headers=arr_headers(api_key)))
+    except RuntimeError as exc:
+        log(f"{kind} root folders: {exc}", "WARNING")
+        return [f"{kind} library folders could not be checked; extra roots were left registered"]
+    registered = [str(item.get("path") or "").rstrip("/") for item in existing]
+    try:
+        titles = as_list(
+            http("GET", f"{base}/{arr_title_collection(kind)}", headers=arr_headers(api_key))
+        )
+        lists = as_list(http("GET", f"{base}/importlist", headers=arr_headers(api_key)))
+    except RuntimeError as exc:
+        log(f"{kind} leftover roots: {exc}", "WARNING")
+        return [f"{kind} library contents could not be checked; extra roots were left registered"]
+    for item in existing:
+        path = (item.get("path") or "").rstrip("/")
+        ident = item.get("id")
+        if not path or path in wanted:
+            continue
+        label = "movie" if kind == "radarr" else "TV"
+        if not is_known_legacy_root(path, wanted):
+            msg = f"Extra {label} library folder left registered: {path}"
+            log(msg, "WARNING")
+            notices.append(msg)
+            continue
+        if root_is_occupied(path, titles, lists, registered):
+            msg = f"Historical {label} library folder still in use, left registered: {path}"
+            log(msg, "WARNING")
+            notices.append(msg)
+            continue
+        if ident is None:
+            msg = f"Historical {label} library folder has no id, left registered: {path}"
+            log(msg, "WARNING")
+            notices.append(msg)
+            continue
+        try:
+            http(
+                "DELETE",
+                f"{base}/rootfolder/{ident}",
+                headers=arr_headers(api_key),
+            )
+            log(f"removed unused leftover root folder {path}")
+        except RuntimeError as extra:
+            msg = f"Could not unregister unused {label} library folder {path}"
+            log(f"{msg}: {extra}", "WARNING")
+            notices.append(msg)
+    return notices
+
+
+def sync_root_folders(base: str, api_key: str, kind: str) -> list[str]:
     auto, gen, kid = wanted_arr_roots(kind)
     for path in (auto, gen, kid):
         ensure_root_folder(base, api_key, path)
-    for path in (auto, gen, kid):
-        ensure_root_folder(base, api_key, path)
+    return prune_root_folders(base, api_key, kind)
 
 
 def schema_impl(schema, name: str):
@@ -382,10 +468,6 @@ def arr_title_collection(kind: str) -> str:
     return "movie" if kind == "radarr" else "series"
 
 
-def title_id_of(item: dict) -> int | None:
-    return profile_id_of(item)
-
-
 def recyclarr_marker() -> str:
     return os.path.join(ready_dir(), "recyclarr")
 
@@ -605,11 +687,6 @@ def ensure_indexer(prowlarr: str, pkey: str) -> None:
     indexer["tags"] = []
     http("POST", f"{prowlarr}/api/v1/indexer", indexer, headers=arr_headers(pkey))
     log("added source")
-
-
-def sync_prowlarr_indexers(prowlarr: str, pkey: str) -> None:
-    """Prowlarr owns ongoing indexer sync and the user's enable/search flags."""
-    return
 
 
 def qbit_category(name: str, save_path: str) -> None:
@@ -970,8 +1047,9 @@ def main() -> int:
     qbit_category("sonarr", complete)
     qbit_category("radarr", complete)
     qbit_category("prowlarr", manual)
-    sync_root_folders(sonarr, sk, "sonarr")
-    sync_root_folders(radarr, rk, "radarr")
+    notices = sync_root_folders(sonarr, sk, "sonarr")
+    notices += sync_root_folders(radarr, rk, "radarr")
+    persist.save("arr-roots", {"notices": notices})
     ensure_download_client(sonarr, sk, secrets, "sonarr")
     ensure_download_client(radarr, rk, secrets, "radarr")
     ensure_prowlarr_download_client(prowlarr, pk, secrets)
@@ -986,7 +1064,6 @@ def main() -> int:
     ensure_prowlarr_app(prowlarr, pk, "Sonarr", "Sonarr", sonarr_url(), sk)
     ensure_prowlarr_app(prowlarr, pk, "Radarr", "Radarr", radarr_url(), rk)
     ensure_indexer(prowlarr, pk)
-    sync_prowlarr_indexers(prowlarr, pk)
 
     sl = language_profile_id(sonarr, sk)
 

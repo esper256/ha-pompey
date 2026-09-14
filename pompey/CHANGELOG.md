@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.3
+
+- Unregister unused historical Arr library folders from older installs. Occupied or extra folders stay registered and are reported.
+
 ## 0.3.2
 
 - Prefer complete TV season packs and allow smaller x265 HD releases.

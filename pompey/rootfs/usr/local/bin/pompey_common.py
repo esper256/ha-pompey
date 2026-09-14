@@ -1,39 +1,15 @@
 """Shared paths, HTTP transport and durable configuration helpers."""
 
-
 from __future__ import annotations
 
-
-import datetime
-
-
 import json
-
-
 import os
-
-
-import re
-
-
 import shutil
-
-
 import subprocess
-
-
 import sys
-
-
 import time
-
-
 import urllib.error
-
-
 import urllib.parse
-
-
 import urllib.request
 
 
@@ -308,7 +284,9 @@ def seerr_permission_update(user: dict) -> dict | None:
 
 def log(msg: str, level: str = "INFO") -> None:
     stamp = time.strftime("%H:%M:%S")
-    print(f"[{stamp}] {level}: [wire_stack.py] {msg}", flush=True)
+    caller = sys._getframe(1)
+    source = os.path.basename(caller.f_globals.get("__file__", "pompey"))
+    print(f"[{stamp}] {level}: [{source}] {msg}", flush=True)
 
 
 def _quiet_path() -> str:
