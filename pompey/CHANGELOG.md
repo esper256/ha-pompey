@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.1
+
+- Fix VPN startup when restoring DNS settings on Home Assistant OS.
+- Remove duplicate MIME warnings from troubleshooting pages.
+- Shorten release notes and sidebar instructions.
+
 ## 0.3.0
 
 - Support compatible WireGuard VPN providers and optional port forwarding.

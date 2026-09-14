@@ -69,7 +69,8 @@ def _filters(mount: str) -> str:
     prefix = f"$http_x_ingress_path/debug/{mount}"
     lines = [
         "    sub_filter_once off;",
-        "    sub_filter_types text/html text/css application/javascript "
+        # nginx always includes text/html; repeating it produces a warning.
+        "    sub_filter_types text/css application/javascript "
         "application/json text/javascript application/xhtml+xml;",
         """    sub_filter 'src="/' 'src="./';""",
         """    sub_filter 'href="/' 'href="./';""",

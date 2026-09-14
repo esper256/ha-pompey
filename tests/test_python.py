@@ -2243,6 +2243,7 @@ class DebugIngress(unittest.TestCase):
                     time.sleep(0.05)
             else:
                 self.fail("nginx did not accept connections")
+            self.assertNotIn('duplicate MIME type', (work / 'error.log').read_text())
             self.assertIn('src="./index-02e24635035ed28fd7d3.js"', html)
             self.assertIn('src="./Content/app.js"', html)
             self.assertNotIn('src="/index-', html)

@@ -38,6 +38,23 @@ class Boundaries(unittest.TestCase):
         self.assertFalse((self.root/'ready/vpn-applied').exists())
         self.assertFalse((self.root/'resolv').exists())
 
+    def test_vpn_preflight_writes_through_resolver_symlink(self):
+        ready=self.root/'ready';ready.mkdir()
+        content='nameserver 172.30.32.3\n'
+        (ready/'bootstrap-resolv.conf').write_text(content)
+        resolver=self.root/'resolv';target=self.root/'managed-resolver'
+        resolver.symlink_to(target)
+        log=self.stub/'pompey-log';log.write_text('#!/bin/sh\nexit 0\n');log.chmod(0o755)
+        service=(ROOT/'pompey/rootfs/etc/services.d/wireguard/run').read_text()
+        # Exercise startup through DNS restoration, without touching networking.
+        preflight=service.split('until apply-vpn-config; do',1)[0]
+        for exists in [False,True]:
+            if exists: target.write_text('nameserver 10.2.0.1\n')
+            proc=subprocess.run(['bash','-c',preflight],env={**self.env,'POMPEY_FAKE_VPN':'0'},capture_output=True,text=True)
+            self.assertEqual(proc.returncode,0,proc.stderr)
+            self.assertTrue(resolver.is_symlink())
+            self.assertEqual(target.read_text(),content)
+
     def test_python_config_writer_preserves_vpn_binding_and_policy(self):
         config=self.root/'config';config.mkdir(exist_ok=True)
         secret=self.root/'secrets.json'

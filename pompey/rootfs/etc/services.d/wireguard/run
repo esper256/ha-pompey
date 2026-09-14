@@ -70,7 +70,8 @@ fi
 # Restore the pre-tunnel resolver for endpoint hostname lookup after a lost
 # tunnel. HAOS's LAN resolver remains allowed by the firewall.
 if [[ -f "${POMPEY_READY}/bootstrap-resolv.conf" ]]; then
-  cp "${POMPEY_READY}/bootstrap-resolv.conf" "${POMPEY_RESOLV}"
+  # Write through Supervisor's resolver mount/symlink without replacing it.
+  cat "${POMPEY_READY}/bootstrap-resolv.conf" > "${POMPEY_RESOLV}"
 fi
 until apply-vpn-config; do
   need_vpn
