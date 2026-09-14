@@ -294,6 +294,11 @@ def ensure_media_management(base: str, api_key: str, kind: str) -> None:
         "importExtraFiles": True,
         "extraFileExtensions": "srt",
     }
+    if kind == "sonarr":
+        # Native revision preference precedes custom-format scores. Let the
+        # guide's Repack CF score corrections so one v2 episode cannot defeat
+        # the preference for a consistent season pack.
+        want["downloadPropersAndRepacks"] = "doNotPrefer"
     # Recycle bin is how Arr upgrades avoid permanently deleting a library file
     # (empty recycleBin + ManualImport/CDH upgrade = dest gone if the move fails).
     extra = {

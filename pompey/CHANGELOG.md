@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.2
+
+- Prefer complete TV season packs and allow smaller x265 HD releases.
+- Avoid replacing completed seasons just to improve release scores.
+
+- Fix request cleanup errors for completed and failed requests.
+- Preserve monitoring while request metadata is incomplete.
+- Suppress webpage dumps in the app log.
+
 ## 0.3.1
 
 - Fix VPN startup when restoring DNS settings on Home Assistant OS.

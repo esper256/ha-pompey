@@ -3,7 +3,9 @@
 
 Default = TRaSH HD (1080p WEB/Bluray). Max = TRaSH UHD (4K encodes) with 1080p
 as a fallback so a Max request is not 4K-or-nothing. Remux stays off. Default
-and Max also score TRaSH Anime Dual Audio as a small tie-break; Sonarr gets
+and Max also score TRaSH Anime Dual Audio as a small tie-break. Sonarr prefers
+season packs within a resolution tier, accepts efficient HD encodes, and stops
+score-only upgrades at the target quality to avoid pack replacement loops. It gets
 Language: Not Original so TV dubs lose. Anything is not Recyclarr's — Pompey
 keeps that profile. Secrets are never printed.
 """
@@ -29,6 +31,12 @@ TRASH_RADARR_ANIME_DUAL_AUDIO = "4a3b087eea2ce012fcc1ce319259a3be"
 TRASH_SONARR_ANIME_DUAL_AUDIO = "418f50b10f1907201b6cfdf881f467b7"
 TRASH_SONARR_NOT_ORIGINAL = "ae575f95ab639ba5d15f663bf019e3e8"
 DUAL_AUDIO_SCORE = 15
+TRASH_SONARR_X265_HD = "47435ece6b99a0b477caf360e79ba0bb"
+TRASH_SONARR_X265_SDR = "9b64dff695c2115facf1b6ea59c9bd07"
+TRASH_SONARR_SEASON_PACK = "3bc5f395426614e155e585a2f056cdf1"
+# Prefer a consistent season over release-group/repack bonuses, without
+# overcoming a -10000 rejection. Seed and quality gates still apply.
+SEASON_PACK_SCORE = 2500
 
 
 def env(name: str, default: str = "") -> str:
@@ -148,6 +156,14 @@ sonarr:
     delete_old_custom_formats: false
     quality_definition:
       type: series
+      # Shared by all TV profiles: allow efficient anime encodes, retain caps.
+      qualities:
+        - name: WEBDL-1080p
+          min: 5
+        - name: WEBRip-1080p
+          min: 5
+        - name: Bluray-1080p
+          min: 5
     quality_profiles:
       - trash_id: {TRASH_SONARR_HD}
         name: Default
@@ -155,14 +171,14 @@ sonarr:
           enabled: true
         upgrade:
           allowed: true
-          until_quality: WEB 1080p
-          until_score: 10000
+          until_quality: HD 1080p
+          until_score: 0
         qualities:
-          - name: WEB 1080p
+          - name: HD 1080p
             qualities:
               - WEBDL-1080p
               - WEBRip-1080p
-          - name: Bluray-1080p
+              - Bluray-1080p
           - name: Bluray-720p
       - trash_id: {TRASH_SONARR_UHD}
         name: Max
@@ -171,23 +187,36 @@ sonarr:
         upgrade:
           allowed: true
           until_quality: WEB 2160p
-          until_score: 10000
+          until_score: 0
         qualities:
           - name: WEB 2160p
             qualities:
               - WEBRip-2160p
               - WEBDL-2160p
           - name: Bluray-2160p
-          - name: WEB 1080p
+          - name: HD 1080p
             qualities:
               - WEBRip-1080p
               - WEBDL-1080p
-          - name: Bluray-1080p
+              - Bluray-1080p
           - name: Bluray-2160p Remux
             enabled: false
           - name: Bluray-1080p Remux
             enabled: false
     custom_formats:
+      - trash_ids:
+          - {TRASH_SONARR_X265_HD}
+          - {TRASH_SONARR_X265_SDR}
+        score: 0
+        assign_scores_to:
+          - name: Default
+          - name: Max
+      - trash_ids:
+          - {TRASH_SONARR_SEASON_PACK}
+        score: {SEASON_PACK_SCORE}
+        assign_scores_to:
+          - name: Default
+          - name: Max
       - trash_ids:
           - {TRASH_SONARR_ANIME_DUAL_AUDIO}
         score: {DUAL_AUDIO_SCORE}

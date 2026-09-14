@@ -1292,6 +1292,35 @@ class OptionsMatchConfig(unittest.TestCase):
 class LogEmit(unittest.TestCase):
     def setUp(self):
         emitmod._last_emitted.clear()
+        emitmod._html_dump.clear()
+
+    def test_suppresses_entire_html_page_and_preserves_following_warning(self):
+        lines = ['<!DOCTYPE html>', '<html lang="en">', '<head>', '<style>']
+        lines += ['body { color: red; }', 'plain page text', 'window.example = true;'] * 1000
+        lines += ['</style>', '</head>', '<body>Unavailable</body>', '</html>', '[Warn] DiskScanService: Disk full']
+        out, err = self.captured('Prowlarr', lines)
+        self.assertEqual(out, '')
+        self.assertEqual(len(err.splitlines()), 1)
+        self.assertIn('Disk full', err)
+
+    def test_truncated_html_resumes_at_next_log_record(self):
+        out, err = self.captured('Prowlarr', ['[Error] Fetch failed: <html>', 'page text',
+            '[Info] Application started', '[Error] Database unavailable'])
+        self.assertNotIn('page text', out+err)
+        self.assertIn('Fetch failed:', err)
+        self.assertIn('Application started', out)
+        self.assertIn('Database unavailable', err)
+        _, err = self.captured('Prowlarr', ['<!DOCTYPE html>', 'page text',
+            '2026-09-14 07:13:53.1|Warn| Disk full'])
+        self.assertIn('Disk full', err)
+
+    def test_single_line_html_does_not_hide_other_services(self):
+        self.captured('Prowlarr',['<html><body>Page</body></html>'])
+        out, _ = self.captured('Prowlarr',['Startup complete'])
+        self.assertIn('Startup complete', out)
+        self.captured('Prowlarr',['<!DOCTYPE html>'])
+        _, err = self.captured('Sonarr',['[Error] Disk full'])
+        self.assertIn('Disk full', err)
 
     def captured(self, name: str, lines: list[str]) -> tuple[str, str]:
         from io import StringIO

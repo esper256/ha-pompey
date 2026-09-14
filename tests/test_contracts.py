@@ -129,6 +129,44 @@ class MediaContracts(Sandbox):
 
 
 class RequestContracts(Sandbox):
+    def test_failed_and_completed_requests_keep_monitoring_until_removed(self):
+        for status in [4,5]:
+            for kind, collection, field in [('movie','movie','tmdbId'),('tv','series','tvdbId')]:
+                with self.subTest(status=status,kind=kind):
+                    state.save('requests',{})
+                    request={'id':1,'type':kind,'status':status,'media':{field:50}}
+                    title={'id':1,field:50,'monitored':True}
+                    def http(method,url,body=None,**kw):
+                        if method=='GET': return [title] if url.endswith('/'+collection) else []
+                        return body
+                    with patch.object(requests,'requests_snapshot',return_value=[request]) as snapshot,patch.object(api,'load_secrets',return_value={'radarr_api_key':'r','sonarr_api_key':'s'}),patch.object(api,'arr_api_root',return_value='http://fake'),patch.object(api,'http',side_effect=http) as calls:
+                        requests.reconcile_requests()
+                        self.assertTrue(all(c.args[0]=='GET' for c in calls.call_args_list))
+                        self.assertIn(collection+':1',state.load('requests')['owned'])
+                        snapshot.return_value=[]
+                        calls.reset_mock()
+                        requests.reconcile_requests()
+                        updates=[c for c in calls.call_args_list if c.args[0]=='PUT']
+                        self.assertEqual(len(updates),1)
+                        self.assertFalse(updates[0].args[2]['monitored'])
+
+    def test_missing_tv_identity_preserves_tv_but_allows_movie_cancellation(self):
+        state.save('requests',{'owned':{'movie:1':{'externalId':50},'series:1':{'externalId':60}}})
+        request={'id':1,'type':'tv','status':2,'media':{'tmdbId':70}}
+        def http(method,url,body=None,**kw):
+            if method!='GET': return body
+            if url.endswith('/movie'):return [{'id':1,'tmdbId':50,'monitored':True}]
+            if url.endswith('/series'):return [{'id':1,'tvdbId':60,'monitored':True}]
+            return []
+        with patch.object(requests,'requests_snapshot',return_value=[request]) as snapshot,patch.object(api,'load_secrets',return_value={'radarr_api_key':'r','sonarr_api_key':'s'}),patch.object(api,'arr_api_root',return_value='http://fake'),patch.object(api,'http',side_effect=http) as calls:
+            requests.reconcile_requests()
+            self.assertEqual([c.args[1] for c in calls.call_args_list if c.args[0]=='PUT'],['http://fake/movie/1'])
+            self.assertIn('series:1',state.load('requests')['owned'])
+            snapshot.return_value=[]
+            calls.reset_mock()
+            requests.reconcile_requests()
+            self.assertEqual([c.args[1] for c in calls.call_args_list if c.args[0]=='PUT'],['http://fake/series/1'])
+
     def test_more_than_2050_requests_are_read(self):
         rows=[{'id':i} for i in range(2101)]
         def http(method,url,**kw):
@@ -457,9 +495,14 @@ class ConfigurationContracts(Sandbox):
         with self.assertRaises(ValueError):pompey_config.validate()
 
     def test_malformed_media_identity_cannot_cancel_known_request(self):
-        with patch.object(requests,'requests_snapshot',return_value=[{'id':1,'type':'tv','status':2,'media':{}}]),patch.object(api,'http') as http:
-            with self.assertRaises(RuntimeError):requests.reconcile_requests()
-            http.assert_not_called()
+        state.save('requests',{'owned':{'series:1':{'externalId':60}}})
+        def http(method,url,**kw):
+            return [{'id':1,'tvdbId':60,'monitored':True}] if url.endswith('/series') else []
+        for media in [{}, None, 'invalid']:
+            with self.subTest(media=media),patch.object(requests,'requests_snapshot',return_value=[{'id':1,'type':'tv','status':2,'media':media}]),patch.object(api,'load_secrets',return_value={'radarr_api_key':'r','sonarr_api_key':'s'}),patch.object(api,'arr_api_root',return_value='http://fake'),patch.object(api,'http',side_effect=http) as calls:
+                requests.reconcile_requests()
+                self.assertTrue(all(c.args[0]=='GET' for c in calls.call_args_list))
+                self.assertIn('series:1',state.load('requests')['owned'])
 
     def test_completed_command_with_retained_files_needs_review(self):
         file=self.video('downloads/manual/Example/test.mkv')

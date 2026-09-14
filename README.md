@@ -41,6 +41,8 @@ Prowlarr’s direct Grab button uses `downloads/manual`. Pompey asks Arr to matc
 
 Recyclarr configures **Default** and **Max** from the release’s pinned TRaSH resources. **Anything** permits lower qualities without automatic upgrades. Pompey waits for real profiles instead of creating empty lookalikes.
 
+For TV, Default and Max prefer complete season packs within the same resolution tier and allow compact x265 HD releases. Once the target quality is reached, release scores alone do not trigger replacements. Max can still upgrade a 1080p fallback to 4K.
+
 Choose **By Rating** for automatic kid/general routing, or choose a specific library. Unknown ratings go to general. Watch through your separate Plex installation.
 
 Removing or declining a request stops future monitoring for a title Pompey previously observed as requested. It retains library files and in-flight downloads. An unreadable, truncated or changing request list never triggers cancellation. Requests created directly in Arr are left alone, and declined requests are not silently recreated.

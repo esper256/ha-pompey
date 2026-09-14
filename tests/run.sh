@@ -16,6 +16,7 @@ python3 tests/test_python.py -v
 python3 tests/test_contracts.py -v
 python3 tests/test_firewall.py -v
 python3 tests/test_fake_source.py -v
+python3 tests/test_anime_fixtures.py -v
 
 echo "== real Seerr (crane unpack + musl chroot; Arr/qbit stay fake) =="
 if [[ "${POMPEY_REAL_SEERR:-0}" == "1" ]]; then

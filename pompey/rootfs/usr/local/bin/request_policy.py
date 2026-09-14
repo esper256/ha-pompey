@@ -33,8 +33,13 @@ def requests_snapshot():
 
 
 def keys(rows):
-    return {(row.get('type'), str((row.get('media') or {}).get('tmdbId')))
-            for row in rows if row.get('status') != 3 and (row.get('media') or {}).get('tmdbId')}
+    return {identity(row) for row in rows if row.get('status') in {1,2,4,5} and identity(row)[1]}
+
+
+def identity(row):
+    media = row.get('media')
+    value = media.get('tvdbId' if row.get('type') == 'tv' else 'tmdbId') if isinstance(media, dict) else None
+    return row.get('type'), str(value) if value else ''
 
 
 def reconcile_requests():
@@ -42,16 +47,20 @@ def reconcile_requests():
     second = requests_snapshot()
     if sorted(json.dumps(r,sort_keys=True) for r in first) != sorted(json.dumps(r,sort_keys=True) for r in second):
         raise RuntimeError('Seerr requests changed; deferring cancellation')
+    uncertain = set()
     for row in second:
-        field = 'tvdbId' if row.get('type') == 'tv' else 'tmdbId'
-        if row.get('type') not in {'movie','tv'} or row.get('status') not in {1,2,3} or not (row.get('media') or {}).get(field):
-            raise RuntimeError('Incomplete Seerr media identity; deferring cancellation')
+        kind, external_id = identity(row)
+        # Seerr statuses: pending, approved, declined, failed, completed.
+        if kind not in {'movie','tv'}:
+            uncertain.update({'movie','tv'})
+        elif row.get('status') not in {1,2,3,4,5} or not external_id:
+            uncertain.add(kind)
     active = keys(second)
     saved = state.load('requests')
     previous = saved.get('owned', {})
     owned = {}
     secrets = api.load_secrets()
-    for kind, host, external in [('movie', api.radarr_url(), 'tmdbId'), ('series', api.sonarr_url(), 'tmdbId')]:
+    for kind, host in [('movie', api.radarr_url()), ('series', api.sonarr_url())]:
         key = secrets['radarr_api_key' if kind == 'movie' else 'sonarr_api_key']
         base = api.arr_api_root(host, key)
         rows = api.http('GET', base + '/' + kind, headers=api.arr_headers(key))
@@ -61,19 +70,20 @@ def reconcile_requests():
             ident = str(row.get('id'))
             token = kind + ':' + ident
             media_type = 'movie' if kind == 'movie' else 'tv'
-            # Seerr TV requests use TMDB while Sonarr exposes TVDB: correlate via
-            # the request's media.tvdbId rather than title text.
-            covered = ((media_type, str(row.get(external))) in active) if kind == 'movie' else any(
-                r.get('type') == 'tv' and r.get('status') != 3 and row.get('tvdbId')
-                and str((r.get('media') or {}).get('tvdbId')) == str(row['tvdbId']) for r in second)
+            external_id = row.get('tmdbId' if kind == 'movie' else 'tvdbId')
+            covered = (media_type, str(external_id)) in active
             if covered:
                 owned[token] = {'externalId': row.get('tmdbId' if kind == 'movie' else 'tvdbId')}
                 continue
             if token not in previous:
                 continue  # Arr-only titles and a first observation are never cancellations.
-            external_id = row.get('tmdbId' if kind == 'movie' else 'tvdbId')
             if previous[token].get('externalId') != external_id:
                 continue  # Never apply old ownership to a reused Arr database ID.
+            if media_type in uncertain:
+                # Keep ownership until metadata resolves. Other media types can
+                # still reconcile, but absence is unsafe for this type today.
+                owned[token] = previous[token]
+                continue
             updated = dict(row, monitored=False)
             if kind == 'series':
                 updated['monitorNewItems'] = 'none'

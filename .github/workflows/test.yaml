@@ -37,6 +37,27 @@ jobs:
           POMPEY_REAL_ENGINES: '1'
           POMPEY_REAL_SEERR: '1'
 
+  anime:
+    name: Real Sonarr anime selection and imports
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/pompey
+          key: pompey-contracts-${{ runner.os }}-${{ hashFiles('pompey/rootfs/usr/share/pompey/engines.json') }}
+      - run: sudo apt-get update && sudo apt-get install -y python3-yaml ffmpeg libicu74
+      - run: python3 tests/test_anime_integration.py -v
+        env:
+          POMPEY_REAL_ENGINES: '1'
+          POMPEY_ANIME_REPORT: ${{ runner.temp }}/anime/report.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: sonarr-anime-decisions
+          path: ${{ runner.temp }}/anime/
+
   runtime:
     name: Built add-on runtime smoke
     runs-on: ubuntu-24.04

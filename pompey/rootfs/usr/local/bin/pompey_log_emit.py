@@ -77,6 +77,11 @@ JWT_RE = re.compile(
 NZBDRONE_RE = re.compile(r"NzbDrone\.", re.I)
 
 _last_emitted: dict[str, str] = {}
+_html_dump: set[str] = set()
+HTML_START_RE = re.compile(r'<!doctype\s+html\b|<html\b|<head\b|<body\b', re.I)
+LOG_RECORD_RE = re.compile(
+    r'^(?:\d{4}-\d\d-\d\d[ T]\d\d:\d\d:\d\d(?:[.,]\d+)?(?:Z|[+-]\d\d:\d\d)?\s*)?'
+    r'(?:\[(?:trace|debug|info|warn|warning|error|fatal)\]|\|(?:Trace|Debug|Info|Warn|Error|Fatal)\|)', re.I)
 
 
 def strip_ansi(line: str) -> str:
@@ -120,6 +125,18 @@ def level_for(line: str) -> str:
 
 def emit(name: str, line: str) -> None:
     line = strip_ansi(line.rstrip("\n"))
+    if name in _html_dump:
+        if LOG_RECORD_RE.match(line):
+            _html_dump.discard(name)  # A truncated page must not swallow later errors.
+        else:
+            if re.search(r'</html\s*>', line, re.I):
+                _html_dump.discard(name)
+            return
+    html = HTML_START_RE.search(line)
+    if html:
+        if not re.search(r'</html\s*>', line, re.I):
+            _html_dump.add(name)
+        line = line[:html.start()].rstrip()  # Retain any error preceding the body.
     if drop(name, line):
         return
     line = redact(line)

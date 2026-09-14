@@ -20,6 +20,27 @@ Fast HTTP fakes make faults deterministic. Real API tests catch upstream shape a
 
 Focused regression cases cover restart recovery with a missing readiness marker, validation descendants stopped before rollback, repair of Prowlarr destinations/credentials/sync mode, legacy download fallback, and known-version downgrade rejection. Version checks use metadata fixtures; there is no historical database upgrade test matrix.
 
+## Anime season acceptance
+
+```sh
+python3 tests/test_anime_fixtures.py -v
+POMPEY_REAL_ENGINES=1 python3 tests/test_anime_integration.py -v
+# Turn the documented acceptance gaps into hard failures:
+POMPEY_REAL_ENGINES=1 POMPEY_ANIME_STRICT=1 python3 tests/test_anime_integration.py -v
+```
+
+The anime suite uses the pinned Sonarr binary, Pompey's actual Recyclarr Default profile, media-management settings and downloader configuration. Two local Torznab mirrors serve the captured World Trigger catalogue; a fake qBittorrent HTTP API records actual automatic grabs. Prowlarr source scraping and torrent peer traffic are outside this test. Public TVDB/SkyHook metadata and pinned profile downloads require internet access. Metadata service failures fail setup rather than silently skipping coverage.
+
+The catalogue contains 203 copied results from seven sources. Titles, sizes, availability, duplicates, multilingual names, manga and ambiguous batches are preserved. Controlled scenarios use the captured 4.9 GiB x265 dual-audio WEBRip and authentic episode rows, with a matched synthetic single-audio pack. They deliberately vary seeds to isolate availability and audio preference. Episode-query routing is simulated, but Sonarr itself parses, scores, rejects and chooses releases. The complete-catalogue probe keeps every captured row. See `tests/fixtures/anime/README.md` for provenance and limits.
+
+Tests cover a live dual pack versus single audio and episodes, zero-seed dual audio rejection, captured-pack eligibility, complete-catalogue request counts, and native completed-download handling of fourteen generated episodes with subtitles and miscellaneous release files. The latter asserts incomplete files stay out of the library, every episode and subtitle imports, download payloads are removed, and repeated download maintenance issues no indexer requests.
+
+The captured-pack and pack-selection checks are required passes. Ordinary-TV cases retain size, language and quality rejection checks. RSS replays after a fourteen-episode import verify that Default and Max do not replace files just to regain pack scores; Max must still accept a real resolution upgrade. Sonarr groups WEB and Blu-ray 1080p as equivalent, prefers season packs through its native custom format, and uses custom-format scoring for repacks. Its shared 1080p size minimum is 5 MiB/minute; upper limits remain guide-backed. Score-only upgrades stop at a cutoff score of zero.
+
+Search volume remains an explicit expected failure in ordinary CI; strict mode fails it. Sonarr 4.0.19.2979 made 240 catalogue requests for this season, including 224 episode queries, even when a pack existed. Setup/search errors remain errors. An unexpected pass fails CI so the marker can be removed when upstream behavior improves. The budget is eight catalogue requests per indexer (four ID/name variants with two pages each), including pagination and excluding capability/setup calls.
+
+`POMPEY_ANIME_REPORT` defaults to `/tmp/pompey-anime-report.json`. Reports contain each query, response counts, elapsed time, actual grabs, rejection reasons and custom-format scores; Sonarr logs are copied next to the report. CI uploads these even after failure. Searches retain Sonarr's real throttling, so allow several minutes per scenario. Existing real Arr tests separately cover multi-episode files and upgrades.
+
 ## Manual HAOS acceptance
 
 Use a disposable or backed-up installation, a known legal test download, and the household’s actual share. Record the Pompey version and bundle manifest with the result.

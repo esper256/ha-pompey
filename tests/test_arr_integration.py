@@ -28,11 +28,11 @@ def port():
         sock.bind(('127.0.0.1',0));return sock.getsockname()[1]
 
 
-def http(method,url,body=None):
+def http(method,url,body=None,timeout=30):
     req=urllib.request.Request(url,method=method,data=None if body is None else json.dumps(body).encode(),
                                headers={'X-Api-Key':'a'*32,'Content-Type':'application/json'})
     try:
-        with urllib.request.urlopen(req,timeout=30) as response:
+        with urllib.request.urlopen(req,timeout=timeout) as response:
             raw=response.read();return json.loads(raw) if raw else None
     except urllib.error.HTTPError as exc:
         body=exc.read().decode()
@@ -41,7 +41,7 @@ def http(method,url,body=None):
 
 
 @unittest.skipUnless(os.environ.get('POMPEY_REAL_ENGINES')=='1','set POMPEY_REAL_ENGINES=1 for real Arr integration')
-class ArrIntegration(unittest.TestCase):
+class RealArrTestCase(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.temp=tempfile.TemporaryDirectory(prefix='pompey-real-arr-');cls.addClassCleanup(cls.temp.cleanup)
@@ -67,6 +67,8 @@ class ArrIntegration(unittest.TestCase):
         try:proc.wait(20)
         except subprocess.TimeoutExpired:proc.kill();proc.wait()
 
+
+class ArrIntegration(RealArrTestCase):
     def test_configuration_converges_on_real_arr(self):
         for kind in ['Radarr','Sonarr']:
             base=self.urls[kind]+'/api/v3'
@@ -78,6 +80,7 @@ class ArrIntegration(unittest.TestCase):
             self.assertEqual(before,after)
             self.assertTrue(after['skipFreeSpaceCheckWhenImporting'])
             self.assertTrue(after['recycleBin'])
+            if kind=='Sonarr':self.assertEqual(after['downloadPropersAndRepacks'],'doNotPrefer')
 
     def test_prowlarr_repairs_sync_mode_on_real_api(self):
         prowlarr = self.urls['Prowlarr']
@@ -164,6 +167,16 @@ class ArrIntegration(unittest.TestCase):
             self.assertTrue({'Default','Max'} <= by_name.keys())
             self.assertTrue(by_name['Default']['items'])
             self.assertTrue(http('GET',self.urls[kind]+'/api/v3/customformat'))
+            if kind=='Sonarr':
+                for name in ['Default','Max']:
+                    profile=by_name[name]
+                    scores={item['format']:item['score'] for item in profile['formatItems']}
+                    formats=http('GET',self.urls[kind]+'/api/v3/customformat')
+                    actual={item['name']:scores[item['id']] for item in formats}
+                    self.assertEqual(actual['Season Pack'],recyclarr_sync.SEASON_PACK_SCORE)
+                    self.assertEqual(actual['x265 (HD)'],0)
+                    self.assertEqual(actual['x265 (no HDR/DV)'],0)
+                    self.assertEqual(profile['cutoffFormatScore'],0)
 
     def command(self, base, payload):
         command = http('POST',base+'/command',payload)
