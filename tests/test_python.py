@@ -568,22 +568,21 @@ def handler_for(state: FakeState):
                     if leftover is None:
                         return self._send(404, {"error": path})
                     titles = state.movies if role == "radarr" else state.series
-                    still = [
-                        item
-                        for item in titles
-                        if ws.in_root(
-                            str(item.get("path") or item.get("rootFolderPath") or ""),
-                            leftover,
-                        )
-                        and not any(
-                            ws.in_root(
-                                str(item.get("path") or item.get("rootFolderPath") or ""),
-                                wanted,
-                            )
+
+                    def uses_root(item) -> bool:
+                        assigned = str(item.get("rootFolderPath") or "").rstrip("/")
+                        if assigned:
+                            return assigned == leftover
+                        path = str(item.get("path") or "").rstrip("/")
+                        if not ws.in_root(path, leftover):
+                            return False
+                        return not any(
+                            ws.in_root(path, wanted)
                             for wanted in folders
-                            if str(wanted).rstrip("/") != leftover
+                            if str(wanted).rstrip("/") not in {"", leftover}
                         )
-                    ]
+
+                    still = [item for item in titles if uses_root(item)]
                     if still:
                         return self._send(
                             400,
