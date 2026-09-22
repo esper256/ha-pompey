@@ -198,9 +198,7 @@ class MediaContracts(Sandbox):
             'Show.r00',
             'Clip.rmvb',
             'Clip.3gp',
-            'Movie.avi',
             'Movie.wmv',
-            'Show.S01E01.XviD-GROUP',
         ):
             self.assertRegex(name, pattern)
         for name in (
@@ -212,6 +210,11 @@ class MediaContracts(Sandbox):
             'file.srt',
             'Show.S01.COMPLETE.1080p.mkv',
             'Show.S01E01.1080p.WEB.h264-GROUP.mkv',
+            'Show.S01E01.XviD-GROUP',
+            'Movie.avi',
+            'Movie.mpg',
+            'Movie.mpeg',
+            'Movie.divx',
             'Something.executive.Cut.mkv',
         ):
             self.assertNotRegex(name, pattern)
@@ -224,9 +227,9 @@ class MediaContracts(Sandbox):
         self.assertIn('*.iso', names)
         self.assertIn('*.r00', names)
         self.assertIn('*.s00', names)
-        for ext in ('rmvb', 'rm', '3gp', '3g2', 'avi', 'wmv', 'flv', 'vob', 'ogm', 'mpg'):
+        for ext in ('rmvb', 'rm', '3gp', '3g2', 'wmv', 'flv', 'vob', 'ogm'):
             self.assertIn(f'*.{ext}', names)
-        for ext in ('mkv', 'mp4', 'm4v', 'mov', 'webm', 'ts', 'm2ts', 'mts', 'srt'):
+        for ext in ('mkv', 'mp4', 'm4v', 'mov', 'webm', 'ts', 'm2ts', 'mts', 'avi', 'mpg', 'mpeg', 'divx', 'srt'):
             self.assertNotIn(f'*.{ext}', names)
         self.assertTrue(api.is_junk_extension('001'))
         self.assertTrue(api.is_junk_extension('s00'))
@@ -234,11 +237,11 @@ class MediaContracts(Sandbox):
         self.assertFalse(api.is_junk_extension('mkv'))
         self.assertTrue(api.is_video_name('Show/Show.S01E01.mkv'))
         self.assertFalse(api.is_video_name('Show/Sample/sample.mkv'))
-        for ext in ('mkv', 'mp4', 'm4v', 'mov', 'webm', 'ts', 'm2ts', 'mts'):
+        for ext in ('mkv', 'mp4', 'm4v', 'mov', 'webm', 'ts', 'm2ts', 'mts', 'avi', 'mpg', 'mpeg', 'divx'):
             self.assertTrue(api.is_video_name(f'Show.1080p.{ext}'), ext)
             self.assertFalse(api.is_junk_extension(ext), ext)
         for ext in (
-            'avi', 'divx', 'xvid', 'mpg', 'mpeg', 'wmv', 'asf', 'wtv', 'flv', 'f4v',
+            'wmv', 'asf', 'wtv', 'flv', 'f4v',
             'rm', 'rmvb', 'ogm', 'ogv', '3gp', '3g2', 'vob', 'm2v', 'qt',
         ):
             self.assertFalse(api.is_video_name(f'Clip.{ext}'), ext)
@@ -350,7 +353,7 @@ class MediaContracts(Sandbox):
         folder = Path(api.downloads_complete()) / 'Old'
         folder.mkdir(parents=True)
         removed = []
-        for name in ('Clip.rmvb', 'Clip.3gp', 'Clip.wmv', 'Clip.avi', 'Clip.flv', 'Clip.vob'):
+        for name in ('Clip.rmvb', 'Clip.3gp', 'Clip.wmv', 'Clip.flv', 'Clip.vob'):
             path = folder / name
             path.write_bytes(b'old')
             removed.append(path)

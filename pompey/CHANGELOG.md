@@ -5,7 +5,7 @@
 - Apply qBittorrent 5.2 share limits so Stop sharing pauses a finished torrent. Arr still removes it after import.
 - Stage By Rating under `downloads` so the movie and TV folders only contain the libraries people browse. Empty leftover staging folders are removed after their titles move.
 - Ignore executable, script, archive, and disc-image payloads, including `.zip`, `.rar`, `.7z`, `.iso`, and `.zipx`. A download with no playable video is removed and blocklisted. A video that arrives beside one of those files keeps the video.
-- Reject obsolete video containers (RealMedia, Windows Media, Flash, DivX/Xvid/AVI, Ogg, 3GP, DVD VOB, and `.qt`). Playable files are Matroska, MP4, QuickTime `.mov`, WebM, and MPEG transport streams.
+- Reject obsolete video containers (RealMedia, Windows Media, Flash, Ogg, 3GP, DVD VOB, and `.qt`). AVI, MPEG program streams, and DivX stay, along with Matroska, MP4, QuickTime `.mov`, WebM, and MPEG transport streams.
 
 ## 0.3.3
 

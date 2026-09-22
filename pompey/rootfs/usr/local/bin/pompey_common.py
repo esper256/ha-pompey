@@ -154,22 +154,17 @@ JUNK_EXTENSIONS = (
     "wtv",
     "flv",
     "f4v",
-    "avi",
-    "divx",
-    "xvid",
     "ogm",
     "ogv",
     "3g2",
     "3gp",
-    "mpeg",
-    "mpg",
     "vob",
     "m2v",
     "qt",
 )
 
-# Containers that carry current 1080p and 4K: Matroska, MP4, QuickTime,
-# WebM, and MPEG transport streams from broadcast and Blu-ray.
+# Containers used for real releases: Matroska, MP4, QuickTime, WebM,
+# MPEG transport streams, AVI, MPEG program streams, and DivX.
 VIDEO_EXTENSIONS = frozenset({
     "mkv",
     "mp4",
@@ -179,6 +174,10 @@ VIDEO_EXTENSIONS = frozenset({
     "ts",
     "m2ts",
     "mts",
+    "avi",
+    "mpg",
+    "mpeg",
+    "divx",
 })
 
 

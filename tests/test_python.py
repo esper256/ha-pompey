@@ -1619,7 +1619,10 @@ class WireStack(unittest.TestCase):
         self.assertIn("*.iso", excluded)
         self.assertIn("*.rmvb", excluded)
         self.assertIn("*.3gp", excluded)
-        self.assertIn("*.avi", excluded)
+        self.assertNotIn("*.avi", excluded)
+        self.assertNotIn("*.mpg", excluded)
+        self.assertNotIn("*.mpeg", excluded)
+        self.assertNotIn("*.divx", excluded)
         self.assertNotIn("*.mkv", excluded)
         self.assertNotIn("*.mp4", excluded)
         self.assertNotIn("*.m2ts", excluded)
@@ -1636,6 +1639,9 @@ class WireStack(unittest.TestCase):
             self.assertIn("3gp", ignored)
             self.assertNotIn("mkv", ignored)
             self.assertNotIn("m2ts", ignored)
+            self.assertNotIn("avi", ignored)
+            self.assertNotIn("divx", ignored)
+            self.assertNotIn("mpeg", ignored)
 
 
     def test_wires_when_seerr_returns_objects(self):
