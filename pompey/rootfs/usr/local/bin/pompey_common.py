@@ -83,7 +83,12 @@ def qbit_share_limits(policy: str | None = None) -> dict:
 
 
 def qbit_seed_conf(policy: str | None = None) -> dict:
-    """Keys qBittorrent 5.2 reads. Older MaxRatio* lines are ignored."""
+    """Keys qBittorrent 5.2 reads. Older MaxRatio* lines are ignored.
+
+    ShareLimitAction stays Stop. The limit is reached when the download
+    finishes, which is before Arr has imported. Remove drops the torrent Arr
+    is watching, and RemoveWithContent deletes the file.
+    """
     limits = qbit_share_limits(policy)
     return {
         r"Session\GlobalMaxRatio": str(limits["ratio"]),
@@ -187,16 +192,26 @@ AUTO_FOLDER = "By Rating"
 
 
 def sibling_auto_dir(library_path: str) -> str:
-    """Staging root Seerr uses for 'sort by rating'. Not a Plex library."""
+    """0.3 staging root beside a general library. Not a Plex library."""
     parent = library_path.rstrip("/").rsplit("/", 1)[0]
     return f"{parent}/{AUTO_FOLDER}"
 
 
 def movies_auto_dir() -> str:
-    return sibling_auto_dir(movies_dir())
+    from pompey_config import staging_dirs
+    return str(staging_dirs()[0])
 
 
 def tv_auto_dir() -> str:
+    from pompey_config import staging_dirs
+    return str(staging_dirs()[1])
+
+
+def legacy_movies_auto_dir() -> str:
+    return sibling_auto_dir(movies_dir())
+
+
+def legacy_tv_auto_dir() -> str:
     return sibling_auto_dir(tv_dir())
 
 

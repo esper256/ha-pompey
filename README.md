@@ -29,7 +29,7 @@ Keep ports 5055 and 9696 on your LAN. The hidden engines remain on localhost; en
 | NAT-PMP gateway | Empty (disabled) |
 | Debug | Off |
 
-Library paths are relative to the media folder. They must not overlap one another, the `downloads` folder, or the `By Rating` folders alongside the general movie and TV libraries. Traversal and escaping symlinks are rejected before creating folders. Restart after changing add-on options.
+Library paths are relative to the media folder. They must not overlap one another or anything under `downloads`. Traversal and escaping symlinks are rejected before creating folders. Restart after changing add-on options.
 
 Arr owns ordinary imports and upgrades. Pompey does not guess that a new download is a duplicate just because the library already contains a title. Older replaced files go into `downloads/recycle` for seven days. Do not add `downloads` to Plex libraries.
 
@@ -43,7 +43,7 @@ Recyclarr configures **Default** and **Max** from the release’s pinned TRaSH r
 
 For TV, Default and Max prefer complete season packs within the same resolution tier and allow compact x265 HD releases. Once the target quality is reached, release scores alone do not trigger replacements. Max can still upgrade a 1080p fallback to 4K.
 
-Choose **By Rating** for automatic kid/general routing, or choose a specific library. Unknown ratings go to general. Watch through your separate Plex installation.
+Choose **By Rating** for automatic kid/general routing, or choose a specific library. Unknown ratings go to general. By Rating is a staging folder under `downloads` (`downloads/By Rating/Movies` and `downloads/By Rating/TV`), then each title moves into the kid or general library. An older By Rating folder next to a library is moved out of and removed once it is empty. Watch through your separate Plex installation, and do not point Plex at `downloads`.
 
 Removing or declining a request stops future monitoring for a title Pompey previously observed as requested. It retains library files and in-flight downloads. An unreadable, truncated or changing request list never triggers cancellation. Requests created directly in Arr are left alone, and declined requests are not silently recreated.
 

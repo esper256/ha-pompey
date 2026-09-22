@@ -21,6 +21,8 @@ from pompey_common import (
     movies_kid_dir,
     tv_dir,
     tv_kid_dir,
+    legacy_movies_auto_dir,
+    legacy_tv_auto_dir,
     movies_auto_dir,
     tv_auto_dir,
     downloads_complete,
@@ -81,6 +83,40 @@ def in_root(path: str, root: str) -> bool:
     path = (path or "").rstrip("/")
     root = (root or "").rstrip("/")
     return bool(root) and (path == root or path.startswith(root + "/"))
+
+
+def is_retired_staging_root(path: str, kind: str) -> bool:
+    """Earlier releases staged By Rating beside the general library."""
+    path = (path or "").rstrip("/")
+    legacy = legacy_movies_auto_dir() if kind == "radarr" else legacy_tv_auto_dir()
+    return bool(path) and path == legacy.rstrip("/")
+
+
+def staging_holds_files(path: str) -> bool:
+    """True when the folder contains a file. Empty directories do not count."""
+    try:
+        for _dirpath, _dirnames, filenames in os.walk(path, followlinks=False):
+            if filenames:
+                return True
+    except OSError:
+        return True
+    return False
+
+
+def remove_empty_staging_tree(path: str) -> None:
+    """Remove a retired staging folder once only empty directories remain."""
+    folder = (path or "").rstrip("/")
+    if not folder or not os.path.isdir(folder) or staging_holds_files(folder):
+        return
+    try:
+        for dirpath, _dirnames, filenames in os.walk(folder, topdown=False, followlinks=False):
+            if filenames or os.path.islink(dirpath):
+                return
+            os.rmdir(dirpath)
+    except OSError as exc:
+        log(f"empty staging folder {folder} left in place: {exc}", "WARNING")
+        return
+    log(f"removed empty staging folder {folder}")
 
 
 def is_known_legacy_root(path: str, wanted: set[str]) -> bool:
@@ -145,8 +181,14 @@ def prune_root_folders(base: str, api_key: str, kind: str) -> list[str]:
         if not path or path in wanted:
             continue
         label = "movie" if kind == "radarr" else "TV"
-        if not is_known_legacy_root(path, wanted):
+        retired_staging = is_retired_staging_root(path, kind)
+        if not retired_staging and not is_known_legacy_root(path, wanted):
             msg = f"Extra {label} library folder left registered: {path}"
+            log(msg, "WARNING")
+            notices.append(msg)
+            continue
+        if retired_staging and staging_holds_files(path):
+            msg = f"Historical {label} staging folder still has files, left registered: {path}"
             log(msg, "WARNING")
             notices.append(msg)
             continue
@@ -167,10 +209,15 @@ def prune_root_folders(base: str, api_key: str, kind: str) -> list[str]:
                 headers=arr_headers(api_key),
             )
             log(f"removed unused leftover root folder {path}")
+            if retired_staging:
+                remove_empty_staging_tree(path)
         except RuntimeError as extra:
             msg = f"Could not unregister unused {label} library folder {path}"
             log(f"{msg}: {extra}", "WARNING")
             notices.append(msg)
+    legacy = (legacy_movies_auto_dir() if kind == "radarr" else legacy_tv_auto_dir()).rstrip("/")
+    if legacy and legacy not in registered and not staging_holds_files(legacy):
+        remove_empty_staging_tree(legacy)
     return notices
 
 

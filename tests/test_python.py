@@ -1616,7 +1616,7 @@ class WireStack(unittest.TestCase):
         registered = [str(p).rstrip("/") for p in self.state.radarr_folders]
         self.assertNotIn(leftover, registered)
         media = os.environ["MEDIA_ROOT"]
-        self.assertIn(f"{media}/Movies/By Rating", registered)
+        self.assertIn(f"{media}/downloads/By Rating/Movies", registered)
         self.assertFalse(any(call[1] == "PUT" and "/editor" in str(call[2]) for call in self.state.calls))
         self.assertTrue((self.ready / "wired").exists())
 
@@ -1632,7 +1632,7 @@ class WireStack(unittest.TestCase):
         registered = [str(p).rstrip("/") for p in self.state.radarr_folders]
         self.assertIn(leftover, registered)
         media = os.environ["MEDIA_ROOT"]
-        self.assertIn(f"{media}/Movies/By Rating", registered)
+        self.assertIn(f"{media}/downloads/By Rating/Movies", registered)
         self.assertEqual(self.state.movies[0]["path"], f"{leftover}/Old Title")
         self.assertFalse(any(call[1] == "PUT" and "/editor" in str(call[2]) for call in self.state.calls))
         deletes = [
@@ -1876,6 +1876,18 @@ class RouteRating(unittest.TestCase):
             "path",
             editor[0][3],
         )
+
+    def test_routes_titles_from_downloads_staging(self):
+        self.state.movies = [{
+            "id": 40,
+            "title": "Staged Kid",
+            "certification": "PG",
+            "path": "/media/downloads/By Rating/Movies/Staged Kid",
+        }]
+        self.state.series = []
+        rr.route_movies("radarr-key")
+        dests = {item.get("title"): item.get("rootFolderPath") for item in self.state.moved}
+        self.assertEqual(dests["Staged Kid"], "/media/Movies/Kid Friendly")
 
     def test_arr_v4_still_routes_kid_titles(self):
         self.state.arr_drop_v3 = True

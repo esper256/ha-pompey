@@ -23,15 +23,43 @@ def library_dir(name, default):
     return media_root() / relative
 
 
+def staging_dirs():
+    """Arr roots for automatic rating sorts. Kept out of the browsed libraries."""
+    base = media_root() / 'downloads' / 'By Rating'
+    return base / 'Movies', base / 'TV'
+
+
+def legacy_staging_dirs():
+    """0.3 staging roots beside the general libraries."""
+    libraries = [library_dir(name, default) for name, default in DEFAULTS.items()]
+    return libraries[0].parent / 'By Rating', libraries[2].parent / 'By Rating'
+
+
+def _overlaps(path, other):
+    return path == other or path.is_relative_to(other) or other.is_relative_to(path)
+
+
 def validate():
-    paths = [library_dir(name,default) for name,default in DEFAULTS.items()]
-    paths += [paths[0].parent/'By Rating', paths[2].parent/'By Rating', media_root()/'downloads']
-    resolved = [p.resolve() for p in paths]
+    libraries = [library_dir(name, default) for name, default in DEFAULTS.items()]
+    root = media_root().resolve()
+    downloads = root / 'downloads'
+    reserved = [p.resolve() for p in (
+        *staging_dirs(),
+        *legacy_staging_dirs(),
+        *(downloads / name for name in ('complete', 'incomplete', 'manual', 'recycle')),
+    )]
+    resolved = []
+    for folder in libraries:
+        path = folder.resolve()
+        if not path.is_relative_to(root) or path == root or path == downloads or path.is_relative_to(downloads):
+            raise ValueError('Library folders must remain inside the media folder and outside downloads')
+        resolved.append(path)
     for i, path in enumerate(resolved):
-        if not path.is_relative_to(media_root().resolve()) or path == media_root().resolve():
-            raise ValueError('Library folders must remain inside the media folder')
-        for other in resolved[i+1:]:
-            if path.is_relative_to(other) or other.is_relative_to(path):
+        for other in resolved[i + 1:]:
+            if _overlaps(path, other):
+                raise ValueError(f'Library folders overlap: {path} and {other}')
+        for other in reserved:
+            if _overlaps(path, other):
                 raise ValueError(f'Library and download folders overlap: {path} and {other}')
     if os.environ.get('AFTER_DOWNLOAD','stop_sharing') not in {'stop_sharing','share_to_ratio','share_one_day'}:
         raise ValueError('Unknown after-download sharing policy')

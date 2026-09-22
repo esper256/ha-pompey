@@ -8,7 +8,7 @@ import sys
 import time
 import urllib.request
 import pompey_state as state
-from pompey_common import arr_api_root, as_list, movies_auto_dir, movies_dir, movies_kid_dir, radarr_url, secrets_path, sonarr_url, tv_auto_dir, tv_dir, tv_kid_dir
+from pompey_common import arr_api_root, as_list, legacy_movies_auto_dir, legacy_tv_auto_dir, movies_auto_dir, movies_dir, movies_kid_dir, radarr_url, secrets_path, sonarr_url, tv_auto_dir, tv_dir, tv_kid_dir
 
 
 AUTO_FOLDER = "By Rating"
@@ -91,7 +91,7 @@ def route_library(
     list_url: str,
     kid_root: str,
     gen_root: str,
-    auto_root: str,
+    auto_roots: list[str],
     kid_set: set[str],
     label: str,
 ) -> None:
@@ -107,7 +107,8 @@ def route_library(
     rows = as_list(payload)
     saved = state.load('routing-' + label)
     owned = {}
-    known_roots = [kid_root, gen_root, auto_root]
+    autos = [root.rstrip("/") for root in auto_roots if root]
+    known_roots = [kid_root, gen_root, *autos]
     by_dest: dict[str, list] = {}
     labels: dict = {}
     for item in rows:
@@ -120,7 +121,7 @@ def route_library(
         previous = saved.get(token, {})
         # Remember auto mode after the first move. A manually changed path or
         # reused Arr ID relinquishes ownership; explicit library choices stay put.
-        if not in_root(str(path), auto_root) and not (
+        if not any(in_root(str(path), root) for root in autos) and not (
             previous and previous.get('externalId') == external
             and str(path).rstrip('/') in previous.get('paths', [])
         ):
@@ -165,7 +166,7 @@ def route_movies(key: str) -> None:
         f"{arr_api_root(radarr_url(), key)}/movie",
         movies_kid_dir(),
         movies_dir(),
-        movies_auto_dir(),
+        [movies_auto_dir(), legacy_movies_auto_dir()],
         KID_MOVIE,
         "movie",
     )
@@ -177,7 +178,7 @@ def route_series(key: str) -> None:
         f"{arr_api_root(sonarr_url(), key)}/series",
         tv_kid_dir(),
         tv_dir(),
-        tv_auto_dir(),
+        [tv_auto_dir(), legacy_tv_auto_dir()],
         KID_TV,
         "series",
     )
