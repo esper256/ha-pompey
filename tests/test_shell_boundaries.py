@@ -73,6 +73,10 @@ class Boundaries(unittest.TestCase):
                 self.assertIn('Session\\Interface=wg0',text)
                 self.assertIn('Session\\ShareLimitAction=Stop',text)
                 self.assertIn('Session\\GlobalMaxInactiveSeedingMinutes=-1',text)
+                self.assertIn('ExcludedFileNamesEnabled=true',text)
+                self.assertRegex(text, r'(?m)^Session\\ExcludedFileNames=.*\*\.exe,.*\*\.zipx')
+                self.assertNotRegex(text, r'\*\.zip(?!x)')
+                self.assertNotIn('*.mkv', text)
                 for needle in needles:
                     self.assertIn(needle,text)
                 self.assertNotIn('Session\\MaxRatio',text)
@@ -101,6 +105,9 @@ class Boundaries(unittest.TestCase):
             text=(config/rel).read_text()
             self.assertIn('Session\\GlobalMaxRatio=0',text)
             self.assertIn('Session\\ShareLimitAction=Stop',text)
+            self.assertIn('ExcludedFileNamesEnabled=true',text)
+            self.assertIn('*.exe',text)
+            self.assertIn('*.zipx',text)
             self.assertNotIn('MaxRatioEnabled',text)
             self.assertNotIn('MaxRatioAct',text)
 

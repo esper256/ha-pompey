@@ -52,16 +52,6 @@ class MediaContracts(Sandbox):
         return dict({'hash':'fixture','category':'radarr','state':'uploading','progress':1,
                      'amount_left':0,'ratio':0.01,'seeding_time':5}, **values)
 
-    def test_upgrade_is_preserved_for_arr(self):
-        old = self.video('Movies/General/Example/Example.720p.mkv')
-        new = self.video('downloads/complete/Example/Example.2160p.mkv')
-        item = self.torrent(content_path=str(new))
-        with patch.object(api,'http',return_value=[item]) as http, patch.object(api,'load_secrets',return_value={}):
-            media.maintain_downloads()
-        self.assertTrue(old.exists())
-        self.assertTrue(new.exists())
-        self.assertFalse(any('/command' in c.args[1] or c.args[0]=='DELETE' for c in http.call_args_list))
-
     def test_both_sharing_policies_keep_seeding_below_goal(self):
         for policy in ['share_to_ratio','share_one_day']:
             with self.subTest(policy=policy), patch.dict(os.environ,{'AFTER_DOWNLOAD':policy}), patch.object(api,'http') as http:
@@ -138,6 +128,305 @@ class MediaContracts(Sandbox):
             media.manual_imports([item],{'radarr_api_key':'fake','sonarr_api_key':'fake'})
         self.assertTrue(source.exists());self.assertTrue(subtitle.exists())
         self.assertFalse(any(c.args[0]=='POST' for c in http.call_args_list))
+
+    def script_http(self, item, files, queue=None, history=None, fail_delete=False, fail_blocklist=False):
+        calls = []
+        queue = [] if queue is None else queue
+        history = [] if history is None else history
+
+        def http(method, url, body=None, **kw):
+            calls.append((method, url, body))
+            if '/torrents/files' in url:
+                return files
+            if url.endswith('/torrents/info'):
+                return [item]
+            if '/queue' in url and method == 'GET':
+                return {'records': queue, 'page': 1, 'pageSize': 100, 'totalRecords': len(queue)}
+            if method == 'DELETE':
+                if fail_blocklist:
+                    raise RuntimeError('DELETE ' + url + ' -> 500 blocked')
+                return {}
+            if '/history/failed/' in url and method == 'POST':
+                return {}
+            if '/history' in url and method == 'GET':
+                return {'records': history, 'page': 1, 'totalRecords': len(history)}
+            if '/torrents/delete' in url:
+                if fail_delete:
+                    raise RuntimeError('POST ' + url + ' -> 404 missing')
+                return 'Ok.'
+            if '/filePrio' in url:
+                return 'Ok.'
+            return []
+
+        return calls, http
+
+    def run_downloads(self, item, files, **kw):
+        calls, http = self.script_http(item, files, **kw)
+        secrets = {'radarr_api_key': 'fake', 'sonarr_api_key': 'fake'}
+        with patch.object(api, 'http', side_effect=http), patch.object(api, 'load_secrets', return_value=secrets), patch.object(api, 'arr_api_root', return_value='http://fake/api/v3'):
+            media.maintain_downloads()
+        return calls
+
+    def test_upgrade_is_preserved_for_arr(self):
+        # Re-assert the original contract after junk housekeeping: an unnamed
+        # file list is unknown, so the new mkv is not deleted.
+        old = self.video('Movies/General/Example/Example.720p.mkv')
+        new = self.video('downloads/complete/Example/Example.2160p.mkv')
+        item = self.torrent(content_path=str(new))
+        with patch.object(api,'http',return_value=[item]) as http, patch.object(api,'load_secrets',return_value={}):
+            media.maintain_downloads()
+        self.assertTrue(old.exists())
+        self.assertTrue(new.exists())
+        self.assertFalse(any('/command' in c.args[1] or c.args[0]=='DELETE' or '/torrents/delete' in c.args[1] or '/filePrio' in c.args[1] for c in http.call_args_list))
+
+    def test_junk_release_pattern_matches_payload_names_only(self):
+        import re
+        pattern = re.compile(api.junk_release_pattern())
+        for name in (
+            'Show.S01E01.1080p.WEB.x264-GROUP.exe',
+            'Movie.2024.1080p.zipx',
+            'Name.mkv.exe',
+            'installer.SCR',
+            'click.bat',
+            'script.ps1',
+            'payload.js',
+            'Site.com.S01E01.mkv',
+        ):
+            self.assertRegex(name, pattern)
+        for name in (
+            'Show.S01E01.1080p.WEB.x264-GROUP.mkv',
+            'Movie.2024.1080p.BluRay.mkv',
+            'Release.rar',
+            'Release.zip',
+            'Release.7z',
+            'Disc.iso',
+            'notes.nfo',
+            'file.json',
+            'Show.S01.COMPLETE.1080p.mkv',
+            'Something.executive.Cut.mkv',
+        ):
+            self.assertNotRegex(name, pattern)
+        names = api.qbit_junk_preferences()['excluded_file_names'].split('\n')
+        self.assertIn('*.exe', names)
+        self.assertIn('*.zipx', names)
+        self.assertNotIn('*.zip', names)
+        self.assertNotIn('*.mkv', names)
+        self.assertNotIn('*.rar', names)
+        self.assertNotIn('*.iso', names)
+
+    def test_all_junk_download_is_removed_and_blocklisted(self):
+        payload = self.video('downloads/complete/FakeShow/FakeShow.exe')
+        zipx = payload.with_suffix('.zipx')
+        zipx.write_bytes(b'junk')
+        folder = payload.parent
+        item = self.torrent(
+            name='The Show S01E01 1080p WEB',
+            hash='abc',
+            content_path=str(folder),
+            save_path=str(Path(api.downloads_complete())),
+            state='stoppedUP',
+        )
+        files = [
+            {'name': 'FakeShow/FakeShow.exe', 'priority': 1, 'progress': 1},
+            {'name': 'FakeShow/FakeShow.zipx', 'priority': 1, 'progress': 1},
+        ]
+        calls = self.run_downloads(item, files, queue=[{'id': 7, 'downloadId': 'abc'}])
+        self.assertFalse(payload.exists())
+        self.assertFalse(zipx.exists())
+        self.assertFalse(folder.exists())
+        self.assertTrue(Path(api.downloads_complete()).exists())
+        deletes = [c for c in calls if c[0] == 'POST' and '/torrents/delete' in c[1]]
+        self.assertEqual(len(deletes), 1)
+        self.assertIn(b'deleteFiles=true', deletes[0][2])
+        self.assertIn(b'hashes=abc', deletes[0][2])
+        self.assertTrue(any(
+            c[0] == 'DELETE' and 'blocklist=true' in c[1] and 'skipRedownload=true' in c[1] and 'removeFromClient=true' in c[1]
+            for c in calls
+        ))
+
+    def test_library_files_are_not_removed_as_junk(self):
+        library = self.video('Movies/General/Example/Example.exe')
+        item = self.torrent(
+            hash='lib',
+            content_path=str(library),
+            save_path=str(Path(api.downloads_complete())),
+        )
+        calls = self.run_downloads(item, [{'name': 'Example.exe'}])
+        self.assertTrue(library.exists())
+        self.assertFalse(any('/torrents/delete' in c[1] or '/torrents/files' in c[1] for c in calls))
+
+    def test_incomplete_junk_is_removed_before_it_reaches_complete(self):
+        payload = self.video('downloads/incomplete/FakeShow/FakeShow.exe')
+        item = self.torrent(
+            hash='partial',
+            state='downloading',
+            progress=0.4,
+            amount_left=10,
+            content_path=str(payload.parent),
+            download_path=str(Path(api.downloads_incomplete())),
+        )
+        calls = self.run_downloads(item, [{'name': 'FakeShow/FakeShow.exe', 'progress': 0.4}])
+        self.assertFalse(payload.exists())
+        self.assertFalse(payload.parent.exists())
+        self.assertTrue(any('/torrents/delete' in c[1] for c in calls))
+
+    def test_video_beside_junk_keeps_the_video(self):
+        video = self.video('downloads/complete/Show/Show.mkv')
+        exe = video.with_suffix('.exe')
+        exe.write_bytes(b'MZ')
+        item = self.torrent(
+            hash='mix',
+            content_path=str(video.parent),
+            save_path=str(Path(api.downloads_complete())),
+            state='uploading',
+        )
+        files = [
+            {'name': 'Show/Show.mkv', 'priority': 1},
+            {'name': 'Show/Show.exe', 'priority': 1},
+        ]
+        calls = self.run_downloads(item, files)
+        self.assertTrue(video.exists())
+        self.assertFalse(exe.exists())
+        self.assertTrue(video.parent.exists())
+        self.assertFalse(any('/torrents/delete' in c[1] for c in calls))
+        self.assertFalse(any(c[0] == 'DELETE' for c in calls))
+        prios = [c for c in calls if '/filePrio' in c[1]]
+        self.assertEqual(len(prios), 1)
+        self.assertIn(b'priority=0', prios[0][2])
+        self.assertIn(b'id=1', prios[0][2])
+
+    def test_archives_and_disc_images_are_kept(self):
+        folder = Path(api.downloads_complete()) / 'Pack'
+        folder.mkdir(parents=True)
+        kept = []
+        for name in ('Pack.zip', 'Pack.rar', 'Pack.7z', 'Pack.iso', 'readme'):
+            path = folder / name
+            path.write_bytes(b'pack')
+            kept.append(path)
+        item = self.torrent(hash='pack', content_path=str(folder), save_path=str(Path(api.downloads_complete())))
+        files = [{'name': f'Pack/{path.name}'} for path in kept]
+        calls = self.run_downloads(item, files)
+        for path in kept:
+            self.assertTrue(path.exists(), path.name)
+        self.assertFalse(any('/torrents/delete' in c[1] or '/filePrio' in c[1] for c in calls))
+
+    def test_metadata_empty_foreign_and_outside_junk_stay(self):
+        payload = self.video('downloads/complete/Wait/Wait.exe')
+        item = self.torrent(
+            hash='wait',
+            state='metaDL',
+            content_path=str(payload.parent),
+            save_path=str(Path(api.downloads_complete())),
+        )
+        calls = self.run_downloads(item, [{'name': 'Wait/Wait.exe'}])
+        self.assertTrue(payload.exists())
+        self.assertFalse(any('/torrents/files' in c[1] or '/torrents/delete' in c[1] for c in calls))
+
+        calls = self.run_downloads(self.torrent(
+            hash='empty',
+            content_path=str(payload.parent),
+            save_path=str(Path(api.downloads_complete())),
+        ), [])
+        self.assertTrue(payload.exists())
+        self.assertFalse(any('/torrents/delete' in c[1] for c in calls))
+
+        calls = self.run_downloads(self.torrent(
+            hash='other',
+            category='unrelated',
+            content_path=str(payload.parent),
+            save_path=str(Path(api.downloads_complete())),
+        ), [{'name': 'Wait/Wait.exe'}])
+        self.assertTrue(payload.exists())
+        self.assertFalse(any('/torrents/delete' in c[1] for c in calls))
+
+        outside = self.root / 'outside.exe'
+        outside.write_bytes(b'MZ')
+        calls = self.run_downloads(self.torrent(
+            hash='out',
+            content_path=str(outside),
+            save_path=str(self.root),
+        ), [{'name': 'outside.exe'}])
+        self.assertTrue(outside.exists())
+        self.assertTrue(payload.exists())
+        self.assertFalse(any('/torrents/delete' in c[1] or '/torrents/files' in c[1] for c in calls))
+
+    def test_missing_client_torrent_still_unlinks_junk_files(self):
+        payload = self.video('downloads/complete/Gone/Gone.exe')
+        item = self.torrent(
+            hash='gone',
+            name='Gone',
+            content_path=str(payload.parent),
+            save_path=str(Path(api.downloads_complete())),
+        )
+        calls = self.run_downloads(item, [{'name': 'Gone/Gone.exe'}], queue=[], fail_delete=True)
+        self.assertFalse(payload.exists())
+        self.assertFalse(any(c[0] == 'DELETE' for c in calls))
+
+    def test_blocklist_failure_does_not_keep_the_junk_files(self):
+        payload = self.video('downloads/manual/Bad/Bad.exe')
+        item = self.torrent(
+            hash='bad',
+            category='prowlarr',
+            state='stoppedUP',
+            content_path=str(payload.parent),
+            save_path=str(Path(api.downloads_manual())),
+        )
+        calls = self.run_downloads(
+            item,
+            [{'name': 'Bad/Bad.exe'}],
+            queue=[{'id': 3, 'downloadId': 'bad'}],
+            fail_blocklist=True,
+        )
+        self.assertFalse(payload.exists())
+        self.assertTrue(any('/torrents/delete' in c[1] for c in calls))
+
+    def test_history_is_blocklisted_when_the_queue_item_is_gone(self):
+        payload = self.video('downloads/complete/Hist/Hist.dll')
+        item = self.torrent(
+            hash='hist',
+            content_path=str(payload.parent),
+            save_path=str(Path(api.downloads_complete())),
+        )
+        calls = self.run_downloads(
+            item,
+            [{'name': 'Hist/Hist.dll'}],
+            queue=[],
+            history=[{'id': 4, 'downloadId': 'hist', 'eventType': 'grabbed'}],
+        )
+        self.assertFalse(payload.exists())
+        self.assertTrue(any(c[0] == 'POST' and c[1].endswith('/history/failed/4') for c in calls))
+        self.assertFalse(any(c[0] == 'DELETE' for c in calls))
+
+    def test_release_restriction_is_created_once_and_updated_in_place(self):
+        pattern = api.junk_release_pattern()
+        stored = []
+
+        def http(method, url, body=None, **kw):
+            if method == 'GET':
+                return [dict(row) for row in stored]
+            if method == 'POST':
+                row = dict(body)
+                row['id'] = len(stored) + 1
+                stored.append(row)
+                return row
+            if method == 'PUT':
+                stored[0] = dict(body)
+                return body
+            return []
+
+        with patch.object(wire_stack, 'http', side_effect=http):
+            wire_stack.ensure_release_restriction('http://fake/api/v3', 'k', 'radarr')
+            wire_stack.ensure_release_restriction('http://fake/api/v3', 'k', 'radarr')
+        self.assertEqual(len(stored), 1)
+        self.assertEqual(stored[0]['ignored'], pattern)
+        self.assertEqual(stored[0]['required'], '')
+        stored[0]['ignored'] = api.junk_restriction_prefix() + 'old)'
+        stored[0]['tags'] = [9]
+        with patch.object(wire_stack, 'http', side_effect=http):
+            wire_stack.ensure_release_restriction('http://fake/api/v3', 'k', 'radarr')
+        self.assertEqual(len(stored), 1)
+        self.assertEqual(stored[0]['ignored'], pattern)
+        self.assertEqual(stored[0]['tags'], [9])
 
 
 class RequestContracts(Sandbox):

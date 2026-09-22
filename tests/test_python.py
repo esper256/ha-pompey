@@ -368,6 +368,7 @@ class FakeState:
         self.fail_seerr_radarr = False
         self.fail_indexer = False
         self.qbit_prefs: object = None
+        self.restrictions: dict[str, list] = {"radarr": [], "sonarr": [], "prowlarr": []}
         self.movies = [
             {"id": 1, "title": "Kid Flick", "certification": "PG", "path": "/media/Movies/By Rating/Kid Flick"},
             {"id": 2, "title": "Unknown", "certification": "", "path": "/media/Movies/By Rating/Unknown"},
@@ -914,6 +915,27 @@ def handler_for(state: FakeState):
                             listed[i] = saved
                             return self._send(body=saved)
                     return self._send(404, {"error": path})
+                if path.endswith("/restriction") and method == "GET":
+                    return self._send(body=state.restrictions.setdefault(role, []))
+                if path.endswith("/restriction") and method == "POST":
+                    row = dict(body or {})
+                    bucket = state.restrictions.setdefault(role, [])
+                    row["id"] = len(bucket) + 1
+                    bucket.append(row)
+                    return self._send(201, row)
+                if "/restriction/" in path and method == "PUT":
+                    try:
+                        ident = int(path.rsplit("/", 1)[-1])
+                    except ValueError:
+                        return self._send(404, {"error": path})
+                    bucket = state.restrictions.setdefault(role, [])
+                    for i, item in enumerate(bucket):
+                        if item.get("id") == ident:
+                            saved = dict(body or item)
+                            saved["id"] = ident
+                            bucket[i] = saved
+                            return self._send(body=saved)
+                    return self._send(404, {"error": path})
                 return self._send(404, {"error": path})
             if role == "prowlarr":
                 if path == "/ping":
@@ -1027,6 +1049,27 @@ def handler_for(state: FakeState):
                             saved = dict(body or item)
                             saved["id"] = idx
                             state.prowlarr_clients[i] = saved
+                            return self._send(body=saved)
+                    return self._send(404, {"error": path})
+                if path.endswith("/restriction") and method == "GET":
+                    return self._send(body=state.restrictions.setdefault(role, []))
+                if path.endswith("/restriction") and method == "POST":
+                    row = dict(body or {})
+                    bucket = state.restrictions.setdefault(role, [])
+                    row["id"] = len(bucket) + 1
+                    bucket.append(row)
+                    return self._send(201, row)
+                if "/restriction/" in path and method == "PUT":
+                    try:
+                        ident = int(path.rsplit("/", 1)[-1])
+                    except ValueError:
+                        return self._send(404, {"error": path})
+                    bucket = state.restrictions.setdefault(role, [])
+                    for i, item in enumerate(bucket):
+                        if item.get("id") == ident:
+                            saved = dict(body or item)
+                            saved["id"] = ident
+                            bucket[i] = saved
                             return self._send(body=saved)
                     return self._send(404, {"error": path})
                 return self._send(404, {"error": path})
@@ -1566,6 +1609,20 @@ class WireStack(unittest.TestCase):
         self.assertEqual(queue.get("max_ratio_act"), 0)
         self.assertIs(queue.get("max_seeding_time_enabled"), False)
         self.assertNotIn("max_ratio_enabled", queue)
+        self.assertIs(queue.get("excluded_file_names_enabled"), True)
+        excluded = str(queue.get("excluded_file_names") or "").split("\n")
+        self.assertIn("*.exe", excluded)
+        self.assertIn("*.zipx", excluded)
+        self.assertNotIn("*.zip", excluded)
+        self.assertNotIn("*.mkv", excluded)
+        self.assertNotIn("*.rar", excluded)
+        for role in ("radarr", "sonarr", "prowlarr"):
+            rows = self.state.restrictions[role]
+            self.assertEqual(len(rows), 1, role)
+            ignored = rows[0].get("ignored") or ""
+            self.assertIn("exe", ignored)
+            self.assertIn("zipx", ignored)
+            self.assertNotIn("mkv", ignored)
 
 
     def test_wires_when_seerr_returns_objects(self):

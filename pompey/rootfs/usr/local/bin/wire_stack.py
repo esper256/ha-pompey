@@ -50,6 +50,8 @@ from pompey_common import (
     http,
     wait_http,
     arr_headers,
+    junk_release_pattern,
+    junk_restriction_prefix,
     SEERR_HOUSEHOLD_PERMS,
     SEERR_REQUEST_ADVANCED,
 )
@@ -469,6 +471,54 @@ def ensure_media_management(base: str, api_key: str, kind: str) -> None:
         f"{kind} import into library folders (rename on the NAS, skip free-space check, "
         "old files go to downloads/recycle)"
     )
+
+
+def ensure_release_restriction(base: str, api_key: str, kind: str) -> None:
+    """Ignore release titles that name an executable, script, or zipx payload.
+
+    This matches the release name only. A normal title whose files are .exe
+    still has to be skipped by qBittorrent and removed by download housekeeping.
+    """
+    pattern = junk_release_pattern()
+    prefix = junk_restriction_prefix()
+    try:
+        rows = as_list(http("GET", f"{base}/restriction", headers=arr_headers(api_key)))
+    except RuntimeError as exc:
+        raise RuntimeError(f"{kind} release restrictions failed") from exc
+    for row in rows:
+        ignored = str(row.get("ignored") or "")
+        if not ignored.startswith(prefix):
+            continue
+        if ignored == pattern:
+            return
+        ident = row.get("id")
+        if ident is None:
+            continue
+        updated = dict(row)
+        updated["ignored"] = pattern
+        updated["required"] = updated.get("required") or ""
+        updated["tags"] = updated.get("tags") or []
+        try:
+            http(
+                "PUT",
+                f"{base}/restriction/{ident}",
+                updated,
+                headers=arr_headers(api_key),
+            )
+        except RuntimeError as exc:
+            raise RuntimeError(f"{kind} release restrictions failed") from exc
+        log(f"{kind} ignores releases named like executable or script payloads")
+        return
+    try:
+        http(
+            "POST",
+            f"{base}/restriction",
+            {"required": "", "ignored": pattern, "tags": []},
+            headers=arr_headers(api_key),
+        )
+    except RuntimeError as exc:
+        raise RuntimeError(f"{kind} release restrictions failed") from exc
+    log(f"{kind} ignores releases named like executable or script payloads")
 
 
 def ensure_download_client_handling(base: str, api_key: str, kind: str) -> None:
@@ -1108,6 +1158,8 @@ def main() -> int:
     for kind, base, key in each_arr(radarr, rk, sonarr, sk):
         ensure_media_management(base, key, kind)
         ensure_download_client_handling(base, key, kind)
+        ensure_release_restriction(base, key, kind)
+    ensure_release_restriction(f"{prowlarr}/api/v1", pk, "prowlarr")
     ensure_prowlarr_app(prowlarr, pk, "Sonarr", "Sonarr", sonarr_url(), sk)
     ensure_prowlarr_app(prowlarr, pk, "Radarr", "Radarr", radarr_url(), rk)
     ensure_indexer(prowlarr, pk)

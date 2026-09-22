@@ -1,7 +1,10 @@
-"""Arr owns normal imports. Pompey only stops at seeding goals and assists manual grabs.
+"""Arr owns normal imports. Pompey stops at seeding goals, assists manual grabs,
+and drops downloads that are only known junk payloads.
 
-Never infer duplicate files from names, delete a download directory, or synthesize
-Plex episodes. Unmatched/ambiguous manual files remain available for operator review.
+A torrent is removed only when every file name ends in an executable, script,
+or zipx-style extension. Video, subtitles, archives, and disc images stay.
+One of those junk files sitting beside a real video is removed on its own.
+Unmatched or ambiguous manual files remain available for operator review.
 """
 import os
 from pathlib import Path
@@ -154,6 +157,310 @@ def seed_times(items):
             item['seeding_time'] = properties['seeding_time']
 
 
+def extension_of(name):
+    base = str(name).replace('\\', '/').rsplit('/', 1)[-1]
+    if '.' not in base:
+        return ''
+    return base.rsplit('.', 1)[-1].lower()
+
+
+def unsafe_name(name):
+    rel = str(name).replace('\\', '/').strip()
+    if not rel or rel.startswith('/'):
+        return True
+    return any(part == '..' for part in rel.split('/'))
+
+
+def junk_roots():
+    return (api.downloads_complete(), api.downloads_manual(), api.downloads_incomplete())
+
+
+def path_in_junk_roots(raw):
+    raw = str(raw or '').strip()
+    if not raw:
+        return False
+    for root in junk_roots():
+        try:
+            path = Path(raw).resolve()
+            base = Path(root).resolve()
+        except OSError:
+            continue
+        if path == base or contained(str(path), str(base)):
+            return True
+    return False
+
+
+def in_managed_downloads(torrent):
+    """Use the current content path when qBittorrent has one.
+
+    A category save path under downloads is not enough: after a move, the
+    files may already be in a library. Those are left alone.
+    """
+    content = str(torrent.get('content_path') or '').strip()
+    if content:
+        return path_in_junk_roots(content)
+    return any(path_in_junk_roots(torrent.get(key)) for key in ('save_path', 'download_path'))
+
+
+def inside_download_file(path):
+    for root in junk_roots():
+        if contained(str(path), root):
+            return True
+    return False
+
+
+def classify_files(files):
+    """junk when every name is a known payload; mixed when only some are; else unknown."""
+    if not isinstance(files, list) or not files:
+        return 'unknown'
+    kinds = []
+    for row in files:
+        if not isinstance(row, dict):
+            return 'unknown'
+        name = row.get('name')
+        if not isinstance(name, str) or not name.strip() or unsafe_name(name):
+            return 'unknown'
+        kinds.append('junk' if extension_of(name) in api.JUNK_EXTENSIONS else 'keep')
+    if kinds and all(kind == 'junk' for kind in kinds):
+        return 'junk'
+    if any(kind == 'junk' for kind in kinds):
+        return 'mixed'
+    return 'keep'
+
+
+def candidate_paths(torrent, name):
+    rel = str(name).replace('\\', '/').lstrip('/')
+    base_name = rel.rsplit('/', 1)[-1]
+    paths = []
+    save = str(torrent.get('save_path') or '').strip()
+    download = str(torrent.get('download_path') or '').strip()
+    content = str(torrent.get('content_path') or '').strip()
+    if save:
+        paths.append(Path(save) / rel)
+    if download:
+        paths.append(Path(download) / rel)
+    if content:
+        content_path = Path(content)
+        paths.append(content_path / rel)
+        paths.append(content_path / base_name)
+        if content_path.name == base_name:
+            paths.append(content_path)
+        paths.append(content_path.parent / rel)
+    unique = []
+    seen = set()
+    for path in paths:
+        key = str(path)
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(path)
+    return unique
+
+
+def remove_empty_parents(start):
+    roots = []
+    for root in junk_roots():
+        try:
+            roots.append(Path(root).resolve())
+        except OSError:
+            continue
+    current = start
+    while True:
+        try:
+            resolved = current.resolve()
+        except OSError:
+            return
+        if resolved in roots or not inside_download_file(resolved):
+            return
+        if current.is_symlink():
+            return
+        try:
+            next(current.iterdir())
+            return
+        except StopIteration:
+            pass
+        except OSError:
+            return
+        try:
+            current.rmdir()
+        except OSError:
+            return
+        current = current.parent
+
+
+def unlink_contained_junk(torrent, name):
+    if unsafe_name(name) or extension_of(name) not in api.JUNK_EXTENSIONS:
+        return False
+    for candidate in candidate_paths(torrent, name):
+        try:
+            if candidate.is_symlink() or not candidate.is_file():
+                continue
+            resolved = candidate.resolve()
+        except OSError:
+            continue
+        if extension_of(resolved.name) not in api.JUNK_EXTENSIONS:
+            continue
+        if not inside_download_file(resolved):
+            continue
+        try:
+            candidate.unlink()
+        except OSError as exc:
+            api.log(f'could not remove {candidate}: {exc}', 'WARNING')
+            return False
+        remove_empty_parents(candidate.parent)
+        return True
+    return False
+
+
+def same_hash(value, digest):
+    return str(value or '').strip().lower() == str(digest).strip().lower()
+
+
+def iter_queue(base, key):
+    page = 1
+    while page <= 20:
+        query = urllib.parse.urlencode({
+            'page': page,
+            'pageSize': 100,
+            'includeUnknownMovieItems': 'true',
+            'includeUnknownSeriesItems': 'true',
+        })
+        payload = api.http('GET', f'{base}/queue?{query}', headers=api.arr_headers(key))
+        rows = api.as_list(payload)
+        for row in rows:
+            yield row
+        total = payload.get('totalRecords') if isinstance(payload, dict) else None
+        try:
+            total_n = int(total) if total is not None else None
+        except (TypeError, ValueError):
+            total_n = None
+        if not rows or len(rows) < 100 or (total_n is not None and page * 100 >= total_n):
+            return
+        page += 1
+
+
+def remove_from_queue(base, key, digest):
+    removed = False
+    for row in iter_queue(base, key):
+        if not same_hash(row.get('downloadId') or row.get('downloadID'), digest):
+            continue
+        ident = row.get('id')
+        if ident is None:
+            continue
+        query = urllib.parse.urlencode({
+            'removeFromClient': 'true',
+            'blocklist': 'true',
+            'skipRedownload': 'true',
+        })
+        try:
+            api.http('DELETE', f'{base}/queue/{ident}?{query}', headers=api.arr_headers(key))
+        except RuntimeError as exc:
+            if '-> 404' not in str(exc):
+                raise
+        removed = True
+    return removed
+
+
+def mark_history_failed(base, key, digest):
+    query = urllib.parse.urlencode({'downloadId': digest, 'page': 1, 'pageSize': 50})
+    payload = api.http('GET', f'{base}/history?{query}', headers=api.arr_headers(key))
+    for row in api.as_list(payload):
+        if not same_hash(row.get('downloadId'), digest) or row.get('id') is None:
+            continue
+        api.http('POST', f"{base}/history/failed/{row['id']}", {}, headers=api.arr_headers(key))
+
+
+def blocklist_hash(digest, secrets):
+    targets = (
+        ('radarr', api.radarr_url(), secrets.get('radarr_api_key') or ''),
+        ('sonarr', api.sonarr_url(), secrets.get('sonarr_api_key') or ''),
+    )
+    for kind, host, key in targets:
+        if not key:
+            continue
+        try:
+            base = api.arr_api_root(host, key)
+            if not remove_from_queue(base, key, digest):
+                mark_history_failed(base, key, digest)
+        except RuntimeError as exc:
+            api.log(f'{kind} could not blocklist {digest}: {exc}', 'WARNING')
+
+
+def fetch_files(digest):
+    query = urllib.parse.urlencode({'hash': digest})
+    try:
+        payload = api.http('GET', api.qbit_url() + '/api/v2/torrents/files?' + query)
+    except RuntimeError as exc:
+        api.log_if_new(f'junk-files:{digest}', f'could not list files for {digest}: {exc}', 'WARNING')
+        return None
+    if not isinstance(payload, list):
+        return None
+    return payload
+
+
+def remove_junk_torrent(torrent, files, secrets):
+    digest = str(torrent.get('hash') or '')
+    blocklist_hash(digest, secrets)
+    data = urllib.parse.urlencode({'hashes': digest, 'deleteFiles': 'true'}).encode()
+    try:
+        api.http('POST', api.qbit_url() + '/api/v2/torrents/delete', data)
+    except RuntimeError as exc:
+        if '-> 404' not in str(exc):
+            api.log(f'could not remove junk download {digest}: {exc}', 'WARNING')
+    for row in files:
+        unlink_contained_junk(torrent, row.get('name') or '')
+    api.log(f"removed junk download {torrent.get('name') or digest}")
+
+
+def drop_junk_sidecars(torrent, files):
+    digest = str(torrent.get('hash') or '')
+    indexes = []
+    names = []
+    for index, row in enumerate(files):
+        name = row.get('name') or ''
+        if extension_of(name) not in api.JUNK_EXTENSIONS:
+            continue
+        indexes.append(str(index))
+        names.append(name)
+    if not indexes:
+        return
+    data = urllib.parse.urlencode({'hash': digest, 'id': '|'.join(indexes), 'priority': '0'}).encode()
+    try:
+        api.http('POST', api.qbit_url() + '/api/v2/torrents/filePrio', data)
+    except RuntimeError as exc:
+        api.log(f'could not skip junk files in {digest}: {exc}', 'WARNING')
+    for name in names:
+        unlink_contained_junk(torrent, name)
+    api.log(f"removed junk files from {torrent.get('name') or digest}")
+
+
+def discard_junk(items, secrets):
+    """Drop obvious payload downloads from the managed download folders.
+
+    Skip metadata and allocation states, empty file lists, and anything that
+    is not entirely a known junk extension. Never delete a video, archive,
+    disc image, or a file outside the incomplete, complete, and manual folders.
+    """
+    for torrent in items:
+        if not isinstance(torrent, dict):
+            continue
+        if torrent.get('category') not in {'radarr', 'sonarr', 'prowlarr'}:
+            continue
+        digest = str(torrent.get('hash') or '')
+        if not digest or torrent.get('state') in {'metaDL', 'allocating'}:
+            continue
+        if not in_managed_downloads(torrent):
+            continue
+        files = fetch_files(digest)
+        if files is None:
+            continue
+        decision = classify_files(files)
+        if decision == 'junk':
+            remove_junk_torrent(torrent, files, secrets)
+        elif decision == 'mixed':
+            drop_junk_sidecars(torrent, files)
+
+
 def maintain_downloads():
     payload = api.http('GET', api.qbit_url() + '/api/v2/torrents/info')
     if not isinstance(payload, list):
@@ -165,4 +472,6 @@ def maintain_downloads():
     if not isinstance(payload, list):
         raise RuntimeError('Download client returned an invalid torrent list')
     seed_times(payload)
-    manual_imports(payload, api.load_secrets())
+    secrets = api.load_secrets()
+    manual_imports(payload, secrets)
+    discard_junk(payload, secrets)

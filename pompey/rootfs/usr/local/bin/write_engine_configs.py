@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Write persistent engine configuration before services start."""
 import json, os, re, sys
-from pompey_common import qbit_seed_conf, simultaneous_downloads
+from pompey_common import qbit_junk_conf, qbit_seed_conf, simultaneous_downloads
 
 secrets = json.load(open(sys.argv[1], encoding="utf-8"))
 media = sys.argv[2].rstrip("/")
@@ -255,6 +255,7 @@ def patch_qbit_paths(text: str) -> str:
 seed = qbit_seed_conf()
 seed[r"Session\DisableAutoTMMByDefault"] = "true"
 queue = qbit_queue_settings(simultaneous_downloads())
+junk = qbit_junk_conf()
 # Locals: f-string expressions cannot contain backslashes on older Python.
 max_ratio = seed[r"Session\GlobalMaxRatio"]
 seed_minutes = seed[r"Session\GlobalMaxSeedingMinutes"]
@@ -268,6 +269,8 @@ ignore_slow = queue[r"Session\IgnoreSlowTorrentsForQueueing"]
 slow_dl = queue[r"Session\SlowTorrentsDownloadRate"]
 slow_ul = queue[r"Session\SlowTorrentsUploadRate"]
 slow_wait = queue[r"Session\SlowTorrentsInactivityTimer"]
+excluded_enabled = junk["ExcludedFileNamesEnabled"]
+excluded_names = junk[r"Session\ExcludedFileNames"]
 qbit_text = f"""[Application]
 FileLogger\\Enabled=true
 FileLogger\\Path={config}/qBittorrent/logs
@@ -297,6 +300,8 @@ Session\\GlobalMaxRatio={max_ratio}
 Session\\GlobalMaxSeedingMinutes={seed_minutes}
 Session\\GlobalMaxInactiveSeedingMinutes={inactive_minutes}
 Session\\ShareLimitAction={share_action}
+ExcludedFileNamesEnabled={excluded_enabled}
+Session\\ExcludedFileNames={excluded_names}
 
 [LegalNotice]
 Accepted=true
@@ -333,8 +338,11 @@ for qconf in (
     os.makedirs(os.path.dirname(qconf), exist_ok=True)
     if os.path.isfile(qconf):
         body = patch_qbit_seed(
-            patch_qbit_seed(patch_qbit_paths(open(qconf, encoding="utf-8").read()), seed),
-            queue,
+            patch_qbit_seed(
+                patch_qbit_seed(patch_qbit_paths(open(qconf, encoding="utf-8").read()), seed),
+                queue,
+            ),
+            junk,
         )
         with open(qconf, "w", encoding="utf-8") as fh:
             fh.write(body)

@@ -116,6 +116,73 @@ def qbit_seed_preferences(policy: str | None = None) -> dict:
     return prefs
 
 
+# Payloads that pretend to be a show. Archives and disc images stay: scene
+# packs and full discs are real downloads. A missing or unknown extension
+# stays too. Housekeeping only removes a torrent when every file is in this set.
+JUNK_EXTENSIONS = (
+    "exe",
+    "zipx",
+    "scr",
+    "com",
+    "bat",
+    "cmd",
+    "pif",
+    "msi",
+    "lnk",
+    "js",
+    "jse",
+    "vbs",
+    "vbe",
+    "wsf",
+    "wsh",
+    "ps1",
+    "hta",
+    "cpl",
+    "reg",
+    "dll",
+)
+
+
+def junk_wildcards() -> list[str]:
+    return [f"*.{ext}" for ext in JUNK_EXTENSIONS]
+
+
+def junk_release_pattern() -> str:
+    """Arr ignored-regex for a release title that names one of these payloads.
+
+    The extension has to end the name or be followed by a non-letter, so
+    `file.json` and `COMPLETE` are left alone while `file.js` and `file.exe` match.
+    """
+    body = "|".join(JUNK_EXTENSIONS)
+    return rf"(?i)\.(?:{body})(?:$|[^a-z0-9])"
+
+
+def junk_restriction_prefix() -> str:
+    """Stable start of junk_release_pattern(), used to update our own row."""
+    return r"(?i)\.(?:exe|zipx|"
+
+
+def qbit_junk_conf() -> dict:
+    """Keys qBittorrent 5.2 reads at startup.
+
+    ExcludedFileNamesEnabled sits directly under [BitTorrent]. The name list
+    is a QStringList, which the conf stores comma-separated. The filter runs
+    when a torrent is added without explicit file priorities.
+    """
+    return {
+        "ExcludedFileNamesEnabled": "true",
+        r"Session\ExcludedFileNames": ",".join(junk_wildcards()),
+    }
+
+
+def qbit_junk_preferences() -> dict:
+    """WebAPI names. The client splits this string on newlines."""
+    return {
+        "excluded_file_names_enabled": True,
+        "excluded_file_names": "\n".join(junk_wildcards()),
+    }
+
+
 def qbit_set_preferences_url() -> str:
     return f"{qbit_url()}/api/v2/app/setPreferences"
 
@@ -128,6 +195,7 @@ def apply_qbit_queue() -> None:
     """
     prefs = qbit_queue_preferences()
     prefs.update(qbit_seed_preferences())
+    prefs.update(qbit_junk_preferences())
     data = urllib.parse.urlencode({"json": json.dumps(prefs)}).encode()
     http("POST", qbit_set_preferences_url(), data)
     limits = qbit_share_limits()
@@ -135,7 +203,8 @@ def apply_qbit_queue() -> None:
         f"qbit queue max_active_downloads={prefs['max_active_downloads']} "
         f"max_active_torrents={prefs['max_active_torrents']} ignore_slow=true "
         f"share={after_download()} ratio={limits['ratio']} "
-        f"seeding_minutes={limits['seeding_minutes']}"
+        f"seeding_minutes={limits['seeding_minutes']} "
+        f"exclude_junk={len(JUNK_EXTENSIONS)}"
     )
 
 
@@ -217,6 +286,10 @@ def legacy_tv_auto_dir() -> str:
 
 def downloads_complete() -> str:
     return f"{media_root()}/downloads/complete"
+
+
+def downloads_incomplete() -> str:
+    return f"{media_root()}/downloads/incomplete"
 
 
 def downloads_manual() -> str:

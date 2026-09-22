@@ -33,6 +33,8 @@ Library paths are relative to the media folder. They must not overlap one anothe
 
 Arr owns ordinary imports and upgrades. Pompey does not guess that a new download is a duplicate just because the library already contains a title. Older replaced files go into `downloads/recycle` for seven days. Do not add `downloads` to Plex libraries.
 
+Release names that include an executable, a script, or a `.zipx` payload are ignored in Radarr, Sonarr, and Prowlarr. qBittorrent skips those file types on new downloads. A transfer whose files are only those types is removed, including while it is still in the incomplete folder, and blocklisted. A real video that arrives beside one of those files keeps the video; the extra file is removed. Archives such as `.zip`, `.rar`, and `.7z`, and disc images such as `.iso`, are left alone.
+
 **Stop sharing** stops a completed transfer so Arr can move it into the library. **Share to ratio** keeps sharing until ratio 1.0; **Share one day** keeps sharing for 24 hours of seeding. Sharing uses hardlinks where supported and otherwise needs a copy, so a NAS without hardlink support needs space for both copies until the goal is reached. Arr removes its completed client entries after import and the sharing goal. Stalled transfers do not occupy the active-download limit.
 
 Prowlarr’s direct Grab button uses `downloads/manual`. Pompey asks Arr to match finished, stopped files there and submits only accepted matches. Unmatched files, rejected upgrades and ambiguous import attempts stay on disk for review through Debug. Normal imports never use this fallback. Pompey no longer invents episode identities or moves extras into Plex folders.
