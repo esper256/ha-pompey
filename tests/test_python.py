@@ -1617,7 +1617,15 @@ class WireStack(unittest.TestCase):
         self.assertIn("*.rar", excluded)
         self.assertIn("*.7z", excluded)
         self.assertIn("*.iso", excluded)
+        self.assertIn("*.rmvb", excluded)
+        self.assertIn("*.3gp", excluded)
+        self.assertNotIn("*.avi", excluded)
+        self.assertNotIn("*.mpg", excluded)
+        self.assertNotIn("*.mpeg", excluded)
+        self.assertNotIn("*.divx", excluded)
         self.assertNotIn("*.mkv", excluded)
+        self.assertNotIn("*.mp4", excluded)
+        self.assertNotIn("*.m2ts", excluded)
         self.assertNotIn("*.srt", excluded)
         for role in ("radarr", "sonarr", "prowlarr"):
             rows = self.state.restrictions[role]
@@ -1627,7 +1635,13 @@ class WireStack(unittest.TestCase):
             self.assertIn("zipx", ignored)
             self.assertIn("rar", ignored)
             self.assertIn("iso", ignored)
+            self.assertIn("rmvb", ignored)
+            self.assertIn("3gp", ignored)
             self.assertNotIn("mkv", ignored)
+            self.assertNotIn("m2ts", ignored)
+            self.assertNotIn("avi", ignored)
+            self.assertNotIn("divx", ignored)
+            self.assertNotIn("mpeg", ignored)
 
 
     def test_wires_when_seerr_returns_objects(self):

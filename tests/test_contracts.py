@@ -196,6 +196,9 @@ class MediaContracts(Sandbox):
             'Release.7z',
             'Disc.iso',
             'Show.r00',
+            'Clip.rmvb',
+            'Clip.3gp',
+            'Movie.wmv',
         ):
             self.assertRegex(name, pattern)
         for name in (
@@ -206,6 +209,12 @@ class MediaContracts(Sandbox):
             'file.json',
             'file.srt',
             'Show.S01.COMPLETE.1080p.mkv',
+            'Show.S01E01.1080p.WEB.h264-GROUP.mkv',
+            'Show.S01E01.XviD-GROUP',
+            'Movie.avi',
+            'Movie.mpg',
+            'Movie.mpeg',
+            'Movie.divx',
             'Something.executive.Cut.mkv',
         ):
             self.assertNotRegex(name, pattern)
@@ -218,14 +227,25 @@ class MediaContracts(Sandbox):
         self.assertIn('*.iso', names)
         self.assertIn('*.r00', names)
         self.assertIn('*.s00', names)
-        self.assertNotIn('*.mkv', names)
-        self.assertNotIn('*.srt', names)
+        for ext in ('rmvb', 'rm', '3gp', '3g2', 'wmv', 'flv', 'vob', 'ogm'):
+            self.assertIn(f'*.{ext}', names)
+        for ext in ('mkv', 'mp4', 'm4v', 'mov', 'webm', 'ts', 'm2ts', 'mts', 'avi', 'mpg', 'mpeg', 'divx', 'srt'):
+            self.assertNotIn(f'*.{ext}', names)
         self.assertTrue(api.is_junk_extension('001'))
         self.assertTrue(api.is_junk_extension('s00'))
         self.assertFalse(api.is_junk_extension('srt'))
         self.assertFalse(api.is_junk_extension('mkv'))
         self.assertTrue(api.is_video_name('Show/Show.S01E01.mkv'))
         self.assertFalse(api.is_video_name('Show/Sample/sample.mkv'))
+        for ext in ('mkv', 'mp4', 'm4v', 'mov', 'webm', 'ts', 'm2ts', 'mts', 'avi', 'mpg', 'mpeg', 'divx'):
+            self.assertTrue(api.is_video_name(f'Show.1080p.{ext}'), ext)
+            self.assertFalse(api.is_junk_extension(ext), ext)
+        for ext in (
+            'wmv', 'asf', 'wtv', 'flv', 'f4v',
+            'rm', 'rmvb', 'ogm', 'ogv', '3gp', '3g2', 'vob', 'm2v', 'qt',
+        ):
+            self.assertFalse(api.is_video_name(f'Clip.{ext}'), ext)
+            self.assertTrue(api.is_junk_extension(ext), ext)
 
     def test_all_junk_download_is_removed_and_blocklisted(self):
         payload = self.video('downloads/complete/FakeShow/FakeShow.exe')
@@ -328,6 +348,37 @@ class MediaContracts(Sandbox):
         self.assertFalse(folder.exists())
         self.assertTrue(Path(api.downloads_complete()).exists())
         self.assertTrue(any('/torrents/delete' in c[1] and b'deleteFiles=true' in c[2] for c in calls))
+
+    def test_obsolete_containers_are_removed(self):
+        folder = Path(api.downloads_complete()) / 'Old'
+        folder.mkdir(parents=True)
+        removed = []
+        for name in ('Clip.rmvb', 'Clip.3gp', 'Clip.wmv', 'Clip.flv', 'Clip.vob'):
+            path = folder / name
+            path.write_bytes(b'old')
+            removed.append(path)
+        item = self.torrent(hash='old', content_path=str(folder), save_path=str(Path(api.downloads_complete())))
+        files = [{'name': f'Old/{path.name}'} for path in removed]
+        calls = self.run_downloads(item, files)
+        for path in removed:
+            self.assertFalse(path.exists(), path.name)
+        self.assertFalse(folder.exists())
+        self.assertTrue(any('/torrents/delete' in c[1] for c in calls))
+
+    def test_obsolete_file_beside_a_current_video_is_removed(self):
+        video = self.video('downloads/complete/Show/Show.1080p.m2ts')
+        legacy = video.with_suffix('.wmv')
+        legacy.write_bytes(b'wmv')
+        item = self.torrent(
+            hash='hd',
+            content_path=str(video.parent),
+            save_path=str(Path(api.downloads_complete())),
+        )
+        files = [{'name': 'Show/Show.1080p.m2ts'}, {'name': 'Show/Show.1080p.wmv'}]
+        calls = self.run_downloads(item, files)
+        self.assertTrue(video.exists())
+        self.assertFalse(legacy.exists())
+        self.assertFalse(any('/torrents/delete' in c[1] for c in calls))
 
     def test_sample_clip_does_not_keep_an_archive(self):
         folder = Path(api.downloads_complete()) / 'Show'
