@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Write persistent engine configuration before services start."""
 import json, os, re, sys
-from pompey_common import after_download, simultaneous_downloads
+from pompey_common import qbit_seed_conf, simultaneous_downloads
 
 secrets = json.load(open(sys.argv[1], encoding="utf-8"))
 media = sys.argv[2].rstrip("/")
@@ -138,35 +138,25 @@ def qbit_queue_settings(active: int) -> dict:
     }
 
 
-def qbit_seed_settings(policy: str) -> dict:
-    # MaxRatioAct 0 stops seeding; Arr owns removal after import.
-    # library files may be hardlinked.
-    if policy == "share_to_ratio":
-        return {
-            r"Session\MaxRatioEnabled": "true",
-            r"Session\MaxRatio": "1",
-            r"Session\MaxSeedingTimeEnabled": "false",
-            r"Session\MaxSeedingTime": "-1",
-            r"Session\MaxRatioAct": "0",
-        }
-    if policy == "share_one_day":
-        return {
-            r"Session\MaxRatioEnabled": "false",
-            r"Session\MaxRatio": "1",
-            r"Session\MaxSeedingTimeEnabled": "true",
-            r"Session\MaxSeedingTime": "1440",
-            r"Session\MaxRatioAct": "0",
-        }
-    return {
-        r"Session\MaxRatioEnabled": "true",
-        r"Session\MaxRatio": "0",
-        r"Session\MaxSeedingTimeEnabled": "false",
-        r"Session\MaxSeedingTime": "-1",
-        r"Session\MaxRatioAct": "0",
-    }
+# qBittorrent 4 stored share limits as Session\MaxRatio*. 5.2 ignores those
+# and reads GlobalMaxRatio / GlobalMaxSeedingMinutes / ShareLimitAction.
+OBSOLETE_QBIT_SEED_KEYS = (
+    r"Session\MaxRatioEnabled",
+    r"Session\MaxRatio",
+    r"Session\MaxSeedingTimeEnabled",
+    r"Session\MaxSeedingTime",
+    r"Session\MaxRatioAct",
+)
+
+
+def drop_obsolete_qbit_seed(text: str) -> str:
+    for key in OBSOLETE_QBIT_SEED_KEYS:
+        text = re.sub(rf"(?m)^{re.escape(key)}=.*\n?", "", text)
+    return text
 
 
 def patch_qbit_seed(text: str, settings: dict) -> str:
+    text = drop_obsolete_qbit_seed(text)
     for key, value in settings.items():
         pat = rf"(?m)^{re.escape(key)}=.*$"
         line = f"{key}={value}"
@@ -262,15 +252,14 @@ def patch_qbit_paths(text: str) -> str:
     return text
 
 
-seed = qbit_seed_settings(after_download())
+seed = qbit_seed_conf()
 seed[r"Session\DisableAutoTMMByDefault"] = "true"
 queue = qbit_queue_settings(simultaneous_downloads())
 # Locals: f-string expressions cannot contain backslashes on older Python.
-ratio_on = seed[r"Session\MaxRatioEnabled"]
-ratio = seed[r"Session\MaxRatio"]
-time_on = seed[r"Session\MaxSeedingTimeEnabled"]
-time_min = seed[r"Session\MaxSeedingTime"]
-ratio_act = seed[r"Session\MaxRatioAct"]
+max_ratio = seed[r"Session\GlobalMaxRatio"]
+seed_minutes = seed[r"Session\GlobalMaxSeedingMinutes"]
+inactive_minutes = seed[r"Session\GlobalMaxInactiveSeedingMinutes"]
+share_action = seed[r"Session\ShareLimitAction"]
 queue_on = queue[r"Session\QueueingSystemEnabled"]
 max_dl = queue[r"Session\MaxActiveDownloads"]
 max_ul = queue[r"Session\MaxActiveUploads"]
@@ -304,11 +293,10 @@ Session\\IgnoreSlowTorrentsForQueueing={ignore_slow}
 Session\\SlowTorrentsDownloadRate={slow_dl}
 Session\\SlowTorrentsUploadRate={slow_ul}
 Session\\SlowTorrentsInactivityTimer={slow_wait}
-Session\\MaxRatioEnabled={ratio_on}
-Session\\MaxRatio={ratio}
-Session\\MaxSeedingTimeEnabled={time_on}
-Session\\MaxSeedingTime={time_min}
-Session\\MaxRatioAct={ratio_act}
+Session\\GlobalMaxRatio={max_ratio}
+Session\\GlobalMaxSeedingMinutes={seed_minutes}
+Session\\GlobalMaxInactiveSeedingMinutes={inactive_minutes}
+Session\\ShareLimitAction={share_action}
 
 [LegalNotice]
 Accepted=true

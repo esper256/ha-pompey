@@ -98,6 +98,18 @@ class MediaContracts(Sandbox):
             media.stop_at_goal([self.torrent(category='unrelated')])
             http.assert_not_called()
 
+    def test_share_preferences_match_qbit_52_api(self):
+        self.assertEqual(api.qbit_seed_preferences('stop_sharing'), {
+            'max_inactive_seeding_time_enabled': False, 'max_ratio_act': 0,
+            'max_ratio': 0, 'max_seeding_time_enabled': False,
+        })
+        self.assertEqual(api.qbit_seed_preferences('share_to_ratio')['max_ratio'], 1)
+        one_day = api.qbit_seed_preferences('share_one_day')
+        self.assertEqual(one_day['max_seeding_time'], 1440)
+        self.assertIs(one_day['max_ratio_enabled'], False)
+        self.assertNotIn('max_ratio', one_day)
+        self.assertNotIn('max_seeding_time_enabled', one_day)
+
     def test_malformed_download_list_is_an_error(self):
         with patch.object(api,'http',return_value={'error':'unavailable'}):
             with self.assertRaises(RuntimeError): media.maintain_downloads()

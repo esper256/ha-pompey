@@ -1562,6 +1562,10 @@ class WireStack(unittest.TestCase):
         self.assertEqual(queue.get("max_active_uploads"), 12)
         self.assertEqual(queue.get("max_active_torrents"), 28)
         self.assertTrue(queue.get("dont_count_slow_torrents"))
+        self.assertEqual(queue.get("max_ratio"), 0)
+        self.assertEqual(queue.get("max_ratio_act"), 0)
+        self.assertIs(queue.get("max_seeding_time_enabled"), False)
+        self.assertNotIn("max_ratio_enabled", queue)
 
 
     def test_wires_when_seerr_returns_objects(self):

@@ -32,7 +32,8 @@ configuration:
     name: After a title is in the library
     description: >-
       Sharing finished torrents uses RAM and CPU in this app. Stop sharing
-      (the default) removes the torrent once the file is in your library.
+      (the default) stops the torrent as soon as the download finishes.
+      Arr moves the file into the library and then removes the torrent.
       Share to 1.0 ratio or for one day if you want to give a little back.
       The library file is kept either way.
   simultaneous_downloads:

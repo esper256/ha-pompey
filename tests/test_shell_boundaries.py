@@ -59,13 +59,50 @@ class Boundaries(unittest.TestCase):
         config=self.root/'config';config.mkdir(exist_ok=True)
         secret=self.root/'secrets.json'
         secret.write_text(json.dumps({'radarr_api_key':'r','sonarr_api_key':'s','prowlarr_api_key':'p','qbit_pbkdf2':'fake','qbit_user':'u'}))
-        for policy in ['stop_sharing','share_to_ratio','share_one_day']:
+        expected={
+            'stop_sharing':['Session\\GlobalMaxRatio=0','Session\\GlobalMaxSeedingMinutes=-1'],
+            'share_to_ratio':['Session\\GlobalMaxRatio=1','Session\\GlobalMaxSeedingMinutes=-1'],
+            'share_one_day':['Session\\GlobalMaxRatio=-1','Session\\GlobalMaxSeedingMinutes=1440'],
+        }
+        for policy, needles in expected.items():
             proc=subprocess.run([sys.executable,str(BIN/'write_engine_configs.py'),str(secret),str(self.root/'media')],
                                 env={**self.env,'AFTER_DOWNLOAD':policy},capture_output=True,text=True)
             self.assertEqual(proc.returncode,0,proc.stderr)
-            text=(config/'qBittorrent/qBittorrent.conf').read_text()
-            self.assertIn('Session\\Interface=wg0',text)
-            self.assertIn('Session\\MaxRatioAct=0',text)
+            for path in (config/'qBittorrent/qBittorrent.conf', config/'qBittorrent/config/qBittorrent.conf'):
+                text=path.read_text()
+                self.assertIn('Session\\Interface=wg0',text)
+                self.assertIn('Session\\ShareLimitAction=Stop',text)
+                self.assertIn('Session\\GlobalMaxInactiveSeedingMinutes=-1',text)
+                for needle in needles:
+                    self.assertIn(needle,text)
+                self.assertNotIn('Session\\MaxRatio',text)
+
+    def test_qbit_conf_replaces_obsolete_ratio_keys(self):
+        config=self.root/'config';config.mkdir(exist_ok=True)
+        secret=self.root/'secrets.json'
+        secret.write_text(json.dumps({'radarr_api_key':'r','sonarr_api_key':'s','prowlarr_api_key':'p','qbit_pbkdf2':'fake','qbit_user':'u'}))
+        stale=(
+            '[BitTorrent]\n'
+            'Session\\MaxRatioEnabled=true\n'
+            'Session\\MaxRatio=0\n'
+            'Session\\MaxSeedingTimeEnabled=false\n'
+            'Session\\MaxSeedingTime=-1\n'
+            'Session\\MaxRatioAct=0\n'
+            'Session\\DisableAutoTMMByDefault=true\n'
+        )
+        for rel in ('qBittorrent/qBittorrent.conf','qBittorrent/config/qBittorrent.conf'):
+            path=config/rel
+            path.parent.mkdir(parents=True,exist_ok=True)
+            path.write_text(stale)
+        proc=subprocess.run([sys.executable,str(BIN/'write_engine_configs.py'),str(secret),str(self.root/'media')],
+                            env={**self.env,'AFTER_DOWNLOAD':'stop_sharing'},capture_output=True,text=True)
+        self.assertEqual(proc.returncode,0,proc.stderr)
+        for rel in ('qBittorrent/qBittorrent.conf','qBittorrent/config/qBittorrent.conf'):
+            text=(config/rel).read_text()
+            self.assertIn('Session\\GlobalMaxRatio=0',text)
+            self.assertIn('Session\\ShareLimitAction=Stop',text)
+            self.assertNotIn('MaxRatioEnabled',text)
+            self.assertNotIn('MaxRatioAct',text)
 
     def test_every_shell_entrypoint_parses(self):
         paths=list(BIN.iterdir())+list((ROOT/'pompey/rootfs/etc').glob('services.d/*/*'))+list((ROOT/'pompey/rootfs/etc').glob('cont-init.d/*'))

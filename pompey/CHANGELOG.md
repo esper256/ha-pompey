@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.4
+
+- Apply qBittorrent 5.2 share limits so Stop sharing pauses a finished torrent. Arr still removes it after import.
+
 ## 0.3.3
 
 - Unregister unused historical Arr library folders from older installs. Occupied or extra folders stay registered and are reported.

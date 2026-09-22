@@ -67,18 +67,70 @@ def qbit_queue_preferences(active: int | None = None) -> dict:
     }
 
 
+def qbit_share_limits(policy: str | None = None) -> dict:
+    """Ratio and seeding minutes for the household policy.
+
+    qBittorrent 5.2 stores these as GlobalMaxRatio / GlobalMaxSeedingMinutes.
+    A negative value disables that limit. Ratio 0 is reached as soon as the
+    download finishes. Arr removes the torrent later, after it imports.
+    """
+    chosen = policy or after_download()
+    if chosen == "share_to_ratio":
+        return {"ratio": 1, "seeding_minutes": -1}
+    if chosen == "share_one_day":
+        return {"ratio": -1, "seeding_minutes": 1440}
+    return {"ratio": 0, "seeding_minutes": -1}
+
+
+def qbit_seed_conf(policy: str | None = None) -> dict:
+    """Keys qBittorrent 5.2 reads. Older MaxRatio* lines are ignored."""
+    limits = qbit_share_limits(policy)
+    return {
+        r"Session\GlobalMaxRatio": str(limits["ratio"]),
+        r"Session\GlobalMaxSeedingMinutes": str(limits["seeding_minutes"]),
+        r"Session\GlobalMaxInactiveSeedingMinutes": "-1",
+        r"Session\ShareLimitAction": "Stop",
+    }
+
+
+def qbit_seed_preferences(policy: str | None = None) -> dict:
+    """WebAPI names. 5.2 accepts the value or the enabled flag, not both."""
+    limits = qbit_share_limits(policy)
+    prefs: dict = {
+        "max_inactive_seeding_time_enabled": False,
+        "max_ratio_act": 0,
+    }
+    if limits["ratio"] < 0:
+        prefs["max_ratio_enabled"] = False
+    else:
+        prefs["max_ratio"] = limits["ratio"]
+    if limits["seeding_minutes"] < 0:
+        prefs["max_seeding_time_enabled"] = False
+    else:
+        prefs["max_seeding_time"] = limits["seeding_minutes"]
+    return prefs
+
+
 def qbit_set_preferences_url() -> str:
     return f"{qbit_url()}/api/v2/app/setPreferences"
 
 
 def apply_qbit_queue() -> None:
-    """Restamp queue prefs on a running client (existing installs + Debug UI)."""
+    """Restamp queue and share limits on a running client.
+
+    The conf file is only read at startup, and qBittorrent 5.2 ignores the
+    MaxRatio keys older builds used. Push the live preferences too.
+    """
     prefs = qbit_queue_preferences()
+    prefs.update(qbit_seed_preferences())
     data = urllib.parse.urlencode({"json": json.dumps(prefs)}).encode()
     http("POST", qbit_set_preferences_url(), data)
+    limits = qbit_share_limits()
     log(
         f"qbit queue max_active_downloads={prefs['max_active_downloads']} "
-        f"max_active_torrents={prefs['max_active_torrents']} ignore_slow=true"
+        f"max_active_torrents={prefs['max_active_torrents']} ignore_slow=true "
+        f"share={after_download()} ratio={limits['ratio']} "
+        f"seeding_minutes={limits['seeding_minutes']}"
     )
 
 
