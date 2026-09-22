@@ -82,7 +82,12 @@ class Boundaries(unittest.TestCase):
                 self.assertIn('*.7z', excluded)
                 self.assertIn('*.iso', excluded)
                 self.assertIn('*.r00', excluded)
+                self.assertIn('*.rmvb', excluded)
+                self.assertIn('*.3gp', excluded)
+                self.assertIn('*.avi', excluded)
                 self.assertNotIn('*.mkv', excluded)
+                self.assertNotIn('*.mp4', excluded)
+                self.assertNotIn('*.m2ts', excluded)
                 self.assertNotIn('*.srt', excluded)
                 for needle in needles:
                     self.assertIn(needle,text)

@@ -1,9 +1,10 @@
 """Arr owns normal imports. Pompey stops at seeding goals, assists manual grabs,
 and drops downloads that have no playable video.
 
-Executables, scripts, archives, and disc images are removed. Notes, split
-archive parts, and sample clips do not keep a torrent. A real video that
-arrives beside one of those files stays, and so do its subtitles.
+Executables, scripts, archives, disc images, and obsolete video containers
+are removed. Notes, split archive parts, and sample clips do not keep a
+torrent. A current video that arrives beside one of those files stays, and
+so do its subtitles.
 Unmatched or ambiguous manual files remain available for operator review.
 """
 import os
