@@ -98,6 +98,18 @@ class MediaContracts(Sandbox):
             media.stop_at_goal([self.torrent(category='unrelated')])
             http.assert_not_called()
 
+    def test_share_preferences_match_qbit_52_api(self):
+        self.assertEqual(api.qbit_seed_preferences('stop_sharing'), {
+            'max_inactive_seeding_time_enabled': False, 'max_ratio_act': 0,
+            'max_ratio': 0, 'max_seeding_time_enabled': False,
+        })
+        self.assertEqual(api.qbit_seed_preferences('share_to_ratio')['max_ratio'], 1)
+        one_day = api.qbit_seed_preferences('share_one_day')
+        self.assertEqual(one_day['max_seeding_time'], 1440)
+        self.assertIs(one_day['max_ratio_enabled'], False)
+        self.assertNotIn('max_ratio', one_day)
+        self.assertNotIn('max_seeding_time_enabled', one_day)
+
     def test_malformed_download_list_is_an_error(self):
         with patch.object(api,'http',return_value={'error':'unavailable'}):
             with self.assertRaises(RuntimeError): media.maintain_downloads()
@@ -470,13 +482,13 @@ class RoutingContracts(Sandbox):
             if method=='GET':return [dict(item)]
             moves.append(body['rootFolderPath']);item['path']=body['rootFolderPath']+'/Example'
         with patch.object(routing,'http_json',side_effect=http):
-            routing.route_library('key','http://fake/movie',kid,general,auto,routing.KID_MOVIE,'movie')
+            routing.route_library('key','http://fake/movie',kid,general,[auto],routing.KID_MOVIE,'movie')
             item['certification']='PG'
-            routing.route_library('key','http://fake/movie',kid,general,auto,routing.KID_MOVIE,'movie')
+            routing.route_library('key','http://fake/movie',kid,general,[auto],routing.KID_MOVIE,'movie')
             # A subsequent explicit move out of the last automatic destination
             # relinquishes ownership instead of repeatedly undoing the choice.
             item['path']=general+'/Manually Chosen'
-            routing.route_library('key','http://fake/movie',kid,general,auto,routing.KID_MOVIE,'movie')
+            routing.route_library('key','http://fake/movie',kid,general,[auto],routing.KID_MOVIE,'movie')
         self.assertEqual(moves,[general,kid])
         self.assertEqual(state.load('routing-movie'),{})
 
@@ -525,6 +537,77 @@ class LeftoverRootContracts(Sandbox):
         with patch.object(wire_stack,'http',side_effect=http):
             notices=wire_stack.prune_root_folders('http://fake','k','radarr')
         self.assertEqual(folders,[])
+        self.assertEqual(notices,[])
+
+    def test_empty_retired_staging_root_is_removed(self):
+        legacy = api.legacy_movies_auto_dir()
+        Path(legacy).mkdir(parents=True)
+        folders=[{'id':4,'path':legacy}]
+        def http(method,url,body=None,**kw):
+            if method=='DELETE':
+                folders.clear(); return None
+            if url.endswith('/rootfolder'): return folders
+            if url.endswith('/movie'): return []
+            if url.endswith('/importlist'): return []
+            return []
+        with patch.object(wire_stack,'http',side_effect=http):
+            notices=wire_stack.prune_root_folders('http://fake','k','radarr')
+        self.assertEqual(folders,[])
+        self.assertFalse(Path(legacy).exists())
+        self.assertEqual(notices,[])
+
+    def test_retired_staging_with_files_stays_registered(self):
+        legacy = api.legacy_movies_auto_dir()
+        title = Path(legacy)/'Title'
+        title.mkdir(parents=True)
+        (title/'movie.mkv').write_bytes(b'keep')
+        folders=[{'id':4,'path':legacy}]
+        def http(method,url,body=None,**kw):
+            if method=='DELETE':
+                raise AssertionError('occupied staging root was unregistered')
+            if url.endswith('/rootfolder'): return folders
+            if url.endswith('/movie'): return [{'id':1,'path':str(title)}]
+            if url.endswith('/importlist'): return []
+            return []
+        with patch.object(wire_stack,'http',side_effect=http):
+            notices=wire_stack.prune_root_folders('http://fake','k','radarr')
+        self.assertEqual(folders,[{'id':4,'path':legacy}])
+        self.assertTrue((title/'movie.mkv').is_file())
+        self.assertTrue(any('still has files' in note for note in notices))
+
+    def test_retired_staging_keeps_an_empty_title_dir_while_arr_points_at_it(self):
+        legacy = api.legacy_movies_auto_dir()
+        title = Path(legacy)/'Title'
+        title.mkdir(parents=True)
+        folders=[{'id':4,'path':legacy}]
+        def http(method,url,body=None,**kw):
+            if method=='DELETE':
+                raise AssertionError('referenced staging root was unregistered')
+            if url.endswith('/rootfolder'): return folders
+            if url.endswith('/movie'): return [{'id':1,'path':str(title)}]
+            if url.endswith('/importlist'): return []
+            return []
+        with patch.object(wire_stack,'http',side_effect=http):
+            notices=wire_stack.prune_root_folders('http://fake','k','radarr')
+        self.assertEqual(folders,[{'id':4,'path':legacy}])
+        self.assertTrue(title.is_dir())
+        self.assertTrue(any('still in use' in note for note in notices))
+
+    def test_retired_staging_empty_directories_are_removed(self):
+        legacy = api.legacy_movies_auto_dir()
+        (Path(legacy)/'Gone Title').mkdir(parents=True)
+        folders=[{'id':4,'path':legacy}]
+        def http(method,url,body=None,**kw):
+            if method=='DELETE':
+                folders.clear(); return None
+            if url.endswith('/rootfolder'): return folders
+            if url.endswith('/movie'): return []
+            if url.endswith('/importlist'): return []
+            return []
+        with patch.object(wire_stack,'http',side_effect=http):
+            notices=wire_stack.prune_root_folders('http://fake','k','radarr')
+        self.assertEqual(folders,[])
+        self.assertFalse(Path(legacy).exists())
         self.assertEqual(notices,[])
 
 

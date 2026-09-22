@@ -13,7 +13,7 @@ Supervisor builds one thin container from `pompey/Dockerfile`. s6 supervises its
 | `wire_stack.py` | Reconcile required localhost connections and configuration |
 | `media_policy.py` | Respect sharing goals; conservatively submit matched manual grabs |
 | `request_policy.py` | Complete stable request snapshots and previously observed ownership |
-| `route_rating.py` | Ask Arr to move titles from By Rating into the appropriate library |
+| `route_rating.py` | Ask Arr to move titles from `downloads/By Rating` into the appropriate library |
 | Arr / Prowlarr / Recyclarr | Ordinary imports and upgrades / native source synchronization / quality configuration |
 
 Python sources have `.py` extensions and can be imported normally. Shell scripts are small environment and process entrypoints. There is no global Torznab rewrite proxy. Source-specific capability problems should be fixed at the source adapter, not by deleting identifiers from every search.

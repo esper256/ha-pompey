@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.4
+
+- Apply qBittorrent 5.2 share limits so Stop sharing pauses a finished torrent. Arr still removes it after import.
+- Stage By Rating under `downloads` so the movie and TV folders only contain the libraries people browse. Empty leftover staging folders are removed after their titles move.
+
 ## 0.3.3
 
 - Unregister unused historical Arr library folders from older installs. Occupied or extra folders stay registered and are reported.
