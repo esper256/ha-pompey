@@ -11,7 +11,7 @@ Supervisor builds one thin container from `pompey/Dockerfile`. s6 supervises its
 | `engine_manager.py` | Verified artifact staging, supervised service stop/start, transaction journal and database rollback |
 | `pompey_controller.py` | Independent scheduled jobs, deadlines, bounded exponential backoff, live health |
 | `wire_stack.py` | Reconcile required localhost connections and configuration |
-| `media_policy.py` | Respect sharing goals; remove downloads that contain only known junk payloads; conservatively submit matched manual grabs |
+| `media_policy.py` | Respect sharing goals; remove downloads that contain no playable video, including archives and disc images; conservatively submit matched manual grabs |
 | `request_policy.py` | Complete stable request snapshots and previously observed ownership |
 | `route_rating.py` | Ask Arr to move titles from `downloads/By Rating` into the appropriate library |
 | Arr / Prowlarr / Recyclarr | Ordinary imports and upgrades / native source synchronization / quality configuration |

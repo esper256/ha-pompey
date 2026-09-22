@@ -1,9 +1,9 @@
 """Arr owns normal imports. Pompey stops at seeding goals, assists manual grabs,
-and drops downloads that are only known junk payloads.
+and drops downloads that have no playable video.
 
-A torrent is removed only when every file name ends in an executable, script,
-or zipx-style extension. Video, subtitles, archives, and disc images stay.
-One of those junk files sitting beside a real video is removed on its own.
+Executables, scripts, archives, and disc images are removed. Notes, split
+archive parts, and sample clips do not keep a torrent. A real video that
+arrives beside one of those files stays, and so do its subtitles.
 Unmatched or ambiguous manual files remain available for operator review.
 """
 import os
@@ -157,13 +157,6 @@ def seed_times(items):
             item['seeding_time'] = properties['seeding_time']
 
 
-def extension_of(name):
-    base = str(name).replace('\\', '/').rsplit('/', 1)[-1]
-    if '.' not in base:
-        return ''
-    return base.rsplit('.', 1)[-1].lower()
-
-
 def unsafe_name(name):
     rel = str(name).replace('\\', '/').strip()
     if not rel or rel.startswith('/'):
@@ -210,22 +203,26 @@ def inside_download_file(path):
 
 
 def classify_files(files):
-    """junk when every name is a known payload; mixed when only some are; else unknown."""
+    """junk when no file is a playable video; mixed when junk sits beside one."""
     if not isinstance(files, list) or not files:
         return 'unknown'
-    kinds = []
+    saw_video = False
+    saw_junk = False
     for row in files:
         if not isinstance(row, dict):
             return 'unknown'
         name = row.get('name')
         if not isinstance(name, str) or not name.strip() or unsafe_name(name):
             return 'unknown'
-        kinds.append('junk' if extension_of(name) in api.JUNK_EXTENSIONS else 'keep')
-    if kinds and all(kind == 'junk' for kind in kinds):
-        return 'junk'
-    if any(kind == 'junk' for kind in kinds):
+        if api.is_video_name(name):
+            saw_video = True
+        elif api.is_junk_extension(api.extension_of(name)):
+            saw_junk = True
+    if saw_video and saw_junk:
         return 'mixed'
-    return 'keep'
+    if saw_video:
+        return 'keep'
+    return 'junk'
 
 
 def candidate_paths(torrent, name):
@@ -288,8 +285,10 @@ def remove_empty_parents(start):
         current = current.parent
 
 
-def unlink_contained_junk(torrent, name):
-    if unsafe_name(name) or extension_of(name) not in api.JUNK_EXTENSIONS:
+def unlink_contained_file(torrent, name, junk_only):
+    if unsafe_name(name) or api.is_video_name(name):
+        return False
+    if junk_only and not api.is_junk_extension(api.extension_of(name)):
         return False
     for candidate in candidate_paths(torrent, name):
         try:
@@ -298,7 +297,9 @@ def unlink_contained_junk(torrent, name):
             resolved = candidate.resolve()
         except OSError:
             continue
-        if extension_of(resolved.name) not in api.JUNK_EXTENSIONS:
+        if api.is_video_name(resolved.name):
+            continue
+        if junk_only and not api.is_junk_extension(api.extension_of(resolved.name)):
             continue
         if not inside_download_file(resolved):
             continue
@@ -408,7 +409,7 @@ def remove_junk_torrent(torrent, files, secrets):
         if '-> 404' not in str(exc):
             api.log(f'could not remove junk download {digest}: {exc}', 'WARNING')
     for row in files:
-        unlink_contained_junk(torrent, row.get('name') or '')
+        unlink_contained_file(torrent, row.get('name') or '', junk_only=False)
     api.log(f"removed junk download {torrent.get('name') or digest}")
 
 
@@ -418,7 +419,7 @@ def drop_junk_sidecars(torrent, files):
     names = []
     for index, row in enumerate(files):
         name = row.get('name') or ''
-        if extension_of(name) not in api.JUNK_EXTENSIONS:
+        if not api.is_junk_extension(api.extension_of(name)):
             continue
         indexes.append(str(index))
         names.append(name)
@@ -430,16 +431,18 @@ def drop_junk_sidecars(torrent, files):
     except RuntimeError as exc:
         api.log(f'could not skip junk files in {digest}: {exc}', 'WARNING')
     for name in names:
-        unlink_contained_junk(torrent, name)
+        unlink_contained_file(torrent, name, junk_only=True)
     api.log(f"removed junk files from {torrent.get('name') or digest}")
 
 
 def discard_junk(items, secrets):
-    """Drop obvious payload downloads from the managed download folders.
+    """Drop downloads that a nontechnical household cannot watch.
 
-    Skip metadata and allocation states, empty file lists, and anything that
-    is not entirely a known junk extension. Never delete a video, archive,
-    disc image, or a file outside the incomplete, complete, and manual folders.
+    A playable video keeps the torrent. Executables, archives, disc images,
+    and split archive parts beside that video are removed. With no playable
+    video, the torrent goes, including its notes and sample clip. Skip
+    metadata and allocation states, empty file lists, and unsafe names.
+    Never delete a file outside the incomplete, complete, and manual folders.
     """
     for torrent in items:
         if not isinstance(torrent, dict):

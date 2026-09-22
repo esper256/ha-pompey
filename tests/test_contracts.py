@@ -191,17 +191,20 @@ class MediaContracts(Sandbox):
             'script.ps1',
             'payload.js',
             'Site.com.S01E01.mkv',
+            'Release.rar',
+            'Release.zip',
+            'Release.7z',
+            'Disc.iso',
+            'Show.r00',
         ):
             self.assertRegex(name, pattern)
         for name in (
             'Show.S01E01.1080p.WEB.x264-GROUP.mkv',
             'Movie.2024.1080p.BluRay.mkv',
-            'Release.rar',
-            'Release.zip',
-            'Release.7z',
-            'Disc.iso',
+            'Movie.2020.1080p.BluRay.mkv',
             'notes.nfo',
             'file.json',
+            'file.srt',
             'Show.S01.COMPLETE.1080p.mkv',
             'Something.executive.Cut.mkv',
         ):
@@ -209,10 +212,20 @@ class MediaContracts(Sandbox):
         names = api.qbit_junk_preferences()['excluded_file_names'].split('\n')
         self.assertIn('*.exe', names)
         self.assertIn('*.zipx', names)
-        self.assertNotIn('*.zip', names)
+        self.assertIn('*.zip', names)
+        self.assertIn('*.rar', names)
+        self.assertIn('*.7z', names)
+        self.assertIn('*.iso', names)
+        self.assertIn('*.r00', names)
+        self.assertIn('*.s00', names)
         self.assertNotIn('*.mkv', names)
-        self.assertNotIn('*.rar', names)
-        self.assertNotIn('*.iso', names)
+        self.assertNotIn('*.srt', names)
+        self.assertTrue(api.is_junk_extension('001'))
+        self.assertTrue(api.is_junk_extension('s00'))
+        self.assertFalse(api.is_junk_extension('srt'))
+        self.assertFalse(api.is_junk_extension('mkv'))
+        self.assertTrue(api.is_video_name('Show/Show.S01E01.mkv'))
+        self.assertFalse(api.is_video_name('Show/Sample/sample.mkv'))
 
     def test_all_junk_download_is_removed_and_blocklisted(self):
         payload = self.video('downloads/complete/FakeShow/FakeShow.exe')
@@ -274,6 +287,8 @@ class MediaContracts(Sandbox):
         video = self.video('downloads/complete/Show/Show.mkv')
         exe = video.with_suffix('.exe')
         exe.write_bytes(b'MZ')
+        archive = video.with_suffix('.rar')
+        archive.write_bytes(b'rar')
         item = self.torrent(
             hash='mix',
             content_path=str(video.parent),
@@ -283,31 +298,68 @@ class MediaContracts(Sandbox):
         files = [
             {'name': 'Show/Show.mkv', 'priority': 1},
             {'name': 'Show/Show.exe', 'priority': 1},
+            {'name': 'Show/Show.rar', 'priority': 1},
         ]
         calls = self.run_downloads(item, files)
         self.assertTrue(video.exists())
         self.assertFalse(exe.exists())
+        self.assertFalse(archive.exists())
         self.assertTrue(video.parent.exists())
         self.assertFalse(any('/torrents/delete' in c[1] for c in calls))
         self.assertFalse(any(c[0] == 'DELETE' for c in calls))
         prios = [c for c in calls if '/filePrio' in c[1]]
         self.assertEqual(len(prios), 1)
         self.assertIn(b'priority=0', prios[0][2])
-        self.assertIn(b'id=1', prios[0][2])
+        self.assertIn(b'id=1%7C2', prios[0][2])
 
-    def test_archives_and_disc_images_are_kept(self):
+    def test_archives_and_disc_images_are_removed(self):
         folder = Path(api.downloads_complete()) / 'Pack'
         folder.mkdir(parents=True)
-        kept = []
-        for name in ('Pack.zip', 'Pack.rar', 'Pack.7z', 'Pack.iso', 'readme'):
+        removed = []
+        for name in ('Pack.zip', 'Pack.rar', 'Pack.r00', 'Pack.7z', 'Pack.iso', 'readme', 'Pack.nfo', 'Pack.sfv'):
             path = folder / name
             path.write_bytes(b'pack')
-            kept.append(path)
+            removed.append(path)
         item = self.torrent(hash='pack', content_path=str(folder), save_path=str(Path(api.downloads_complete())))
-        files = [{'name': f'Pack/{path.name}'} for path in kept]
+        files = [{'name': f'Pack/{path.name}'} for path in removed]
         calls = self.run_downloads(item, files)
-        for path in kept:
-            self.assertTrue(path.exists(), path.name)
+        for path in removed:
+            self.assertFalse(path.exists(), path.name)
+        self.assertFalse(folder.exists())
+        self.assertTrue(Path(api.downloads_complete()).exists())
+        self.assertTrue(any('/torrents/delete' in c[1] and b'deleteFiles=true' in c[2] for c in calls))
+
+    def test_sample_clip_does_not_keep_an_archive(self):
+        folder = Path(api.downloads_complete()) / 'Show'
+        sample = folder / 'Sample' / 'sample.mkv'
+        sample.parent.mkdir(parents=True)
+        sample.write_bytes(b'sample')
+        archive = folder / 'Show.rar'
+        archive.write_bytes(b'rar')
+        item = self.torrent(hash='sample', content_path=str(folder), save_path=str(Path(api.downloads_complete())))
+        files = [
+            {'name': 'Show/Sample/sample.mkv'},
+            {'name': 'Show/Show.rar'},
+        ]
+        calls = self.run_downloads(item, files)
+        self.assertFalse(sample.exists())
+        self.assertFalse(archive.exists())
+        self.assertFalse(folder.exists())
+        self.assertTrue(any('/torrents/delete' in c[1] for c in calls))
+
+    def test_subtitles_stay_with_the_video(self):
+        video = self.video('downloads/complete/Show/Show.mkv')
+        subtitle = video.with_suffix('.srt')
+        subtitle.write_text('subtitle')
+        item = self.torrent(
+            hash='subs',
+            content_path=str(video.parent),
+            save_path=str(Path(api.downloads_complete())),
+        )
+        files = [{'name': 'Show/Show.mkv'}, {'name': 'Show/Show.srt'}]
+        calls = self.run_downloads(item, files)
+        self.assertTrue(video.exists())
+        self.assertTrue(subtitle.exists())
         self.assertFalse(any('/torrents/delete' in c[1] or '/filePrio' in c[1] for c in calls))
 
     def test_metadata_empty_foreign_and_outside_junk_stay(self):

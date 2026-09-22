@@ -116,9 +116,10 @@ def qbit_seed_preferences(policy: str | None = None) -> dict:
     return prefs
 
 
-# Payloads that pretend to be a show. Archives and disc images stay: scene
-# packs and full discs are real downloads. A missing or unknown extension
-# stays too. Housekeeping only removes a torrent when every file is in this set.
+# Nothing in this household unpacks scene archives or mounts disc images.
+# A download stays only when it contains a playable video; these extensions
+# are removed on their own, and they take the torrent with them when no video
+# is present. Split volumes (.r00, .s00, .001) travel with those archives.
 JUNK_EXTENSIONS = (
     "exe",
     "zipx",
@@ -140,20 +141,88 @@ JUNK_EXTENSIONS = (
     "cpl",
     "reg",
     "dll",
+    "zip",
+    "rar",
+    "7z",
+    "iso",
 )
+
+VIDEO_EXTENSIONS = frozenset({
+    "mkv",
+    "mp4",
+    "m4v",
+    "avi",
+    "mpg",
+    "mpeg",
+    "mov",
+    "wmv",
+    "ts",
+    "m2ts",
+    "mts",
+    "vob",
+    "flv",
+    "webm",
+    "divx",
+    "ogm",
+    "rm",
+    "rmvb",
+    "asf",
+    "wtv",
+    "3gp",
+    "m2v",
+    "ogv",
+})
+
+
+def extension_of(name: str) -> str:
+    base = str(name).replace("\\", "/").rsplit("/", 1)[-1]
+    if "." not in base:
+        return ""
+    return base.rsplit(".", 1)[-1].lower()
+
+
+def is_junk_extension(ext: str) -> bool:
+    ext = str(ext or "").lower()
+    if ext in JUNK_EXTENSIONS:
+        return True
+    if len(ext) == 3 and ext[0] in {"r", "s"} and ext[1:].isdigit():
+        return True
+    return len(ext) == 3 and ext.isdigit()
+
+
+def is_sample_video(name: str) -> bool:
+    """Scene sample clips are not the episode. Arr will not import them."""
+    rel = str(name).replace("\\", "/").strip()
+    parts = [part for part in rel.split("/") if part and part != "."]
+    if any(part.lower() == "sample" for part in parts[:-1]):
+        return True
+    base = parts[-1] if parts else ""
+    stem = base.rsplit(".", 1)[0] if "." in base else base
+    lowered = stem.lower()
+    return lowered == "sample" or lowered.endswith((".sample", "-sample", "_sample"))
+
+
+def is_video_name(name: str) -> bool:
+    if is_sample_video(name):
+        return False
+    return extension_of(name) in VIDEO_EXTENSIONS
 
 
 def junk_wildcards() -> list[str]:
-    return [f"*.{ext}" for ext in JUNK_EXTENSIONS]
+    names = [f"*.{ext}" for ext in JUNK_EXTENSIONS]
+    names.extend(f"*.r{i:02d}" for i in range(100))
+    names.extend(f"*.s{i:02d}" for i in range(100))
+    return names
 
 
 def junk_release_pattern() -> str:
     """Arr ignored-regex for a release title that names one of these payloads.
 
     The extension has to end the name or be followed by a non-letter, so
-    `file.json` and `COMPLETE` are left alone while `file.js` and `file.exe` match.
+    `file.json`, `file.srt`, and `Show.S01` are left alone while `file.rar`
+    and `file.r00` match. Season numbers are not archive parts.
     """
-    body = "|".join(JUNK_EXTENSIONS)
+    body = "|".join([*JUNK_EXTENSIONS, r"r\d{2}"])
     return rf"(?i)\.(?:{body})(?:$|[^a-z0-9])"
 
 

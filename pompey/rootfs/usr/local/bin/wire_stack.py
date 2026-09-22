@@ -507,7 +507,7 @@ def ensure_release_restriction(base: str, api_key: str, kind: str) -> None:
             )
         except RuntimeError as exc:
             raise RuntimeError(f"{kind} release restrictions failed") from exc
-        log(f"{kind} ignores releases named like executable or script payloads")
+        log(f"{kind} ignores releases named like executables, archives, or disc images")
         return
     try:
         http(
@@ -518,7 +518,7 @@ def ensure_release_restriction(base: str, api_key: str, kind: str) -> None:
         )
     except RuntimeError as exc:
         raise RuntimeError(f"{kind} release restrictions failed") from exc
-    log(f"{kind} ignores releases named like executable or script payloads")
+    log(f"{kind} ignores releases named like executables, archives, or disc images")
 
 
 def ensure_download_client_handling(base: str, api_key: str, kind: str) -> None:

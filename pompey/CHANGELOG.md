@@ -4,7 +4,7 @@
 
 - Apply qBittorrent 5.2 share limits so Stop sharing pauses a finished torrent. Arr still removes it after import.
 - Stage By Rating under `downloads` so the movie and TV folders only contain the libraries people browse. Empty leftover staging folders are removed after their titles move.
-- Ignore executable and script payloads, including `.zipx`, so `downloads/complete` does not keep virus-named releases. Arr skips those release names, qBittorrent skips the files, and a download that is only those files is removed and blocklisted.
+- Ignore executable, script, archive, and disc-image payloads, including `.zip`, `.rar`, `.7z`, `.iso`, and `.zipx`. A download with no playable video is removed and blocklisted. A video that arrives beside one of those files keeps the video.
 
 ## 0.3.3
 

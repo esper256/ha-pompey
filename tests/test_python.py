@@ -1613,15 +1613,20 @@ class WireStack(unittest.TestCase):
         excluded = str(queue.get("excluded_file_names") or "").split("\n")
         self.assertIn("*.exe", excluded)
         self.assertIn("*.zipx", excluded)
-        self.assertNotIn("*.zip", excluded)
+        self.assertIn("*.zip", excluded)
+        self.assertIn("*.rar", excluded)
+        self.assertIn("*.7z", excluded)
+        self.assertIn("*.iso", excluded)
         self.assertNotIn("*.mkv", excluded)
-        self.assertNotIn("*.rar", excluded)
+        self.assertNotIn("*.srt", excluded)
         for role in ("radarr", "sonarr", "prowlarr"):
             rows = self.state.restrictions[role]
             self.assertEqual(len(rows), 1, role)
             ignored = rows[0].get("ignored") or ""
             self.assertIn("exe", ignored)
             self.assertIn("zipx", ignored)
+            self.assertIn("rar", ignored)
+            self.assertIn("iso", ignored)
             self.assertNotIn("mkv", ignored)
 
 
