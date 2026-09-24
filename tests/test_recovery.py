@@ -46,12 +46,14 @@ class Recovery(Sandbox):
 
     def test_malformed_root_snapshots_never_authorize_cleanup(self):
         root = [{'id': 1, 'path': '/media/Movies'}]
-        for invalid in [{'error': 'unavailable'}, {'records': []}, [None], [{'id': 5}]]:
-            def http(method, url, **kw):
-                return root if url.endswith('/rootfolder') else invalid
-            with self.subTest(invalid=invalid), patch.object(wire_stack, 'http', side_effect=http) as calls:
-                self.assertTrue(wire_stack.prune_root_folders('http://fake', 'key', 'radarr'))
-                self.assertTrue(all(c.args[0] == 'GET' for c in calls.call_args_list))
+        for endpoint in ['movie', 'importlist']:
+            for invalid in [{'error': 'unavailable'}, {'records': []}, [None], [{'id': 5}], [{'id': 5, 'path': 123, 'rootFolderPath': 123}]]:
+                def http(method, url, **kw):
+                    if url.endswith('/rootfolder'): return root
+                    return invalid if url.endswith('/' + endpoint) else []
+                with self.subTest(endpoint=endpoint, invalid=invalid), patch.object(wire_stack, 'http', side_effect=http) as calls:
+                    self.assertTrue(wire_stack.prune_root_folders('http://fake', 'key', 'radarr'))
+                    self.assertTrue(all(c.args[0] == 'GET' for c in calls.call_args_list))
 
     def test_moves_wait_retry_and_verify_actual_files(self):
         source = self.video('downloads/By Rating/Movies/Example/Example.mkv')

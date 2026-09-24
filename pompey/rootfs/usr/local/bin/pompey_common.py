@@ -146,13 +146,18 @@ class ApiError(RuntimeError):
 
 
 def object_list(value, context, required=()):
-    """Validate snapshots before absence can authorize a mutation."""
-    if not isinstance(value, list) or any(
-        not isinstance(row, dict) or any(row.get(key) is None for key in required)
-        for row in value
-    ):
+    """Validate Arr snapshots before absence can authorize a mutation."""
+    field_types = {'id': int, 'tmdbId': int, 'tvdbId': int, 'seasonNumber': int,
+                   'path': str, 'rootFolderPath': str, 'name': str, 'status': str, 'monitored': bool}
+    if not isinstance(value, list) or any(not isinstance(row, dict) for row in value):
         raise RuntimeError('Invalid ' + context + ' snapshot')
+    for row in value:
+        for key in required:
+            item = row.get(key)
+            if item is None or item == '' or (key in field_types and type(item) is not field_types[key]):
+                raise RuntimeError('Invalid ' + context + ' snapshot: ' + key)
     return value
+
 
 
 def as_list(value):

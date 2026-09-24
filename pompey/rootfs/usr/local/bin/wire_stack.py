@@ -172,7 +172,7 @@ def prune_root_folders(base: str, api_key: str, kind: str) -> list[str]:
         titles = object_list(
             http("GET", f"{base}/{arr_title_collection(kind)}", headers=arr_headers(api_key)), "library titles", ("id", "path")
         )
-        lists = object_list(http("GET", f"{base}/importlist", headers=arr_headers(api_key)), "import lists", ("id",))
+        lists = object_list(http("GET", f"{base}/importlist", headers=arr_headers(api_key)), "import lists", ("id", "rootFolderPath"))
     except RuntimeError as exc:
         log(f"{kind} leftover roots: {exc}", "WARNING")
         return [f"{kind} library contents could not be checked; extra roots were left registered"]
