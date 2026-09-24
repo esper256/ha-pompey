@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.3.6
+
+- Accept smaller 1080p movie releases while preferring approximately 3.5 GB for a two-hour movie.
+
 ## 0.3.5
 
 - Wait for Arr wiring before running maintenance jobs during startup.
