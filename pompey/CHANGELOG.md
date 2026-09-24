@@ -2,10 +2,14 @@
 
 ## Unreleased
 
+## 0.3.5
+
 - Keep manual imports moving when an earlier import loses its status.
 - Track library moves and report blocked imports or delayed maintenance.
 - Preserve other requested and manually monitored seasons when cancelling TV requests.
 - Leave libraries unchanged when service responses are incomplete.
+- Reject malformed Arr identities, library paths and snapshots before cleanup or routing mutations.
+- Serialize mutating maintenance jobs so concurrent retries do not interfere with one another.
 
 ## 0.3.4
 
