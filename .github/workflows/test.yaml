@@ -56,7 +56,7 @@ jobs:
       POMPEY_SEARCH_MODE: ${{ (github.event_name == 'pull_request' && 'pr') || 'full' }}
     steps:
       - uses: actions/checkout@v7.0.1
-      - uses: actions/cache@v4
+      - uses: actions/cache@v5
         with:
           path: ~/.cache/pompey
           key: pompey-contracts-${{ runner.os }}-${{ hashFiles('pompey/rootfs/usr/share/pompey/engines.json') }}
@@ -78,7 +78,7 @@ jobs:
     timeout-minutes: 8
     steps:
       - uses: actions/checkout@v7.0.1
-      - uses: actions/cache@v4
+      - uses: actions/cache@v5
         with:
           path: ~/.cache/pompey
           key: pompey-contracts-${{ runner.os }}-${{ hashFiles('pompey/rootfs/usr/share/pompey/engines.json') }}
@@ -97,7 +97,7 @@ jobs:
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v7.0.1
-      - uses: actions/cache@v4
+      - uses: actions/cache@v5
         with:
           path: ~/.cache/pompey
           key: pompey-contracts-${{ runner.os }}-${{ hashFiles('pompey/rootfs/usr/share/pompey/engines.json') }}
@@ -109,7 +109,7 @@ jobs:
           POMPEY_ANIME_MODE: ${{ (github.event_name == 'pull_request' && 'pr') || 'full' }}
           SEARCH_TIMEOUT: ${{ (github.event_name == 'pull_request' && '420s') || '1200s' }}
           POMPEY_ANIME_REPORT: ${{ runner.temp }}/anime/report.json
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: sonarr-anime-decisions
@@ -184,12 +184,12 @@ jobs:
         run: timeout 1200s python3 tests/test_anime_integration.py -v
       - name: Candidate peerless downloader
         run: timeout 360s python3 tests/test_qbit_integration.py -v
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: candidate-anime-decisions
           path: ${{ runner.temp }}/candidate-anime/
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: candidate-manifest
