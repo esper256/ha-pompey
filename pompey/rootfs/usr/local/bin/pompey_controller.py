@@ -54,11 +54,12 @@ def execute(job):
     return True
 
 
-def dispatch(jobs, pool, now):
-    """One mutation at a time; downloads run before routine configuration."""
-    busy = any(j.exclusive and j.future is not None for j in jobs)
+def dispatch(jobs, pool, now, ready):
+    """Configure Arr first; routine jobs wait until the stack is wired."""
+    candidates = jobs if (ready / 'arr-wired').exists() else [j for j in jobs if j.name == 'configuration']
+    busy = any(j.exclusive and j.future is not None for j in candidates)
     priority = {'downloads': 0, 'requests': 1, 'routing': 2, 'configuration': 3, 'updates': 4}
-    for job in sorted(jobs, key=lambda j: priority[j.name]):
+    for job in sorted(candidates, key=lambda j: priority[j.name]):
         if job.future is not None or now < job.due:
             continue
         job.phase = 'waiting'
@@ -114,7 +115,7 @@ def main():
                         print(f'{job.name}: {exc}',flush=True)
                         job.complete(now, False)
             if (ready/'engines-ready').exists():
-                dispatch(jobs, pool, now)
+                dispatch(jobs, pool, now, ready)
             if now >= next_health:
                 current = health(ready)
                 if any(current.get(k) and not observed.get(k) for k in current):

@@ -158,14 +158,20 @@ class Scheduling(Sandbox):
         self.assertFalse(controller.job_status(job, 101)['overdue'])
         self.assertTrue(controller.job_status(job, 161)['overdue'])
 
-    def test_downloads_have_priority_and_only_one_mutator_is_dispatched(self):
+    def test_configuration_gates_mutators_until_arr_wired(self):
         jobs = [controller.Job(name, [], 30, 120) for name in ['configuration', 'routing', 'downloads']]
+        ready = self.root / 'ready'
         pool = Mock(); pool.submit.side_effect = lambda *args: Future()
-        controller.dispatch(jobs, pool, 100)
+        controller.dispatch(jobs, pool, 100, ready)
         self.assertEqual(pool.submit.call_count, 1)
+        self.assertEqual(pool.submit.call_args.args[1].name, 'configuration')
+        jobs[0].future = None; jobs[0].complete(100, True)
+        ready.mkdir(parents=True, exist_ok=True)
+        (ready / 'arr-wired').touch()
+        controller.dispatch(jobs, pool, 101, ready)
         self.assertEqual(pool.submit.call_args.args[1].name, 'downloads')
-        jobs[2].future = None; jobs[2].complete(100, True)
-        controller.dispatch(jobs, pool, 101)
+        jobs[2].future = None; jobs[2].complete(101, True)
+        controller.dispatch(jobs, pool, 102, ready)
         self.assertEqual(pool.submit.call_args.args[1].name, 'routing')
 
 
