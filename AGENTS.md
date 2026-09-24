@@ -14,6 +14,8 @@ Do not use CI watch commands, repeated polling, sleep loops, background watchers
 
 Fix failures already observed within the task's scope, run the relevant local checks, and push the fix without waiting for the new CI run. Revisit later results when the user requests it. Only wait for CI when the user explicitly asks to wait or a requested merge requires checking completion. Keep required CI checks and the manual HAOS release gate intact; never bypass them to merge or release.
 
+PR CI uses `POMPEY_ANIME_MODE=pr` and `POMPEY_SEARCH_MODE=pr` for focused real-engine tests. Use these modes when validating changes to the PR harness. Full mode remains the default for main, scheduled/manual and candidate runs; do not launch it locally merely to duplicate CI. See the testing guide for coverage differences. CI builds amd64 only, once, and tests that image. `CI required` is the stable aggregate check for branch protection.
+
 ## Runtime constraints
 
 Torrent clients may run only in the dedicated peerless integration harness after it verifies a fresh loopback-only network namespace, with no external interface or route. Never contact peers or wait for them. All other tests must use HTTP downloader fakes. Fake Torznab and downloader HTTP APIs are allowed. Use synthetic media. Public metadata lookup by real Arr is allowed. Never apply an OUTPUT DROP policy or change default routes in the host namespace; use isolated network namespaces for firewall/handshake tests. `pompey-dev-vpn` is an optional legacy local helper, not the product VPN or a required CI gate.

@@ -9,22 +9,51 @@ on:
     - cron: '17 4 * * 1'
 permissions:
   contents: read
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
+  changes:
+    name: Select checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    outputs:
+      code: ${{ steps.scope.outputs.code }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 0
+      - id: scope
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: python3 tools/ci_scope.py
+
   fast:
     name: Behavioral and network failure contracts
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v7.0.1
       - run: sudo apt-get update && sudo apt-get install -y python3-yaml jq shellcheck nginx wireguard-tools iproute2 nftables iputils-ping
-      - run: bash tests/run.sh
+      - name: Behavioral and isolated network tests
+        run: bash tests/run.sh
         env:
           POMPEY_REQUIRE_NETWORK_TESTS: '1'
 
   integration:
     name: Pinned real engine contracts
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 12
+    env:
+      POMPEY_REAL_ENGINES: '1'
+      POMPEY_REAL_SEERR: '1'
+      POMPEY_SEARCH_MODE: ${{ (github.event_name == 'pull_request' && 'pr') || 'full' }}
     steps:
       - uses: actions/checkout@v7.0.1
       - uses: actions/cache@v4
@@ -32,15 +61,21 @@ jobs:
           path: ~/.cache/pompey
           key: pompey-contracts-${{ runner.os }}-${{ hashFiles('pompey/rootfs/usr/share/pompey/engines.json') }}
       - run: sudo apt-get update && sudo apt-get install -y python3-yaml ffmpeg libicu74
-      - run: python3 tests/test_engine_artifacts.py -v && python3 tests/test_arr_integration.py -v && python3 tests/test_orchestration.py -v && python3 tests/test_seerr_real.py -v
-        env:
-          POMPEY_REAL_ENGINES: '1'
-          POMPEY_REAL_SEERR: '1'
+      - name: Verify pinned artifacts
+        run: timeout 180s python3 tests/test_engine_artifacts.py -v
+      - name: Arr imports and Recyclarr profiles
+        run: timeout 180s python3 tests/test_arr_integration.py -v
+      - name: Sonarr and Prowlarr orchestration
+        run: timeout 360s python3 tests/test_orchestration.py -v
+      - name: Seerr initialization
+        run: timeout 120s python3 tests/test_seerr_real.py -v
 
   downloader:
     name: Isolated real qBittorrent and Sonarr
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 8
     steps:
       - uses: actions/checkout@v7.0.1
       - uses: actions/cache@v4
@@ -48,15 +83,18 @@ jobs:
           path: ~/.cache/pompey
           key: pompey-contracts-${{ runner.os }}-${{ hashFiles('pompey/rootfs/usr/share/pompey/engines.json') }}
       - run: sudo apt-get update && sudo apt-get install -y python3-yaml ffmpeg libicu74 iproute2 util-linux
-      - run: python3 tests/test_qbit_integration.py -v
+      - name: Peerless downloader lifecycle
+        run: timeout 360s python3 tests/test_qbit_integration.py -v
         env:
           POMPEY_REAL_ENGINES: '1'
           POMPEY_REAL_QBIT: '1'
 
   anime:
     name: Real Sonarr anime selection and imports
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v7.0.1
       - uses: actions/cache@v4
@@ -64,9 +102,12 @@ jobs:
           path: ~/.cache/pompey
           key: pompey-contracts-${{ runner.os }}-${{ hashFiles('pompey/rootfs/usr/share/pompey/engines.json') }}
       - run: sudo apt-get update && sudo apt-get install -y python3-yaml ffmpeg libicu74
-      - run: python3 tests/test_anime_integration.py -v
+      - name: Anime decisions, imports and request budget
+        run: timeout "$SEARCH_TIMEOUT" python3 tests/test_anime_integration.py -v
         env:
           POMPEY_REAL_ENGINES: '1'
+          POMPEY_ANIME_MODE: ${{ (github.event_name == 'pull_request' && 'pr') || 'full' }}
+          SEARCH_TIMEOUT: ${{ (github.event_name == 'pull_request' && '420s') || '1200s' }}
           POMPEY_ANIME_REPORT: ${{ runner.temp }}/anime/report.json
       - uses: actions/upload-artifact@v4
         if: always()
@@ -76,34 +117,73 @@ jobs:
 
   runtime:
     name: Built add-on runtime smoke
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7.0.1
-      - run: docker build --build-arg BUILD_ARCH=amd64 -t local/pompey:test pompey/
-      # This starts only API/layout fixtures, never s6, the VPN or a torrent client.
-      - run: docker run --rm --entrypoint python3 -v "$PWD/tests/smoke_runtime.py:/smoke.py:ro" local/pompey:test /smoke.py
+      - run: sudo apt-get update && sudo apt-get install -y python3-yaml
+      - name: Build amd64 add-on with release metadata
+        run: |
+          version=$(python3 -c 'import yaml; print(yaml.safe_load(open("pompey/config.yaml"))["version"])')
+          docker build --build-arg BUILD_ARCH=amd64 --build-arg BUILD_VERSION="$version" --build-arg BUILD_REF="$GITHUB_SHA" -t local/pompey:test pompey/
+      # Same image, no second build. Never boot s6, the VPN or a torrent client.
+      - name: Verify built musl runtime
+        run: timeout 180s docker run --rm --entrypoint python3 -v "$PWD/tests/smoke_runtime.py:/smoke.py:ro" local/pompey:test /smoke.py
+
+  required:
+    name: CI required
+    if: always()
+    needs: [changes, fast, integration, downloader, anime, runtime]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    steps:
+      - name: Require all selected checks
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          python3 - <<'PYTHON'
+          import json, os
+          jobs = json.loads(os.environ['NEEDS'])
+          assert jobs['changes']['result'] == 'success', jobs
+          code = jobs['changes']['outputs']['code']
+          assert code in {'true', 'false'}, jobs
+          expected = 'success' if code == 'true' else 'skipped'
+          assert all(job['result'] == expected for name, job in jobs.items() if name != 'changes'), jobs
+          PYTHON
 
   candidate:
     name: Upstream candidate (never promoted automatically)
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04
-    timeout-minutes: 90
+    timeout-minutes: 45
+    env:
+      POMPEY_ENGINE_MANIFEST: /tmp/candidate.json
+      POMPEY_REAL_ENGINES: '1'
+      POMPEY_REAL_SEERR: '1'
+      POMPEY_REAL_QBIT: '1'
+      POMPEY_SEARCH_MODE: full
+      POMPEY_ANIME_MODE: full
     steps:
       - uses: actions/checkout@v7.0.1
       - run: sudo apt-get update && sudo apt-get install -y python3-yaml ffmpeg libicu74 iproute2 util-linux
-      - run: python3 tools/build_engine_manifest.py /tmp/candidate.json
-      - run: python3 tests/test_engine_artifacts.py -v && python3 tests/test_arr_integration.py -v && python3 tests/test_orchestration.py -v && python3 tests/test_seerr_real.py -v
+      - name: Discover candidate bundle
+        run: timeout 300s python3 tools/build_engine_manifest.py /tmp/candidate.json
+      - name: Verify candidate artifacts
+        run: timeout 600s python3 tests/test_engine_artifacts.py -v
+      - name: Candidate Arr imports and profiles
+        run: timeout 180s python3 tests/test_arr_integration.py -v
+      - name: Candidate orchestration
+        run: timeout 360s python3 tests/test_orchestration.py -v
+      - name: Candidate Seerr initialization
+        run: timeout 300s python3 tests/test_seerr_real.py -v
+      - name: Full candidate anime matrix
         env:
-          POMPEY_ENGINE_MANIFEST: /tmp/candidate.json
-          POMPEY_REAL_ENGINES: '1'
-          POMPEY_REAL_SEERR: '1'
-      - run: python3 tests/test_anime_integration.py -v && python3 tests/test_qbit_integration.py -v
-        env:
-          POMPEY_ENGINE_MANIFEST: /tmp/candidate.json
-          POMPEY_REAL_ENGINES: '1'
-          POMPEY_REAL_QBIT: '1'
           POMPEY_ANIME_REPORT: ${{ runner.temp }}/candidate-anime/report.json
+        run: timeout 1200s python3 tests/test_anime_integration.py -v
+      - name: Candidate peerless downloader
+        run: timeout 360s python3 tests/test_qbit_integration.py -v
       - uses: actions/upload-artifact@v4
         if: always()
         with:

@@ -44,6 +44,10 @@ class Orchestration(RealArrTestCase):
             time.sleep(.5)
         else: raise RuntimeError('World Trigger metadata unavailable')
 
+    def setUp(self):
+        started = time.monotonic()
+        self.addCleanup(lambda: print(f"TIMING {self.id()}: {time.monotonic()-started:.2f}s", flush=True))
+
     def server(self, handler):
         server = ThreadingHTTPServer(('127.0.0.1', 0), handler)
         self.addCleanup(server.server_close); self.addCleanup(server.shutdown)
@@ -104,7 +108,15 @@ class Orchestration(RealArrTestCase):
     def test_c_search_through_real_prowlarr_is_bounded(self):
         catalogue = anime_indexer.Catalogue()
         row = next(r for r in json.loads((ROOT/'tests/fixtures/anime/world_trigger.json').read_text()) if r['title']=='World Trigger S03 (WEBRip 1080p x265 HEVC AAC + AC3) (Dual Audio) [S1PH3R]')
+        full = os.environ.get('POMPEY_SEARCH_MODE') != 'pr'
         row = dict(row, season=3, episode=None, seeders=20)
+        if not full:
+            # Wiring needs a successful forwarded grab, not another anime fan-out test.
+            title = http('GET', self.base+'/series/'+str(self.show['id']))
+            self.addCleanup(http, 'PUT', self.base+'/series/'+str(title['id']), dict(title))
+            http('PUT', self.base+'/series/'+str(title['id']), dict(title, seriesType='standard'))
+            row.update(title='World Trigger S03E01 1080p WEBRip x265 [Fixture]', episode=1,
+                       size=400*1024*1024)
         catalogue.reset([row])
         source = self.server(catalogue.handler())
         prowlarr = self.urls['Prowlarr']
@@ -123,10 +135,15 @@ class Orchestration(RealArrTestCase):
         client.update(name='Fixture', priority=1)
         http('POST', self.base+'/downloadclient', client)
         catalogue.reset([row])
-        self.command(self.base, {'name': 'SeasonSearch', 'seriesId': self.show['id'], 'seasonNumber': 3})
+        if full:
+            self.command(self.base, {'name': 'SeasonSearch', 'seriesId': self.show['id'], 'seasonNumber': 3})
+        else:
+            episode = next(e for e in http('GET', self.base+'/episode?seriesId='+str(self.show['id']))
+                           if e['seasonNumber'] == 3 and e['episodeNumber'] == 1)
+            self.command(self.base, {'name': 'EpisodeSearch', 'episodeIds': [episode['id']]})
         queries = [r for r in catalogue.snapshot() if r['query'].get('t') != ['caps']]
         self.assertGreater(len(queries), 0)
-        self.assertLessEqual(len(queries), 120, queries)
+        self.assertLessEqual(len(queries), 120 if full else 8, queries)
         self.assertEqual(len(fake.list_torrents()), 1)
         self.assertEqual(fake.list_torrents()[0]['hash'], anime_indexer.digest(row))
         history = http('GET', self.base+'/history?page=1&pageSize=100')['records']

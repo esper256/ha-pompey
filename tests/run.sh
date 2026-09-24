@@ -6,6 +6,7 @@ cd "${ROOT}"
 
 # Protocol traffic is prohibited. Source and downloader HTTP fixtures are
 # permitted here. The separate real-downloader job requires verified isolation.
+python3 tests/test_ci_scope.py
 python3 tests/test_no_torrent_process.py
 
 echo "== Home Assistant config.yaml (Supervisor SCHEMA_APP_CONFIG) =="

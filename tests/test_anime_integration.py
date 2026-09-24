@@ -98,6 +98,14 @@ class AnimeIntegration(RealArrTestCase):
         client.update(name='HTTP fixture',priority=1);http('POST',cls.base+'/downloadclient',client)
 
     def setUp(self):
+        self.scenario_started = time.monotonic()
+        self.addCleanup(lambda: print(f"TIMING {self.id()}: {time.monotonic() - self.scenario_started:.2f}s", flush=True))
+        if os.environ.get('POMPEY_ANIME_MODE') == 'pr' and self._testMethodName in {
+            'test_captured_healthy_dual_pack_is_usable',
+            'test_completed_season_search_has_bounded_indexer_requests',
+            'test_catalogue_search_does_not_regress_request_volume',
+        }:
+            self.skipTest('Full interactive catalogue probe runs in the full matrix; PR automatic search enforces the request ceiling')
         self.client.delete_torrents('|'.join(self.client.torrents),'true')
         self.add_offset=len(self.client.adds_path.read_text().splitlines())
         self.command({'name':'RefreshMonitoredDownloads'})
@@ -168,7 +176,47 @@ class AnimeIntegration(RealArrTestCase):
         self.assertLessEqual(len(requests), 120 * len(self.catalogues), 'Indexer request volume regressed')
         return decisions, requests
 
+    def rss_selection(self, rows, expected):
+        """Real scoring/grabbing without repeating season-search query generation."""
+        # RSS honours recent grabs; unlike an explicit search it must not
+        # redownload a title grabbed by an earlier scenario. Re-add only this
+        # disposable fixture series to give each selection case fresh history.
+        self.assertFalse(http('GET', self.base+'/episodefile?seriesId='+str(self.show['id'])))
+        show = http('GET', self.base+'/series/'+str(self.show['id']))
+        http('DELETE', self.base+'/series/'+str(show.pop('id'))+'?deleteFiles=false')
+        show['addOptions'] = {'searchForMissingEpisodes': False}
+        type(self).show = http('POST', self.base+'/series', show)
+        for _ in range(120):
+            episodes = http('GET', self.base+'/episode?seriesId='+str(self.show['id']))
+            if len([e for e in episodes if e['seasonNumber'] == 3]) == 14:
+                break
+            time.sleep(.5)
+        else:
+            self.fail('Fresh RSS fixture series did not finish refreshing')
+        # RSS is newest-first. Make packs new feed entries so the previous
+        # import scenario's RSS cursor cannot truncate them behind older rows.
+        rows = [dict(row, age_days=0) if row.get('episode') is None else row for row in rows]
+        rows.sort(key=lambda row: row.get('age_days', 365))
+        for catalogue in self.catalogues:
+            catalogue.reset(rows)
+        for indexer in http('GET', self.base+'/indexer'):
+            self.addCleanup(http, 'PUT', self.base+'/indexer/'+str(indexer['id']), dict(indexer))
+            http('PUT', self.base+'/indexer/'+str(indexer['id']), dict(indexer, enableRss=True))
+        started = time.monotonic()
+        self.command({'name': 'RssSync'})
+        grabs = self.client.list_torrents()
+        self.assertEqual([g['hash'] for g in grabs], [anime_indexer.digest(expected)])
+        self.assertEqual(len(self.client.adds_path.read_text().splitlines())-self.add_offset, 1)
+        requests = [r for c in self.catalogues for r in c.snapshot() if r['query'].get('t') != ['caps']]
+        self.assertTrue(requests, 'RSS must reach the fixture')
+        self.assertLessEqual(len(requests), 8)
+        self.reports.append({'test': self._testMethodName, 'mode': 'rss',
+                             'request_count': len(requests), 'grabs': [g['name'] for g in grabs],
+                             'elapsed_seconds': round(time.monotonic()-started, 2)})
+
     def test_zero_seed_dual_pack_is_rejected(self):
+        if os.environ.get('POMPEY_ANIME_MODE') == 'pr':
+            return self.rss_selection(self.rows('phantom-pack', 'single-pack'), self.single)
         decisions,_=self.search(self.rows('phantom-pack','single-pack'))
         phantom=[d for d in decisions if d['title']==self.dual['title']]
         self.assertTrue(phantom,decisions)
@@ -184,6 +232,8 @@ class AnimeIntegration(RealArrTestCase):
         self.assertEqual(anime_indexer.digest(self.dual),grabs[0]['hash'])
 
     def test_healthy_dual_pack_beats_single_audio_pack(self):
+        if os.environ.get('POMPEY_ANIME_MODE') == 'pr':
+            return self.rss_selection(self.rows('dual-pack', 'single-pack'), self.dual)
         self.search(self.rows('dual-pack','single-pack'),automatic=True)
         grabs=self.client.list_torrents()
         self.assertEqual(len(grabs),1,grabs)
