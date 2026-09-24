@@ -273,8 +273,8 @@ class FakeState:
         self.prowlarr_clients: list[dict] = []
         radarr_q = any_quality_bundle(1, "Any")
         sonarr_q = any_quality_bundle(1, "Any")
-        self.radarr_profiles = [any_quality_bundle(1,"Default")["profile"], any_quality_bundle(2,"Max")["profile"]]
-        self.sonarr_profiles = [any_quality_bundle(1,"Default")["profile"], any_quality_bundle(2,"Max")["profile"]]
+        self.radarr_profiles = [any_quality_bundle(1,"Default")["profile"], any_quality_bundle(2,"Max")["profile"], any_quality_bundle(3,"Anime")["profile"]]
+        self.sonarr_profiles = [any_quality_bundle(1,"Default")["profile"], any_quality_bundle(2,"Max")["profile"], any_quality_bundle(3,"Anime")["profile"]]
         self.radarr_defs: list[dict] = radarr_q["definitions"]
         self.sonarr_defs: list[dict] = sonarr_q["definitions"]
         self.radarr_formats: list[dict] = []
@@ -1577,6 +1577,8 @@ class WireStack(unittest.TestCase):
         self.assertTrue((self.ready / "wired").exists())
         self.assertEqual(self.state.seerr_radarr[0]["hostname"], "127.0.0.1")
         self.assertEqual(self.state.seerr_sonarr[0]["hostname"], "127.0.0.1")
+        self.assertEqual(self.state.seerr_sonarr[0]["activeAnimeProfileName"], "Anime")
+        self.assertEqual(self.state.seerr_sonarr[0]["activeAnimeProfileId"], 3)
         self.assertTrue((self.ready / "seerr-arr").exists())
         live = json.loads((self.ready / "status.json").read_text())
         self.assertTrue(live["search"])
@@ -1726,18 +1728,24 @@ class WireStack(unittest.TestCase):
         self.assertIn(recyclarr.TRASH_RADARR_ANIME_DUAL_AUDIO, body)
         self.assertIn(recyclarr.TRASH_SONARR_ANIME_DUAL_AUDIO, body)
         self.assertIn(recyclarr.TRASH_SONARR_NOT_ORIGINAL, body)
+        self.assertIn(recyclarr.TRASH_RADARR_GOLDEN_RULE_HD, body)
+        self.assertIn(recyclarr.TRASH_SONARR_GOLDEN_RULE_HD, body)
+        self.assertIn(recyclarr.TRASH_RADARR_UNWANTED_FORMATS, body)
+        self.assertIn(recyclarr.TRASH_SONARR_UNWANTED_FORMATS, body)
         self.assertIn(f"score: {recyclarr.DUAL_AUDIO_SCORE}", body)
-        self.assertIn("score: -10000", body)
+        self.assertIn(f"score: {recyclarr.NOT_ORIGINAL_SCORE}", body)
         self.assertIn("name: Default", body)
         self.assertIn("name: Max", body)
+        self.assertIn("name: Anime", body)
         self.assertNotIn("name: Anything", body)
         self.assertIn("until_quality: Bluray-2160p", body)
         self.assertIn("until_quality: WEB 2160p", body)
         self.assertIn("- name: Bluray-1080p", body)
         self.assertIn("- name: WEB 1080p", body)
+        self.assertIn("- name: WEB 720p", body)
         self.assertIn("- name: Remux-2160p", body)
         self.assertIn("enabled: false", body)
-        self.assertIn("delete_old_custom_formats: false", body)
+        self.assertIn("delete_old_custom_formats: true", body)
         self.assertIn(
             f"min: {recyclarr.RADARR_1080P_MIN_MB_PER_MIN}",
             body,
