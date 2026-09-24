@@ -46,6 +46,8 @@ class RealArrTestCase(unittest.TestCase):
     def setUpClass(cls):
         cls.temp=tempfile.TemporaryDirectory(prefix='pompey-real-arr-');cls.addClassCleanup(cls.temp.cleanup)
         cls.root=Path(cls.temp.name);cls.urls={};cls.procs=[]
+        policy_env = patch.dict(os.environ, POMPEY_DATA=str(cls.root/'pompey-state'))
+        policy_env.start(); cls.addClassCleanup(policy_env.stop)
         for name in ['Radarr','Sonarr','Prowlarr']:
             config=cls.root/name;config.mkdir();number=port()
             (config/'config.xml').write_text(f'<Config><LogLevel>Debug</LogLevel><Port>{number}</Port><BindAddress>127.0.0.1</BindAddress><ApiKey>{"a"*32}</ApiKey><AuthenticationMethod>None</AuthenticationMethod><AuthenticationRequired>DisabledForLocalAddresses</AuthenticationRequired><UpdateMechanism>Docker</UpdateMechanism></Config>')

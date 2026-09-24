@@ -6,7 +6,17 @@ Supervisor builds `pompey/Dockerfile` locally and starts **one** HAOS add-on con
 
 Run `bash tests/run.sh` for routine work. Real pinned artifact, Arr import/Recyclarr, and Seerr API tests are described in the testing guide. Runtime Python sources use `.py` suffixes; only lint shell entrypoints with shellcheck. CI must require the isolated packet tests rather than silently skip them.
 
-Never start a torrent client, speak BitTorrent, or wait for peers in tests. Fake Torznab and downloader HTTP APIs are allowed. Use synthetic media. Public metadata lookup by real Arr is allowed. Never apply an OUTPUT DROP policy or change default routes in the host namespace; use isolated network namespaces for firewall/handshake tests. `pompey-dev-vpn` is an optional legacy local helper, not the product VPN or a required CI gate.
+## PR completion: do not wait for CI
+
+By default, finish a PR after implementation, relevant local validation, and pushing the changes. Mark it ready for review when the work is complete even if CI is pending. Take at most one non-waiting CI status snapshot after the final push, report passed, failed and pending checks accurately with the PR link, then end the turn. Pending CI alone is not unfinished agent work. Do not claim pending checks passed or that the release is validated.
+
+Do not use CI watch commands, repeated polling, sleep loops, background watchers, or scheduled follow-ups to wait for checks. Do not duplicate the full slow real-engine matrix locally just to finish a PR; use focused integration tests when the change or a failure warrants them, and leave the full matrix to CI. Documentation-only changes need diff/format review, not runtime tests.
+
+Fix failures already observed within the task's scope, run the relevant local checks, and push the fix without waiting for the new CI run. Revisit later results when the user requests it. Only wait for CI when the user explicitly asks to wait or a requested merge requires checking completion. Keep required CI checks and the manual HAOS release gate intact; never bypass them to merge or release.
+
+## Runtime constraints
+
+Torrent clients may run only in the dedicated peerless integration harness after it verifies a fresh loopback-only network namespace, with no external interface or route. Never contact peers or wait for them. All other tests must use HTTP downloader fakes. Fake Torznab and downloader HTTP APIs are allowed. Use synthetic media. Public metadata lookup by real Arr is allowed. Never apply an OUTPUT DROP policy or change default routes in the host namespace; use isolated network namespaces for firewall/handshake tests. `pompey-dev-vpn` is an optional legacy local helper, not the product VPN or a required CI gate.
 
 The real service order is s6 cont-init then supervised services. Engines wait for a working VPN and generated configuration. `wire_stack.py` must fail on a required Prowlarr app/source, downloader category, or initialized Seerr→Arr connection failure. Seerr's public setup wizard is permitted before user id 1 exists; its API key legitimately gets 403 then. After initialization both Radarr and Sonarr are required. Plex/local login and optional Seerr chrome settings must not conceal a required miss.
 

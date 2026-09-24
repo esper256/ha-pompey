@@ -42,6 +42,24 @@ def identity(row):
     return row.get('type'), str(value) if value else ''
 
 
+def requested_seasons(rows, external_id):
+    """None means insufficient evidence; never infer seasons from missing data."""
+    result = set()
+    for request in rows:
+        if identity(request) != ('tv', str(external_id)) or request.get('status') not in {1, 2, 4, 5}:
+            continue
+        seasons = request.get('seasons')
+        if not isinstance(seasons, list) or not seasons:
+            return None
+        for season in seasons:
+            if (not isinstance(season, dict) or type(season.get('seasonNumber')) is not int
+                    or season['seasonNumber'] < 0 or season.get('status', 2) not in {1, 2, 3, 4, 5}):
+                return None
+            if season.get('status') != 3:
+                result.add(season['seasonNumber'])
+    return result
+
+
 def reconcile_requests():
     first = requests_snapshot()
     second = requests_snapshot()
@@ -64,39 +82,60 @@ def reconcile_requests():
         key = secrets['radarr_api_key' if kind == 'movie' else 'sonarr_api_key']
         base = api.arr_api_root(host, key)
         rows = api.http('GET', base + '/' + kind, headers=api.arr_headers(key))
-        if not isinstance(rows, list):
-            raise RuntimeError('Invalid Arr title snapshot')
+        rows = api.object_list(rows, 'Arr titles', ('id', 'tmdbId' if kind == 'movie' else 'tvdbId'))
         for row in rows:
             ident = str(row.get('id'))
             token = kind + ':' + ident
             media_type = 'movie' if kind == 'movie' else 'tv'
             external_id = row.get('tmdbId' if kind == 'movie' else 'tvdbId')
             covered = (media_type, str(external_id)) in active
+            prior = previous.get(token, {})
+            if prior.get('externalId') != external_id:
+                prior = {}
+            seasons = requested_seasons(second, external_id) if kind == 'series' else None
             if covered:
-                owned[token] = {'externalId': row.get('tmdbId' if kind == 'movie' else 'tvdbId')}
-                continue
-            if token not in previous:
-                continue  # Arr-only titles and a first observation are never cancellations.
-            if previous[token].get('externalId') != external_id:
-                continue  # Never apply old ownership to a reused Arr database ID.
+                owned[token] = {'externalId': external_id}
+                if seasons is not None:
+                    owned[token]['seasons'] = sorted(seasons)
+                elif 'seasons' in prior:
+                    owned[token]['seasons'] = prior['seasons']
+                if kind != 'series' or seasons is None or 'seasons' not in prior:
+                    continue
+            if not prior:
+                continue  # No observation of ownership, or a reused Arr ID.
             if media_type in uncertain:
-                # Keep ownership until metadata resolves. Other media types can
-                # still reconcile, but absence is unsafe for this type today.
-                owned[token] = previous[token]
+                owned[token] = prior
                 continue
-            updated = dict(row, monitored=False)
-            if kind == 'series':
-                updated['monitorNewItems'] = 'none'
-                updated['seasons'] = [dict(season, monitored=False) for season in row.get('seasons', [])]
+            removed = None
+            if kind == 'series' and 'seasons' in prior:
+                if seasons is None:
+                    owned[token] = prior
+                    continue
+                removed = set(prior['seasons']) - seasons
+                if not removed:
+                    continue
+                season_rows = api.object_list(row.get('seasons'), 'Sonarr seasons', ('seasonNumber', 'monitored'))
+                updated = dict(row, seasons=[dict(s, monitored=False) if s['seasonNumber'] in removed else dict(s) for s in season_rows])
+                # Preserve manual and future-season monitoring while any other
+                # season remains monitored. Never turn monitoring back on.
+                if not covered and not any(s['monitored'] for s in updated['seasons']):
+                    updated.update(monitored=False, monitorNewItems='none')
+            else:
+                updated = dict(row, monitored=False)
+                if kind == 'series':  # Legacy records predate season ownership.
+                    updated['monitorNewItems'] = 'none'
+                    updated['seasons'] = [dict(s, monitored=False) for s in row.get('seasons', [])]
             if updated != row:
                 api.http('PUT', base + '/' + kind + '/' + ident, updated, headers=api.arr_headers(key))
             commands = api.http('GET', base + '/command', headers=api.arr_headers(key))
-            for command in api.as_list(commands):
+            for command in api.object_list(commands, 'Arr commands', ('id', 'name', 'status')):
                 body = command.get('body') or {}
                 ids = body.get('movieIds' if kind == 'movie' else 'seriesIds') or []
                 matches = body.get('movieId' if kind == 'movie' else 'seriesId') == row['id'] or ids == [row['id']]
-                if matches and command.get('status') in {'queued', 'started'} and 'Search' in command.get('name', ''):
+                if removed is not None and updated.get('monitored', True):
+                    matches = matches and body.get('seasonNumber') in removed
+                if matches and command.get('status') == 'queued' and 'Search' in command.get('name', ''):
                     api.http('DELETE', base + '/command/' + str(command['id']), headers=api.arr_headers(key))
             # Stop monitoring/searching. Keep already-downloaded or in-flight data;
             # request deletion must never become a removeFromClient file deletion.
-    state.save('requests', {'version': 1, 'owned': owned})
+    state.save('requests', {'version': 2, 'owned': owned})

@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 import os
 import sys
 import time
 import urllib.request
 import pompey_state as state
-from pompey_common import arr_api_root, as_list, legacy_movies_auto_dir, legacy_tv_auto_dir, movies_auto_dir, movies_dir, movies_kid_dir, radarr_url, secrets_path, sonarr_url, tv_auto_dir, tv_dir, tv_kid_dir
+from pompey_common import arr_api_root, object_list, legacy_movies_auto_dir, legacy_tv_auto_dir, movies_auto_dir, movies_dir, movies_kid_dir, radarr_url, secrets_path, sonarr_url, tv_auto_dir, tv_dir, tv_kid_dir
 
 
 AUTO_FOLDER = "By Rating"
@@ -104,13 +105,15 @@ def route_library(
     payload = http_json("GET", list_url, headers=headers(key))
     if not isinstance(payload, list):
         raise RuntimeError('Invalid Arr routing snapshot')
-    rows = as_list(payload)
+    rows = object_list(payload, 'routing titles', ('id', 'path'))
     saved = state.load('routing-' + label)
     owned = {}
     autos = [root.rstrip("/") for root in auto_roots if root]
     known_roots = [kid_root, gen_root, *autos]
     by_dest: dict[str, list] = {}
     labels: dict = {}
+    now = time.time()
+    commands = None
     for item in rows:
         cert = title_cert(item)
         path = item.get("path") or item.get("rootFolderPath") or ""
@@ -119,24 +122,58 @@ def route_library(
         token = str(item.get('id'))
         external = item.get('tmdbId' if label == 'movie' else 'tvdbId')
         previous = saved.get(token, {})
-        # Remember auto mode after the first move. A manually changed path or
-        # reused Arr ID relinquishes ownership; explicit library choices stay put.
+        if previous.get('externalId') != external:
+            previous = {}
+        pending = previous.get('pending')
+        # The editor may normalize the title's folder name. Observe its actual
+        # destination rather than guessing the final name from the source.
+        if pending:
+            source = Path(pending['source'])
+            at_destination = in_root(path, pending['destination'])
+            source_files = source.exists() and any(p.is_file() for p in source.rglob('*'))
+            if at_destination and not source_files and (not pending['hadFiles'] or (Path(path).is_dir() and any(p.is_file() for p in Path(path).rglob('*')))):
+                previous = {'externalId': external, 'paths': [str(path).rstrip('/')]}
+                pending = None
+            elif str(path).rstrip('/') not in previous.get('paths', []) and not at_destination:
+                continue  # A manual move relinquishes automatic ownership.
+            else:
+                owned[token] = previous
+                if now - pending['submittedAt'] < 120:
+                    continue
+                if commands is None:
+                    commands = object_list(http_json('GET', list_url.rsplit('/', 1)[0] + '/command', headers=headers(key)), 'move commands', ('id', 'name', 'status'))
+                active = any(c['status'] in {'queued', 'started'} and c['name'] == ('BulkMoveMovie' if label == 'movie' else 'BulkMoveSeries')
+                             and any(str(x.get('movieId' if label == 'movie' else 'seriesId')) == token
+                                     for x in (c.get('body') or {}).get('movies' if label == 'movie' else 'series', []))
+                             for c in commands)
+                if active:
+                    if now - pending['submittedAt'] > 900:
+                        pending['error'] = 'Arr is still moving files; waiting for completion.'
+                    continue
+                pending['error'] = 'Files have not reached the intended library. Check storage and the Arr queue in Debug.'
+                # Never submit a move from a new path while old payload remains.
+                if at_destination or now < pending['retryAt']:
+                    continue
         if not any(in_root(str(path), root) for root in autos) and not (
-            previous and previous.get('externalId') == external
-            and str(path).rstrip('/') in previous.get('paths', [])
+            previous and str(path).rstrip('/') in previous.get('paths', [])
         ):
             continue
-        owned[token] = {'externalId': external, 'paths': [str(path).rstrip('/')]}
         want = kid_root if kid_cert(cert, kid_set) else gen_root
+        owned[token] = {'externalId': external, 'title': item.get('title', label), 'paths': [str(path).rstrip('/')]}
         if in_root(path, want):
             continue
-        ident = item.get("id")
-        if ident is None:
-            continue
+        ident = item['id']
         dest = retarget_path(str(path), want, known_roots)
-        if dest.rstrip("/") == str(path).rstrip("/"):
+        if dest.rstrip('/') == str(path).rstrip('/'):
             continue
-        owned[token]["paths"].append(dest.rstrip("/"))
+        attempts = pending.get('attempts', 0) + 1 if pending else 1
+        owned[token]['paths'].append(dest.rstrip('/'))
+        owned[token]['pending'] = {'source': str(path), 'destination': want, 'submittedAt': now,
+                                  'hadFiles': bool(item.get('hasFile') or (item.get('statistics') or {}).get('episodeFileCount')
+                                                   or (Path(path).exists() and any(p.is_file() for p in Path(path).rglob('*')))),
+                                  'attempts': attempts, 'retryAt': now + min(3600, 300 * 2 ** min(attempts - 1, 4))}
+        if pending and pending.get('error'):
+            owned[token]['pending']['error'] = pending['error']
         by_dest.setdefault(want, []).append(ident)
         labels[ident] = (item.get("title"), cert)
     # Save intent before moving; a crash between editor acknowledgement and
@@ -155,7 +192,7 @@ def route_library(
             )
             for ident in ids:
                 title, cert = labels[ident]
-                log(f"{label} {title} -> {want} ({cert or 'unknown'})")
+                log(f"Requested move: {label} {title} -> {want} ({cert or 'unknown'})")
         except Exception as exc:  # noqa: BLE001
             raise RuntimeError(f"{label} routing failed for {len(ids)} title(s)") from exc
 

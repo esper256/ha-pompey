@@ -554,7 +554,7 @@ def qbit_handler(state: FakeState):
             if path.endswith("/version"):
                 return self._send(200, "v5.2.3")
             if path.endswith("/webapiVersion"):
-                return self._send(200, "2.11.4")
+                return self._send(200, "2.15.1")
             if path.endswith("/preferences"):
                 return self._send(
                     200,
@@ -608,8 +608,9 @@ def qbit_handler(state: FakeState):
                     "savepath": form.get("savepath") or form.get("savePath") or "",
                     "paused": form.get("paused") or "",
                 }
-                state.record_add(payload)
-                return self._send(200, "Ok.")
+                item = state.record_add(payload)
+                return self._send(200, {"added_torrent_ids": [item['hash']],
+                                        "failure_count": 0, "pending_count": 0, "success_count": 1})
             if path.rstrip("/").endswith("/pompey/finish"):
                 state.finish_held_torrents()
                 return self._send(200, "Ok.")

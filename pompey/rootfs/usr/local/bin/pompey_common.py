@@ -139,6 +139,27 @@ def apply_qbit_queue() -> None:
     )
 
 
+class ApiError(RuntimeError):
+    def __init__(self, message, status):
+        super().__init__(message)
+        self.status = status
+
+
+def object_list(value, context, required=()):
+    """Validate Arr snapshots before absence can authorize a mutation."""
+    field_types = {'id': int, 'tmdbId': int, 'tvdbId': int, 'seasonNumber': int,
+                   'path': str, 'rootFolderPath': str, 'name': str, 'status': str, 'monitored': bool}
+    if not isinstance(value, list) or any(not isinstance(row, dict) for row in value):
+        raise RuntimeError('Invalid ' + context + ' snapshot')
+    for row in value:
+        for key in required:
+            item = row.get(key)
+            if item is None or item == '' or (key in field_types and type(item) is not field_types[key]):
+                raise RuntimeError('Invalid ' + context + ' snapshot: ' + key)
+    return value
+
+
+
 def as_list(value):
     """HTTP JSON is usually an array of objects; stubs and error bodies often are not.
 
@@ -442,7 +463,7 @@ def http(method: str, url: str, body=None, headers=None, timeout=30):
         except urllib.error.HTTPError as exc:
             err = exc.read().decode(errors="replace")
             exc.close()
-            last = RuntimeError(f"{method} {url} -> {exc.code} {err[:300]}")
+            last = ApiError(f"{method} {url} -> {exc.code} {err[:300]}", exc.code)
             if exc.code in {502, 503, 504} and attempt + 1 < attempts:
                 time.sleep(wait_sleep())
                 continue

@@ -1,10 +1,14 @@
 # Release confidence
 
+## Agent workflow
+
+Follow the [no-wait PR workflow](../AGENTS.md#pr-completion-do-not-wait-for-ci): validate the change locally, push, report a single CI status snapshot, and end the turn while pending checks run. PR readiness does not mean merge or release readiness. Required CI checks and the manual HAOS gate still apply.
+
 ## Automated layers
 
 `bash tests/run.sh` runs the fast suite: configuration validation, HTTP wiring contracts, file-preservation and sharing policy, complete request pagination, update failure/SQLite rollback/crash recovery, actual shell boundaries, VPN rendering, isolated IPv4/IPv6 packet tests, and the wait-screen preview. Packet and live handshake tests skip explicitly when the host lacks the required namespace/kernel capability. CI sets `POMPEY_REQUIRE_NETWORK_TESTS=1` so these cannot silently skip there.
 
-On Linux install Python 3.12+, PyYAML, jq, shellcheck, nftables, iproute2, iputils-ping and wireguard-tools. Use passwordless sudo for isolated namespaces. Never install a kill switch in the host namespace. No test launches a torrent client or contacts peers; HTTP downloader fixtures are permitted.
+On Linux install Python 3.12+, PyYAML, jq, shellcheck, nftables, iproute2, iputils-ping and wireguard-tools. Use passwordless sudo for isolated namespaces. Never install a kill switch in the host namespace. Only the dedicated peerless qBittorrent harness may launch a torrent client, after verifying a fresh loopback-only network namespace. No test contacts peers; all other downloader tests use HTTP fixtures.
 
 ```sh
 POMPEY_REAL_ENGINES=1 python3 tests/test_engine_artifacts.py -v
@@ -37,7 +41,7 @@ Tests cover a live dual pack versus single audio and episodes, zero-seed dual au
 
 The captured-pack and pack-selection checks are required passes. Ordinary-TV cases retain size, language and quality rejection checks. RSS replays after a fourteen-episode import verify that Default and Max do not replace files just to regain pack scores; Max must still accept a real resolution upgrade. Sonarr groups WEB and Blu-ray 1080p as equivalent, prefers season packs through its native custom format, and uses custom-format scoring for repacks. Its shared 1080p size minimum is 5 MiB/minute; upper limits remain guide-backed. Score-only upgrades stop at a cutoff score of zero.
 
-Search volume remains an explicit expected failure in ordinary CI; strict mode fails it. Sonarr 4.0.19.2979 made 240 catalogue requests for this season, including 224 episode queries, even when a pack existed. Setup/search errors remain errors. An unexpected pass fails CI so the marker can be removed when upstream behavior improves. The budget is eight catalogue requests per indexer (four ID/name variants with two pages each), including pagination and excluding capability/setup calls.
+The aspirational pack-only search budget remains an explicit expected failure in ordinary CI; strict mode fails it. A separate required regression ceiling permits at most 120 catalogue requests per indexer (240 for the two-source fixture), for both interactive and automatic searches. Exceeding that measured baseline fails ordinary CI. Sonarr 4.0.19.2979 made 240 catalogue requests for this season, including 224 episode queries, even when a pack existed. Setup/search errors remain errors. An unexpected pass fails CI so the marker can be removed when upstream behavior improves. The budget is eight catalogue requests per indexer (four ID/name variants with two pages each), including pagination and excluding capability/setup calls.
 
 `POMPEY_ANIME_REPORT` defaults to `/tmp/pompey-anime-report.json`. Reports contain each query, response counts, elapsed time, actual grabs, rejection reasons and custom-format scores; Sonarr logs are copied next to the report. CI uploads these even after failure. Searches retain Sonarr's real throttling, so allow several minutes per scenario. Existing real Arr tests separately cover multi-episode files and upgrades.
 
@@ -56,3 +60,18 @@ Use a disposable or backed-up installation, a known legal test download, and the
 9. **Health and discovery:** stop an engine temporarily, confirm the sidebar reports failure and later recovery, and confirm Plex discovers the imported media. Check Debug off/on and published host ports on the actual Supervisor installation.
 
 A release is accepted only after these household checks pass; a Docker build or green fake suite is insufficient.
+
+## Recovery and cross-service contracts
+
+`tests/test_recovery.py` covers missing/orphaned import commands, per-receipt failure isolation, malformed snapshots, delayed/failed library moves, waiting on the mutation lock, blocked-import notices, and overlapping season requests. Routing fakes deliberately separate request acceptance from file movement.
+
+```sh
+POMPEY_REAL_ENGINES=1 python3 tests/test_orchestration.py -v
+POMPEY_REAL_ENGINES=1 POMPEY_REAL_QBIT=1 python3 tests/test_qbit_integration.py -v
+```
+
+The orchestration suite verifies a real Sonarr move preserves payloads and subtitles, exercises season cancellation with Seerr-shaped paginated HTTP responses, and sends an automatic anime search through real Sonarr and Prowlarr to a local Torznab fixture. The source records every upstream request; the one-source scenario permits at most 120 requests and requires one successful grab. Seerr itself is covered separately by its real API suite.
+
+The downloader suite requires `sudo`, `unshare`, `ip`, ffmpeg and the pinned Sonarr/qBittorrent artifacts. It fetches metadata and artifacts before isolation. Its dedicated worker verifies a different network namespace, loopback as the only interface, and no external routes; it then drops root privileges before starting any engine. It disables discovery and forwarding, uses private trackerless torrent metadata with synthetic local files, and rechecks those files without peers. The suite verifies all sharing configurations across restart, live policy changes, category paths, completion state, real Sonarr imports, subtitle preservation, below-goal retention, and cleanup after stopping sharing. Failure to establish isolation is a failure when this suite is enabled, never permission to run on the host network. It does not test downloading from peers or elapsed real-world seeding goals; deterministic policy tests cover ratio/time boundaries.
+
+Release and candidate CI both require the downloader and orchestration suites. Candidates also run anime selection/import tests and retain their search reports. The existing HAOS/NAS manual gate remains required.

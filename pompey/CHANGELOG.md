@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Keep manual imports moving when an earlier import loses its status.
+- Track library moves and report blocked imports or delayed maintenance.
+- Preserve other requested and manually monitored seasons when cancelling TV requests.
+- Leave libraries unchanged when service responses are incomplete.
+
 ## 0.3.4
 
 - Apply qBittorrent 5.2 share limits so Stop sharing pauses a finished torrent. Arr still removes it after import.

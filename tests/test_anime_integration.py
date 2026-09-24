@@ -102,7 +102,7 @@ class AnimeIntegration(RealArrTestCase):
         self.add_offset=len(self.client.adds_path.read_text().splitlines())
         self.command({'name':'RefreshMonitoredDownloads'})
         for catalogue in self.catalogues:catalogue.reset([])
-        if self._testMethodName in {'test_captured_healthy_dual_pack_is_usable','test_completed_season_search_has_bounded_indexer_requests'}:
+        if self._testMethodName in {'test_captured_healthy_dual_pack_is_usable','test_completed_season_search_has_bounded_indexer_requests','test_catalogue_search_does_not_regress_request_volume'}:
             cls=type(self)
             if not hasattr(cls,'baseline'):
                 cls.baseline=self.search(self.fixture)
@@ -163,6 +163,9 @@ class AnimeIntegration(RealArrTestCase):
             print(json.dumps({k:v for k,v in report.items() if k not in {'requests','decisions'}}),flush=True)
             report['elapsed_seconds']=round(time.monotonic()-started,2)
             self.report_path.write_text(json.dumps(self.reports,indent=2)+'\n')
+        # This guard remains a required pass even while the pack-only target
+        # is an expected failure. It also covers automatic SeasonSearch grabs.
+        self.assertLessEqual(len(requests), 120 * len(self.catalogues), 'Indexer request volume regressed')
         return decisions, requests
 
     def test_zero_seed_dual_pack_is_rejected(self):
@@ -190,6 +193,10 @@ class AnimeIntegration(RealArrTestCase):
     def test_captured_healthy_dual_pack_is_usable(self):
         choices=[d for d in self.baseline_decisions if d['title']==self.captured_dual['title']]
         self.assertTrue(any(d['approved'] for d in choices),choices)
+
+    def test_catalogue_search_does_not_regress_request_volume(self):
+        self.assertLessEqual(len(self.baseline_requests), 120 * len(self.catalogues),
+                             'Search exceeded the measured 240-request baseline')
 
     @known_policy_gap
     def test_completed_season_search_has_bounded_indexer_requests(self):

@@ -5,7 +5,7 @@ export PYTHONDONTWRITEBYTECODE=1
 cd "${ROOT}"
 
 # Protocol traffic is prohibited. Source and downloader HTTP fixtures are
-# permitted; only engine_manager stages qBittorrent, and no test starts it.
+# permitted here. The separate real-downloader job requires verified isolation.
 python3 tests/test_no_torrent_process.py
 
 echo "== Home Assistant config.yaml (Supervisor SCHEMA_APP_CONFIG) =="
@@ -14,6 +14,7 @@ python3 tests/test_ha_config.py -v
 echo "== python unittest (fake engines + supplied options.json) =="
 python3 tests/test_python.py -v
 python3 tests/test_contracts.py -v
+python3 tests/test_recovery.py -v
 python3 tests/test_firewall.py -v
 python3 tests/test_fake_source.py -v
 python3 tests/test_anime_fixtures.py -v
