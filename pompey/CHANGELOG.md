@@ -4,6 +4,7 @@
 
 ## 0.3.5
 
+- Wait for Arr wiring before running maintenance jobs during startup.
 - Keep manual imports moving when an earlier import loses its status.
 - Track library moves and report blocked imports or delayed maintenance.
 - Preserve other requested and manually monitored seasons when cancelling TV requests.
