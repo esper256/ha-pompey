@@ -1,5 +1,9 @@
 # Release confidence
 
+## Agent workflow
+
+Follow the [no-wait PR workflow](../AGENTS.md#pr-completion-do-not-wait-for-ci): validate the change locally, push, report a single CI status snapshot, and end the turn while pending checks run. PR readiness does not mean merge or release readiness. Required CI checks and the manual HAOS gate still apply.
+
 ## Automated layers
 
 `bash tests/run.sh` runs the fast suite: configuration validation, HTTP wiring contracts, file-preservation and sharing policy, complete request pagination, update failure/SQLite rollback/crash recovery, actual shell boundaries, VPN rendering, isolated IPv4/IPv6 packet tests, and the wait-screen preview. Packet and live handshake tests skip explicitly when the host lacks the required namespace/kernel capability. CI sets `POMPEY_REQUIRE_NETWORK_TESTS=1` so these cannot silently skip there.
