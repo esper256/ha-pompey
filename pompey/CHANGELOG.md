@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 0.3.7
+
+- Relax Recyclarr defaults for family-friendly libraries while keeping quality tiers and genuine junk protections.
+- Accept normal x265 and audio formats, prefer original-language releases without making dubbed releases impossible, and stop Max score-only upgrade churn.
+- Add Recyclarr-managed Anime profiles with Seerr Sonarr routing and dual-audio preference.
+- Remove stale managed custom-format state so previous strict Pompey policies do not continue rejecting releases.
+- Allow 720p WEB TV fallbacks and keep broad TRaSH unwanted-format heuristics out of relaxed profiles.
+
 ## 0.3.6
 
 - Accept smaller 1080p movie releases while preferring approximately 3.5 GB for a two-hour movie.

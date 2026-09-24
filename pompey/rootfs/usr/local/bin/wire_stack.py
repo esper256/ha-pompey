@@ -558,20 +558,20 @@ def recyclarr_binary() -> str:
 
 
 def run_recyclarr(*, force: bool = False) -> bool:
-    """Sync TRaSH onto Default/Max. Required profiles remain unavailable until a successful sync."""
+    """Sync TRaSH onto Default/Max/Anime. Required profiles remain unavailable until a successful sync."""
     if not force and recyclarr_is_fresh():
         return True
     binary = recyclarr_binary()
     if not os.path.isfile(binary) or not os.access(binary, os.X_OK):
         log_if_new(
             "recyclarr-missing",
-            "Recyclarr binary not on disk; Default/Max are unavailable until Recyclarr can sync",
+            "Recyclarr binary not on disk; Default/Max/Anime are unavailable until Recyclarr can sync",
         )
         return False
     script = recyclarr_sync_script()
     if not os.path.isfile(script):
         log(
-            "Recyclarr sync script missing; Default/Max are unavailable until Recyclarr can sync",
+            "Recyclarr sync script missing; Default/Max/Anime are unavailable until Recyclarr can sync",
             "WARNING",
         )
         return False
@@ -624,6 +624,15 @@ def household_quality_profile(base: str, api_key: str, kind: str):
     elif any(existing.get(k) != v for k, v in anything.items()):
         http("PUT", f"{base}/qualityprofile/{existing['id']}", anything, headers=arr_headers(api_key))
     return template["id"], "Default"
+
+
+def anime_quality_profile(base: str, api_key: str, kind: str):
+    """Require the Recyclarr-managed Anime profile before wiring anime requests."""
+    profiles = as_list(http("GET", f"{base}/qualityprofile", headers=arr_headers(api_key)))
+    anime = next((row for row in profiles if row.get("name") == "Anime"), None)
+    if anime is None or anime.get("id") is None:
+        raise RuntimeError(f"{kind}: waiting for Recyclarr to configure Anime")
+    return anime["id"], "Anime"
 
 
 def language_profile_id(_base: str, _api_key: str):
@@ -826,7 +835,7 @@ def pick_plex_server(servers, host: str):
     return pool[0] if pool else None
 
 
-def configure_seerr(secrets: dict, radarr_profile, sonarr_profile, sonarr_lang) -> None:
+def configure_seerr(secrets: dict, radarr_profile, sonarr_profile, sonarr_anime_profile, sonarr_lang) -> None:
     s = Seerr()
     for _ in range(wait_tries()):
         try:
@@ -921,6 +930,7 @@ def configure_seerr(secrets: dict, radarr_profile, sonarr_profile, sonarr_lang) 
 
     radarr_id, radarr_name = radarr_profile
     sonarr_id, sonarr_name = sonarr_profile
+    sonarr_anime_id, sonarr_anime_name = sonarr_anime_profile
     radarr_payload = {
         "name": "Radarr",
         "hostname": "127.0.0.1",
@@ -951,6 +961,8 @@ def configure_seerr(secrets: dict, radarr_profile, sonarr_profile, sonarr_lang) 
         "activeProfileName": sonarr_name,
         "activeDirectory": tv_auto_dir(),
         "activeAnimeDirectory": tv_auto_dir(),
+        "activeAnimeProfileId": sonarr_anime_id,
+        "activeAnimeProfileName": sonarr_anime_name,
         "isDefault": True,
         "is4k": False,
         "enableSeasonFolders": True,
@@ -1106,6 +1118,8 @@ def main() -> int:
         raise RuntimeError("Recyclarr has not successfully configured quality profiles")
     sp = household_quality_profile(sonarr, sk, "sonarr")
     rp = household_quality_profile(radarr, rk, "radarr")
+    sap = anime_quality_profile(sonarr, sk, "sonarr")
+    anime_quality_profile(radarr, rk, "radarr")
     for kind, base, key in each_arr(radarr, rk, sonarr, sk):
         ensure_media_management(base, key, kind)
         ensure_download_client_handling(base, key, kind)
@@ -1118,7 +1132,7 @@ def main() -> int:
     os.makedirs(ready_dir(), exist_ok=True)
     open(os.path.join(ready_dir(), "arr-wired"), "w").close()
 
-    configure_seerr(secrets, rp, sp, sl)
+    configure_seerr(secrets, rp, sp, sap, sl)
     port = os.environ.get("SEERR_PORT", "5055")
     sources = os.environ.get("PROWLARR_PORT", "9696")
     log(f"search is on 0.0.0.0:{port}; sources on 0.0.0.0:{sources}; Ingress stays Pompey")

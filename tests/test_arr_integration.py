@@ -166,11 +166,11 @@ class ArrIntegration(RealArrTestCase):
         for kind in ['Radarr','Sonarr']:
             profiles=http('GET',self.urls[kind]+'/api/v3/qualityprofile')
             by_name={p['name']:p for p in profiles}
-            self.assertTrue({'Default','Max'} <= by_name.keys())
+            self.assertTrue({'Default','Max','Anime'} <= by_name.keys())
             self.assertTrue(by_name['Default']['items'])
             self.assertTrue(http('GET',self.urls[kind]+'/api/v3/customformat'))
             if kind=='Sonarr':
-                for name in ['Default','Max']:
+                for name in ['Default','Max','Anime']:
                     profile=by_name[name]
                     scores={item['format']:item['score'] for item in profile['formatItems']}
                     formats=http('GET',self.urls[kind]+'/api/v3/customformat')
@@ -178,6 +178,10 @@ class ArrIntegration(RealArrTestCase):
                     self.assertEqual(actual['Season Pack'],recyclarr_sync.SEASON_PACK_SCORE)
                     self.assertEqual(actual['x265 (HD)'],0)
                     self.assertEqual(actual['x265 (no HDR/DV)'],0)
+                    if name == 'Anime':
+                        self.assertEqual(actual['Anime Dual Audio'],recyclarr_sync.DUAL_AUDIO_SCORE)
+                    else:
+                        self.assertNotEqual(actual['Anime Dual Audio'],recyclarr_sync.DUAL_AUDIO_SCORE)
                     self.assertEqual(profile['cutoffFormatScore'],0)
 
     def command(self, base, payload):
