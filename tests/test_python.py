@@ -1738,6 +1738,14 @@ class WireStack(unittest.TestCase):
         self.assertIn("- name: Remux-2160p", body)
         self.assertIn("enabled: false", body)
         self.assertIn("delete_old_custom_formats: false", body)
+        self.assertIn(
+            f"min: {recyclarr.RADARR_1080P_MIN_MB_PER_MIN}",
+            body,
+        )
+        self.assertIn(
+            f"preferred: {recyclarr.RADARR_1080P_PREFERRED_MB_PER_MIN}",
+            body,
+        )
         redacted = recyclarr.redact(body, {"radarr_api_key": "radarr-secret-key"})
         self.assertNotIn("radarr-secret-key", redacted)
         self.assertIn("***", redacted)

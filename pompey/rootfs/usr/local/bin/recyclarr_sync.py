@@ -34,6 +34,10 @@ DUAL_AUDIO_SCORE = 15
 TRASH_SONARR_X265_HD = "47435ece6b99a0b477caf360e79ba0bb"
 TRASH_SONARR_X265_SDR = "9b64dff695c2115facf1b6ea59c9bd07"
 TRASH_SONARR_SEASON_PACK = "3bc5f395426614e155e585a2f056cdf1"
+# Shared movie quality definitions. These correspond to about 1.5 GiB minimum
+# and 3.5 GiB preferred for a 120-minute 1080p movie.
+RADARR_1080P_MIN_MB_PER_MIN = 12.5
+RADARR_1080P_PREFERRED_MB_PER_MIN = 29.2
 # Prefer a consistent season over release-group/repack bonuses, without
 # overcoming a -10000 rejection. Seed and quality gates still apply.
 SEASON_PACK_SCORE = 2500
@@ -114,6 +118,17 @@ radarr:
     delete_old_custom_formats: false
     quality_definition:
       type: movie
+      # Shared by all movie profiles; values are MB per minute of runtime.
+      qualities:
+        - name: WEBDL-1080p
+          min: {RADARR_1080P_MIN_MB_PER_MIN}
+          preferred: {RADARR_1080P_PREFERRED_MB_PER_MIN}
+        - name: WEBRip-1080p
+          min: {RADARR_1080P_MIN_MB_PER_MIN}
+          preferred: {RADARR_1080P_PREFERRED_MB_PER_MIN}
+        - name: Bluray-1080p
+          min: {RADARR_1080P_MIN_MB_PER_MIN}
+          preferred: {RADARR_1080P_PREFERRED_MB_PER_MIN}
     quality_profiles:
       - trash_id: {TRASH_RADARR_HD}
         name: Default
