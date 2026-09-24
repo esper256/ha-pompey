@@ -21,8 +21,17 @@ class Job:
     due: float = 0
     failures: int = 0
     future: object = None
+    phase: str = 'idle'
+    last_success: float | None = None
+    started: float | None = None
+    error: str = ''
 
     def complete(self, now, success):
+        self.phase = 'idle'
+        if success:
+            self.last_success = time.time()
+            self.error = ''
+
         self.failures = 0 if success else self.failures + 1
         self.due = now + (self.interval if success else min(300, 5 * 2 ** min(self.failures, 6)))
         self.future = None
@@ -30,9 +39,39 @@ class Job:
 
 def execute(job):
     if job.exclusive:
-        with stack_lock(): run_process(job.args, job.timeout)
+        try:
+            with stack_lock(blocking=False):
+                job.phase = 'running'
+                job.started = time.time()
+                run_process(job.args, job.timeout)
+        except BlockingIOError:
+            job.phase = 'waiting'
+            return False
     else:
+        job.phase = 'running'
+        job.started = time.time()
         run_process(job.args, job.timeout)
+    return True
+
+
+def dispatch(jobs, pool, now):
+    """One mutation at a time; downloads run before routine configuration."""
+    busy = any(j.exclusive and j.future is not None for j in jobs)
+    priority = {'downloads': 0, 'requests': 1, 'routing': 2, 'configuration': 3, 'updates': 4}
+    for job in sorted(jobs, key=lambda j: priority[j.name]):
+        if job.future is not None or now < job.due:
+            continue
+        job.phase = 'waiting'
+        if job.exclusive and busy:
+            continue
+        job.future = pool.submit(execute, job)
+        busy = busy or job.exclusive
+
+
+def job_status(job, now):
+    return {'failures': job.failures, 'running': job.phase == 'running', 'phase': job.phase,
+            'lastSuccess': job.last_success, 'started': job.started, 'error': job.error,
+            'overdue': job.phase == 'waiting' and now - job.due > max(60, job.interval)}
 
 
 def health(ready):
@@ -55,7 +94,10 @@ def main():
             Job('downloads',[sys.executable,str(here/'wire_stack.py'),'housekeep'],30,120),
             Job('routing',[sys.executable,str(here/'route_rating.py'),'--once'],60,120),
             Job('updates',['fetch-engines'],86400,1800,False,due=time.monotonic()+86400)]
-    with ThreadPoolExecutor(max_workers=len(jobs)) as pool:
+    for job in jobs:
+        if job.due == 0:
+            job.due = time.monotonic()
+    with ThreadPoolExecutor(max_workers=2) as pool:
         next_health = 0
         observed = {}
         while True:
@@ -63,13 +105,16 @@ def main():
             for job in jobs:
                 if job.future is not None and job.future.done():
                     try:
-                        job.future.result()
-                        job.complete(now, True)
+                        if job.future.result():
+                            job.complete(now, True)
+                        else:
+                            job.future = None  # Lock busy: waiting is not a failed operation.
                     except Exception as exc:
+                        job.error = str(exc)
                         print(f'{job.name}: {exc}',flush=True)
                         job.complete(now, False)
-                if job.future is None and now >= job.due and (ready/'engines-ready').exists():
-                    job.future = pool.submit(execute,job)
+            if (ready/'engines-ready').exists():
+                dispatch(jobs, pool, now)
             if now >= next_health:
                 current = health(ready)
                 if any(current.get(k) and not observed.get(k) for k in current):
@@ -80,7 +125,7 @@ def main():
                 except (OSError, ValueError, TypeError) as exc:
                     notices = ['Policy state could not be read: ' + str(exc)]
                 atomic_json(ready/'health.json',{'updated':time.time(),'services':current,'attention':notices,
-                            'jobs':{j.name:{'failures':j.failures,'running':j.future is not None} for j in jobs}})
+                            'jobs':{j.name:job_status(j, now) for j in jobs}})
                 next_health = now + 10
             time.sleep(1)
 

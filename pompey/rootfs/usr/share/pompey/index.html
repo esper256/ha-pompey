@@ -590,8 +590,12 @@
             } else {
               const down = Object.entries(health.services).filter(([, up]) => !up).map(([name]) => name);
               const failed = Object.entries(health.jobs).filter(([, job]) => job.failures > 0).map(([name]) => name);
-              err.textContent = down.length ? "Waiting for: " + down.join(", ")
-                : failed.length ? "Retrying: " + failed.join(", ") : (health.attention || []).join(" ");
+              const overdue = Object.entries(health.jobs).filter(([, job]) => job.overdue).map(([name]) => name);
+              const messages = [...(health.attention || [])];
+              if (down.length) messages.unshift("Waiting for: " + down.join(", "));
+              if (failed.length) messages.push("Retrying: " + failed.join(", "));
+              if (overdue.length) messages.push("Maintenance delayed: " + overdue.join(", "));
+              err.textContent = messages.join(" ");
             }
           } catch (_) { err.textContent = "Status unavailable."; }
         }

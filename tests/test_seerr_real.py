@@ -51,7 +51,11 @@ class RealSeerrWire(unittest.TestCase):
         cls.seerr.stop()
 
     def setUp(self):
-        self.tmp = Path(tempfile.mkdtemp(prefix="pompey-seerr-wire-"))
+        temp = tempfile.TemporaryDirectory(prefix="pompey-seerr-wire-")
+        self.addCleanup(temp.cleanup)
+        self.tmp = Path(temp.name)
+        environment = patch.dict(os.environ)
+        environment.start(); self.addCleanup(environment.stop)
         secrets = {
             "sonarr_api_key": "sonarr-key",
             "radarr_api_key": "radarr-key",
@@ -68,6 +72,7 @@ class RealSeerrWire(unittest.TestCase):
             {
                 "POMPEY_SECRETS": str(self.tmp / "secrets.json"),
                 "POMPEY_READY": str(ready),
+                "POMPEY_DATA": str(self.tmp / "policy-state"),
                 "MEDIA_ROOT": str(self.tmp / "media"),
                 "PLEX_URL": "",
                 "PLEX_TOKEN": "",

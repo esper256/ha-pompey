@@ -56,7 +56,7 @@ class FakeSourceHTTP(unittest.TestCase):
         with urllib.request.urlopen(url, timeout=5) as resp:
             return resp.status, resp.read()
 
-    def _qbit_form(self, path: str, fields: dict[str, str]) -> None:
+    def _qbit_form(self, path: str, fields: dict[str, str]) -> bytes:
         conn = HTTPConnection("127.0.0.1", self.qbit.server_address[1], timeout=5)
         conn.request(
             "POST",
@@ -82,6 +82,7 @@ class FakeSourceHTTP(unittest.TestCase):
         body = resp.read()
         self.assertEqual(resp.status, 200, body)
         conn.close()
+        return body
 
     def test_caps_is_torznab(self):
         _, body = self._get(self.tz + "/api?t=caps")
@@ -135,10 +136,12 @@ class FakeSourceHTTP(unittest.TestCase):
         self.assertEqual(prefs["save_path"], str(self.media / "downloads" / "complete"))
 
     def test_qbit_records_magnet_add(self):
-        self._qbit_form(
+        response = self._qbit_form(
             "/api/v2/torrents/add",
             {"urls": fs.MAGNET, "category": "radarr", "savepath": ""},
         )
+        self.assertEqual(json.loads(response), {"added_torrent_ids": [fs.INFOHASH], "failure_count": 0,
+                                               "pending_count": 0, "success_count": 1})
         lines = [
             json.loads(line)
             for line in self.state.adds_path.read_text().splitlines()

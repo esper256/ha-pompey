@@ -52,11 +52,11 @@ def atomic_json(path, data):
 
 
 @contextlib.contextmanager
-def stack_lock():
+def stack_lock(blocking=True):
     path = Path(os.environ.get('POMPEY_DATA', '/data/pompey')) / 'stack.lock'
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open('a') as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX)
+        fcntl.flock(lock, fcntl.LOCK_EX | (0 if blocking else fcntl.LOCK_NB))
         yield
 
 

@@ -32,10 +32,26 @@ jobs:
           path: ~/.cache/pompey
           key: pompey-contracts-${{ runner.os }}-${{ hashFiles('pompey/rootfs/usr/share/pompey/engines.json') }}
       - run: sudo apt-get update && sudo apt-get install -y python3-yaml ffmpeg libicu74
-      - run: python3 tests/test_engine_artifacts.py -v && python3 tests/test_arr_integration.py -v && python3 tests/test_seerr_real.py -v
+      - run: python3 tests/test_engine_artifacts.py -v && python3 tests/test_arr_integration.py -v && python3 tests/test_orchestration.py -v && python3 tests/test_seerr_real.py -v
         env:
           POMPEY_REAL_ENGINES: '1'
           POMPEY_REAL_SEERR: '1'
+
+  downloader:
+    name: Isolated real qBittorrent and Sonarr
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/pompey
+          key: pompey-contracts-${{ runner.os }}-${{ hashFiles('pompey/rootfs/usr/share/pompey/engines.json') }}
+      - run: sudo apt-get update && sudo apt-get install -y python3-yaml ffmpeg libicu74 iproute2 util-linux
+      - run: python3 tests/test_qbit_integration.py -v
+        env:
+          POMPEY_REAL_ENGINES: '1'
+          POMPEY_REAL_QBIT: '1'
 
   anime:
     name: Real Sonarr anime selection and imports
@@ -72,16 +88,27 @@ jobs:
     name: Upstream candidate (never promoted automatically)
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v7.0.1
-      - run: sudo apt-get update && sudo apt-get install -y python3-yaml ffmpeg libicu74
+      - run: sudo apt-get update && sudo apt-get install -y python3-yaml ffmpeg libicu74 iproute2 util-linux
       - run: python3 tools/build_engine_manifest.py /tmp/candidate.json
-      - run: python3 tests/test_engine_artifacts.py -v && python3 tests/test_arr_integration.py -v && python3 tests/test_seerr_real.py -v
+      - run: python3 tests/test_engine_artifacts.py -v && python3 tests/test_arr_integration.py -v && python3 tests/test_orchestration.py -v && python3 tests/test_seerr_real.py -v
         env:
           POMPEY_ENGINE_MANIFEST: /tmp/candidate.json
           POMPEY_REAL_ENGINES: '1'
           POMPEY_REAL_SEERR: '1'
+      - run: python3 tests/test_anime_integration.py -v && python3 tests/test_qbit_integration.py -v
+        env:
+          POMPEY_ENGINE_MANIFEST: /tmp/candidate.json
+          POMPEY_REAL_ENGINES: '1'
+          POMPEY_REAL_QBIT: '1'
+          POMPEY_ANIME_REPORT: ${{ runner.temp }}/candidate-anime/report.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: candidate-anime-decisions
+          path: ${{ runner.temp }}/candidate-anime/
       - uses: actions/upload-artifact@v4
         if: always()
         with:

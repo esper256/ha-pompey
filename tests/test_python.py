@@ -392,7 +392,8 @@ class FakeState:
                 "id": 12,
                 "title": "Kid Pathless",
                 "certification": "TV-Y",
-                "rootFolderPath": "/media/TV/By Rating/Kid Pathless",
+                "rootFolderPath": "/media/TV/By Rating",
+                "path": "/media/TV/By Rating/Kid Pathless",
             },
         ]
         self.moved: list[dict] = []

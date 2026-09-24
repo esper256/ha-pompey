@@ -38,6 +38,7 @@ from pompey_common import (
     sonarr_url,
     radarr_url,
     arr_api_root,
+    object_list,
     prowlarr_url,
     prowlarr_arr_url,
     seerr_url,
@@ -162,16 +163,16 @@ def prune_root_folders(base: str, api_key: str, kind: str) -> list[str]:
     wanted = {auto.rstrip("/"), gen.rstrip("/"), kid.rstrip("/")}
     notices: list[str] = []
     try:
-        existing = as_list(http("GET", f"{base}/rootfolder", headers=arr_headers(api_key)))
+        existing = object_list(http("GET", f"{base}/rootfolder", headers=arr_headers(api_key)), "root folders", ("id", "path"))
     except RuntimeError as exc:
         log(f"{kind} root folders: {exc}", "WARNING")
         return [f"{kind} library folders could not be checked; extra roots were left registered"]
     registered = [str(item.get("path") or "").rstrip("/") for item in existing]
     try:
-        titles = as_list(
-            http("GET", f"{base}/{arr_title_collection(kind)}", headers=arr_headers(api_key))
+        titles = object_list(
+            http("GET", f"{base}/{arr_title_collection(kind)}", headers=arr_headers(api_key)), "library titles", ("id", "path")
         )
-        lists = as_list(http("GET", f"{base}/importlist", headers=arr_headers(api_key)))
+        lists = object_list(http("GET", f"{base}/importlist", headers=arr_headers(api_key)), "import lists", ("id",))
     except RuntimeError as exc:
         log(f"{kind} leftover roots: {exc}", "WARNING")
         return [f"{kind} library contents could not be checked; extra roots were left registered"]

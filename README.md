@@ -45,7 +45,7 @@ For TV, Default and Max prefer complete season packs within the same resolution 
 
 Choose **By Rating** for automatic kid/general routing, or choose a specific library. Unknown ratings go to general. By Rating is a staging folder under `downloads` (`downloads/By Rating/Movies` and `downloads/By Rating/TV`), then each title moves into the kid or general library. An older By Rating folder next to a library is moved out of and removed once it is empty. Watch through your separate Plex installation, and do not point Plex at `downloads`.
 
-Removing or declining a request stops future monitoring for a title Pompey previously observed as requested. It retains library files and in-flight downloads. An unreadable, truncated or changing request list never triggers cancellation. Requests created directly in Arr are left alone, and declined requests are not silently recreated.
+Removing or declining a request stops future monitoring for a title Pompey previously observed as requested. For TV requests with explicit seasons, only removed requested seasons are unmonitored; overlapping requests and other monitored seasons are preserved. It retains library files and in-flight downloads. An unreadable, truncated or changing request list never triggers cancellation. Requests created directly in Arr are left alone, and declined requests are not silently recreated.
 
 ## VPN and health
 
@@ -53,7 +53,7 @@ Any compatible full-tunnel WireGuard VPN can be used; a particular provider is n
 
 The firewall is installed as one atomic IPv4/IPv6 transaction. Failure prevents engine downloads and startup. Tunnel loss leaves the drop policy in place, with explicit LAN, loopback, VPN endpoint and UI-reply exceptions. Pasting a replacement file causes the WireGuard service to reconnect.
 
-The sidebar reports current service health and failing background jobs. Configuration, requests, download policy, rating routing and update checks have separate bounded jobs and retry backoff; they continue retrying after a prolonged outage.
+The sidebar reports current service health, delayed maintenance, failed library moves and blocked imports. Configuration, requests, download policy, rating routing and update checks have separate bounded jobs and retry backoff; they continue retrying after a prolonged outage.
 
 ## Releases and recovery
 
