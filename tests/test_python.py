@@ -2419,5 +2419,120 @@ class TestsNeverUseBitTorrent(unittest.TestCase):
         self.assertTrue((ROOT / "tests/lib/fake_source.py").is_file())
 
 
+class TestConfigFileParsers(unittest.TestCase):
+    def setUp(self):
+        import write_engine_configs
+        self.wec = write_engine_configs
+
+    def test_write_engine_configs_can_be_imported_safely(self):
+        self.assertTrue(callable(self.wec.main))
+        self.assertTrue(callable(self.wec.configure_engines))
+
+    def test_set_tag_updates_and_adds(self):
+        xml = "<Config><Port>8989</Port></Config>"
+        updated = self.wec.set_tag(xml, "Port", "9090")
+        self.assertIn("<Port>9090</Port>", updated)
+        self.assertNotIn("<Port>8989</Port>", updated)
+
+        added = self.wec.set_tag(updated, "LogLevel", "warn")
+        self.assertIn("<LogLevel>warn</LogLevel>", added)
+        self.assertIn("<Port>9090</Port>", added)
+
+    def test_set_tag_handles_self_closing_tags(self):
+        xml = "<Config><LogLevel/></Config>"
+        updated = self.wec.set_tag(xml, "LogLevel", "warn")
+        self.assertIn("<LogLevel>warn</LogLevel>", updated)
+        self.assertNotIn("<LogLevel/>", updated)
+
+    def test_set_tag_preserves_xml_prologue_and_comments(self):
+        xml = (
+            '<?xml version="1.0" encoding="utf-8"?>\n'
+            "<!-- Top level comment -->\n"
+            '<Config version="1.0">\n'
+            "  <!-- Inner comment -->\n"
+            "  <Port>8989</Port>\n"
+            "</Config>\n"
+        )
+        updated = self.wec.set_tag(xml, "Port", "9090")
+        self.assertIn('<?xml version="1.0" encoding="utf-8"?>', updated)
+        self.assertIn("<!-- Top level comment -->", updated)
+        self.assertIn("<!-- Inner comment -->", updated)
+        self.assertIn('version="1.0"', updated)
+        self.assertIn("<Port>9090</Port>", updated)
+
+    def test_drop_auth_none(self):
+        xml_none = "<Config><AuthenticationMethod>\n  None\n</AuthenticationMethod></Config>"
+        dropped = self.wec.drop_auth_none(xml_none)
+        self.assertNotIn("AuthenticationMethod", dropped)
+
+        xml_forms = "<Config><AuthenticationMethod>Forms</AuthenticationMethod></Config>"
+        kept_forms = self.wec.drop_auth_none(xml_forms)
+        self.assertIn("<AuthenticationMethod>Forms</AuthenticationMethod>", kept_forms)
+
+        xml_external = "<Config><AuthenticationMethod>External</AuthenticationMethod></Config>"
+        kept_external = self.wec.drop_auth_none(xml_external)
+        self.assertIn("<AuthenticationMethod>External</AuthenticationMethod>", kept_external)
+
+    def test_drop_obsolete_qbit_seed(self):
+        ini = (
+            "[BitTorrent]\n"
+            "Session\\MaxRatioEnabled=true\n"
+            "Session\\MaxRatio=1\n"
+            "Session\\MaxSeedingTimeEnabled=true\n"
+            "Session\\MaxSeedingTime=1440\n"
+            "Session\\MaxRatioAct=0\n"
+            "Session\\KeepMe=true\n"
+        )
+        cleaned = self.wec.drop_obsolete_qbit_seed(ini)
+        self.assertNotIn("MaxRatioEnabled", cleaned)
+        self.assertNotIn("MaxRatio=", cleaned)
+        self.assertNotIn("MaxSeedingTimeEnabled", cleaned)
+        self.assertNotIn("MaxSeedingTime=", cleaned)
+        self.assertNotIn("MaxRatioAct", cleaned)
+        self.assertIn("Session\\KeepMe=true", cleaned)
+
+    def test_patch_qbit_seed(self):
+        ini = "[BitTorrent]\nSession\\DisableAutoTMMByDefault=true\n"
+        patched = self.wec.patch_qbit_seed(
+            ini,
+            {
+                r"Session\GlobalMaxRatio": "0",
+                r"Session\ShareLimitAction": "Stop",
+            },
+        )
+        self.assertIn("Session\\GlobalMaxRatio=0", patched)
+        self.assertIn("Session\\ShareLimitAction=Stop", patched)
+
+    def test_patch_qbit_paths_preserves_quotes_and_empty_values(self):
+        ini = (
+            "[Preferences]\n"
+            'WebUI\\Password_PBKDF2="@ByteArray(abc:123#456==)"\n'
+            "[BitTorrent]\n"
+            "Session\\InterfaceAddress=\n"
+        )
+        patched = self.wec.patch_qbit_paths(ini, media="/media", log_dir="/config/qBittorrent/logs")
+        self.assertIn('WebUI\\Password_PBKDF2="@ByteArray(abc:123#456==)"', patched)
+        self.assertIn("Session\\InterfaceAddress=", patched)
+        self.assertIn("Session\\Interface=wg0", patched)
+        self.assertIn("Connection\\Interface=wg0", patched)
+        self.assertIn("FileLogger\\Path=/config/qBittorrent/logs", patched)
+
+    def test_qbit_conf_handles_missing_section_header(self):
+        ini_without_section = "Session\\Interface=wg0\nSession\\Port=6881\n"
+        patched = self.wec.patch_qbit_seed(
+            ini_without_section,
+            {r"Session\GlobalMaxRatio": "1"},
+        )
+        self.assertIn("Session\\GlobalMaxRatio=1", patched)
+        self.assertIn("Session\\Interface=wg0", patched)
+
+    def test_xml_fallback_on_malformed_xml(self):
+        malformed = "<Config><Port>8989</Port><UnclosedTag></Config>"
+        # Should not raise exception and should still update or fallback
+        res = self.wec.set_tag(malformed, "Port", "9090")
+        self.assertIn("<Port>9090</Port>", res)
+
+
 if __name__ == "__main__":
     unittest.main()
+
