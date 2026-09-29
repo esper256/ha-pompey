@@ -17,6 +17,7 @@ engines.
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import random
 import subprocess
@@ -37,7 +38,7 @@ class Handler(SimpleHTTPRequestHandler):
         super().__init__(*args, directory=str(STATIC), **kwargs)
 
     def log_message(self, fmt: str, *args) -> None:
-        if self.path.split("?", 1)[0] == "/status.json":
+        if self.path.split("?", 1)[0] in {"/status.json", "/health.json"}:
             return
         stamp = time.strftime("%H:%M:%S")
         sys.stderr.write("[%s] INFO: %s - %s\n" % (stamp, self.address_string(), fmt % args))
@@ -48,6 +49,34 @@ class Handler(SimpleHTTPRequestHandler):
             body = b'{"step":"vpn","label":"Starting","percent":5,"error":"","steps":[]}\n'
             if self._status_path.is_file():
                 body = self._status_path.read_bytes()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+        if path == "/health.json":
+            health_path = self._status_path.parent / "health.json"
+            if health_path.is_file():
+                body = health_path.read_bytes()
+            else:
+                body = (
+                    json.dumps({
+                        "updated": time.time(),
+                        "services": {
+                            "radarr": True,
+                            "sonarr": True,
+                            "prowlarr": True,
+                            "qbittorrent": True,
+                            "seerr": True,
+                            "vpn": True,
+                        },
+                        "jobs": {},
+                        "attention": [],
+                    })
+                    + "\n"
+                ).encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.send_header("Cache-Control", "no-store")

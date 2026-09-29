@@ -2237,6 +2237,12 @@ class DebugIngress(unittest.TestCase):
         self.assertNotIn("http://\" + location.hostname + \":7878", html)
         self.assertNotIn(":8080", html)
 
+    def test_wait_page_health_updates_err_hidden(self):
+        html = (ROOT / "pompey/rootfs/usr/share/pompey/index.html").read_text()
+        self.assertIn("fetch(\"health.json\"", html)
+        self.assertIn("err.hidden = !messages.length;", html)
+        self.assertIn("isVpnFormVisible", html)
+
     def test_preview_debug_pages_are_standins(self):
         preview = load("preview", ROOT / "tests/preview.py")
         html, ctype = preview.preview_debug_page("/debug/radarr/")
@@ -2246,6 +2252,28 @@ class DebugIngress(unittest.TestCase):
         self.assertIn("json", api_type)
         self.assertIn("Radarr", api)
         self.assertIsNone(preview.preview_debug_page("/"))
+
+    def test_preview_serves_health_json(self):
+        import tempfile
+        import threading
+        from urllib.request import urlopen
+        preview = load("preview", ROOT / "tests/preview.py")
+        with tempfile.TemporaryDirectory() as td:
+            status_path = Path(td) / "status.json"
+            handler = lambda *a, **k: preview.Handler(*a, status_path=status_path, **k)
+            httpd = preview.ThreadingHTTPServer(("127.0.0.1", 0), handler)
+            port = httpd.server_address[1]
+            t = threading.Thread(target=httpd.serve_forever, daemon=True)
+            t.start()
+            try:
+                with urlopen(f"http://127.0.0.1:{port}/health.json") as resp:
+                    self.assertEqual(resp.status, 200)
+                    data = json.loads(resp.read().decode("utf-8"))
+                    self.assertIn("services", data)
+                    self.assertIn("updated", data)
+            finally:
+                httpd.shutdown()
+                httpd.server_close()
 
     def test_nginx_debug_proxy_rewrites_ingress_and_stays_off_when_disabled(self):
         import shutil

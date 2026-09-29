@@ -421,10 +421,14 @@
       }).join(" ");
     }
 
-    function renderVpn(data) {
-      const showForm = !vpnSubmitted && (
+    function isVpnFormVisible(data) {
+      return !vpnSubmitted && (
         Boolean(data.need_vpn) || document.activeElement === wg
       );
+    }
+
+    function renderVpn(data) {
+      const showForm = isVpnFormVisible(data);
       const vpn = data.vpn;
       if (showForm || !vpn || vpn.up !== true) {
         vpnBw.hidden = true;
@@ -479,9 +483,7 @@
     function render(data) {
       const dashboard = isDashboard(data);
       document.body.classList.toggle("is-ready", dashboard);
-      const showForm = !vpnSubmitted && (
-        Boolean(data.need_vpn) || document.activeElement === wg
-      );
+      const showForm = isVpnFormVisible(data);
       vpn.hidden = !showForm;
       const sig = JSON.stringify([
         data.percent,
@@ -504,7 +506,7 @@
       if (data.error && !dashboard) {
         err.hidden = false;
         err.textContent = data.error;
-      } else if (!showForm) {
+      } else if (!showForm && !dashboard) {
         err.hidden = true;
         err.textContent = "";
       }
@@ -581,23 +583,28 @@
         const data = await res.json();
         render(data);
         renderVpn(data);
-        if (data.search) {
+        if (data.search && !isVpnFormVisible(data)) {
           try {
             const response = await fetch("health.json", { cache: "no-store" });
             const health = response.ok ? await response.json() : null;
-            if (!health || Date.now() / 1000 - health.updated > 35) {
+            if (!health || Date.now() / 1000 - (Number(health.updated) || 0) > 35) {
               err.textContent = "Status unavailable. Check the app log.";
+              err.hidden = false;
             } else {
-              const down = Object.entries(health.services).filter(([, up]) => !up).map(([name]) => name);
-              const failed = Object.entries(health.jobs).filter(([, job]) => job.failures > 0).map(([name]) => name);
-              const overdue = Object.entries(health.jobs).filter(([, job]) => job.overdue).map(([name]) => name);
+              const down = Object.entries(health.services || {}).filter(([, up]) => !up).map(([name]) => name);
+              const failed = Object.entries(health.jobs || {}).filter(([, job]) => job && job.failures > 0).map(([name]) => name);
+              const overdue = Object.entries(health.jobs || {}).filter(([, job]) => job && job.overdue).map(([name]) => name);
               const messages = [...(health.attention || [])];
               if (down.length) messages.unshift("Waiting for: " + down.join(", "));
               if (failed.length) messages.push("Retrying: " + failed.join(", "));
               if (overdue.length) messages.push("Maintenance delayed: " + overdue.join(", "));
               err.textContent = messages.join(" ");
+              err.hidden = !messages.length;
             }
-          } catch (_) { err.textContent = "Status unavailable."; }
+          } catch (_) {
+            err.textContent = "Status unavailable.";
+            err.hidden = false;
+          }
         }
       } catch (_exc) {
         // Polling is read-only. A torn status.json must not look like boot
