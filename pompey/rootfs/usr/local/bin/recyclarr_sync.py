@@ -6,10 +6,9 @@ encodes) with 1080p as a fallback so a Max request is not 4K-or-nothing. Anime
 variants keep the same quality tiers but prefer dual-audio releases. Remux stays
 off. x265, ordinary audio formats, and HDR/DV are preferences rather than
 automatic blockers. Sonarr prefers season packs within a resolution tier,
-penalizes non-original-language releases without making them impossible, and
-stops score-only upgrades at the target quality to avoid pack replacement loops.
-Anything is not Recyclarr's — Pompey keeps that profile. Secrets are never
-printed.
+rejects non-original-language releases, and stops score-only upgrades at the
+target quality to avoid pack replacement loops. Anything is not Recyclarr's —
+Pompey keeps that profile. Secrets are never printed.
 """
 from __future__ import annotations
 
@@ -47,14 +46,14 @@ TRASH_SONARR_AUDIO_FORMATS = "e9a1944a254e6f8a9da63083f7ae15cb"
 TRASH_SONARR_LANGUAGE_PROFILES = "74aff4168620ed49dcc67e92b2c2a5b4"
 TRASH_SONARR_UNWANTED_FORMATS = "59c3af66780d08332fdc64e68297098f"
 DUAL_AUDIO_SCORE = 15
-NOT_ORIGINAL_SCORE = -1000
+NOT_ORIGINAL_SCORE = -10000
 # Shared movie quality definitions. These correspond to about 1.5 GiB minimum
 # and 3.5 GiB preferred for a 120-minute 1080p movie.
 RADARR_1080P_MIN_MB_PER_MIN = 12.5
 RADARR_1080P_PREFERRED_MB_PER_MIN = 29.2
 # Prefer a consistent season over release-group/repack bonuses, without
 # overcoming a -10000 rejection. Seed and quality gates still apply.
-SEASON_PACK_SCORE = 250
+SEASON_PACK_SCORE = 2500
 
 
 def env(name: str, default: str = "") -> str:
@@ -222,7 +221,6 @@ sonarr:
         name: Default
         reset_unmatched_scores:
           enabled: true
-        min_format_score: {NOT_ORIGINAL_SCORE}
         upgrade:
           allowed: true
           until_quality: HD 1080p
@@ -242,7 +240,6 @@ sonarr:
         name: Anime
         reset_unmatched_scores:
           enabled: true
-        min_format_score: {NOT_ORIGINAL_SCORE}
         upgrade:
           allowed: true
           until_quality: HD 1080p
@@ -262,7 +259,6 @@ sonarr:
         name: Max
         reset_unmatched_scores:
           enabled: true
-        min_format_score: {NOT_ORIGINAL_SCORE}
         upgrade:
           allowed: true
           until_quality: WEB 2160p

@@ -76,7 +76,10 @@ class AnimeIntegration(RealArrTestCase):
         secret=data/'secrets.json';secret.write_text(json.dumps({'radarr_api_key':'a'*32,'sonarr_api_key':'a'*32}))
         with patch.dict(os.environ,POMPEY_RECYCLARR=str(artifact('recyclarr')/'recyclarr'),POMPEY_RECYCLARR_DATA=str(data),POMPEY_SECRETS=str(secret),RADARR_URL=cls.urls['Radarr'],SONARR_URL=cls.urls['Sonarr']):
             if recyclarr_sync.main():raise RuntimeError('Production quality profiles failed')
-        cls.profile=next(p for p in http('GET',cls.base+'/qualityprofile') if p['name']=='Default')
+        profiles=http('GET',cls.base+'/qualityprofile')
+        cls.anime_profile=next(p for p in profiles if p['name']=='Anime')
+        cls.default_profile=next(p for p in profiles if p['name']=='Default')
+        cls.profile=cls.anime_profile
         cls.show=http('GET',cls.base+'/series/'+str(cls.show['id']))
         cls.show['qualityProfileId']=cls.profile['id'];http('PUT',cls.base+'/series/'+str(cls.show['id']),cls.show)
         for number in range(2):
@@ -257,7 +260,7 @@ class AnimeIntegration(RealArrTestCase):
 
     def test_standard_tv_keeps_quality_size_and_language_gates(self):
         show=http('GET',self.base+'/series/lookup?term=tvdb:79257')[0]
-        show.update(qualityProfileId=self.profile['id'],rootFolderPath=str(self.root/'media'),seriesType='standard',
+        show.update(qualityProfileId=self.default_profile['id'],rootFolderPath=str(self.root/'media'),seriesType='standard',
                     monitored=True,seasonFolder=True,addOptions={'searchForMissingEpisodes':False})
         saved=http('POST',self.base+'/series',show)
         self.addCleanup(http,'DELETE',self.base+'/series/'+str(saved['id'])+'?deleteFiles=true')
