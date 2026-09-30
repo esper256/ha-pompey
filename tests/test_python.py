@@ -35,6 +35,8 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
+import yaml
+
 
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -1466,6 +1468,46 @@ class VpnStats(unittest.TestCase):
                     os.environ.pop(key, None)
                 else:
                     os.environ[key] = value
+
+
+class RecyclarrPolicy(unittest.TestCase):
+    def test_sonarr_scores_are_assigned_to_the_intended_profiles(self):
+        config = yaml.safe_load(recyclarr.render_config(
+            "http://127.0.0.1:7878", "radarr-key",
+            "http://127.0.0.1:8989", "sonarr-key",
+        ))["sonarr"]["tv"]
+        profiles = {profile["name"]: profile for profile in config["quality_profiles"]}
+        self.assertEqual(set(profiles), {"Default", "Anime", "Max"})
+        for name, profile in profiles.items():
+            with self.subTest(profile=name):
+                self.assertTrue(profile["reset_unmatched_scores"]["enabled"])
+                self.assertEqual(profile["upgrade"]["until_score"], 0)
+                # Omission inherits the pinned guide's minimum. The real API
+                # test verifies that inheritance also repairs existing profiles.
+                if "min_format_score" in profile:
+                    self.assertEqual(profile["min_format_score"], 0)
+
+        assignments = {}
+        for custom_format in config["custom_formats"]:
+            for trash_id in custom_format["trash_ids"]:
+                for target in custom_format["assign_scores_to"]:
+                    key = (trash_id, target["name"])
+                    self.assertNotIn(key, assignments, "duplicate score assignment")
+                    assignments[key] = target["score"] if "score" in target else custom_format["score"]
+
+        # Pin the policy independently of the implementation's score constants.
+        # A global text search cannot catch a score attached to the wrong profile.
+        expected = {}
+        for trash_id, score in (
+            ("3bc5f395426614e155e585a2f056cdf1", 2500),  # Season Pack
+            ("ae575f95ab639ba5d15f663bf019e3e8", -10000),  # Not Original
+            ("47435ece6b99a0b477caf360e79ba0bb", 0),  # x265 (HD)
+            ("9b64dff695c2115facf1b6ea59c9bd07", 0),  # x265 (no HDR/DV)
+        ):
+            for name in ("Default", "Anime", "Max"):
+                expected[(trash_id, name)] = score
+        expected[("418f50b10f1907201b6cfdf881f467b7", "Anime")] = 15
+        self.assertEqual(assignments, expected)
 
 
 class WireStack(unittest.TestCase):

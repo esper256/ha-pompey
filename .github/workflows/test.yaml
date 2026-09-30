@@ -1,7 +1,7 @@
 name: Test
 on:
   pull_request:
-    branches: [main]
+    branches: [main, codex/fix-anime-and-language-selection]
   push:
     branches: [main]
   workflow_dispatch:

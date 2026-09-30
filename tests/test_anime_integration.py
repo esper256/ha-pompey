@@ -258,6 +258,90 @@ class AnimeIntegration(RealArrTestCase):
         # Episode-by-episode fan-out is outside this completed-season budget.
         self.assertLessEqual(len(requests),8*len(self.catalogues),requests)
 
+    def test_language_scores_across_profiles_and_pack_bonuses(self):
+        """Score real parsed releases, including anime still using Default/Max."""
+        original = http('GET', self.base+'/series/'+str(self.show['id']))
+        self.addCleanup(http, 'PUT', self.base+'/series/'+str(self.show['id']), original)
+        episode = next(e for e in http('GET', self.base+'/episode?seriesId='+str(self.show['id']))
+                       if e['seasonNumber'] == 3 and e['episodeNumber'] == 1)
+        # Untagged is deliberately a parser-default case, not proof of a file's
+        # audio tracks. Explicit English/French tags must never inherit Japanese.
+        languages = [
+            ('Japanese', True, False),
+            ('Japanese English Dual Audio', True, True),
+            ('English', False, False),
+            ('French', False, False),
+            ('Korean English Dual Audio', False, True),
+            ('', True, False),
+        ]
+        cases = []
+        for pack in (False, True):
+            for language, approved, dual in languages:
+                title = f'World Trigger {"S03" if pack else "S03E01"} 1080p WEB-DL {language} [Fixture]'
+                row = dict(self.dual, title=title, size=(5*1024**3 if pack else 512*1024**2),
+                           season=3, episode=None if pack else 1,
+                           absolute=None if pack else episode.get('absoluteEpisodeNumber'), synthetic=True)
+                cases.append((row, pack, approved, dual))
+        # These controlled SxxEyy titles use standard search routing to isolate
+        # scoring without repeating anime's 240-request absolute-number fan-out.
+        # Original-language metadata and real Sonarr parsing/CFs are unchanged;
+        # the existing automatic anime search separately covers native routing.
+        profiles = {p['name']: p for p in http('GET', self.base+'/qualityprofile')}
+        for name in ('Default', 'Anime', 'Max'):
+            with self.subTest(profile=name):
+                http('PUT', self.base+'/series/'+str(original['id']),
+                     dict(original, qualityProfileId=profiles[name]['id'], seriesType='standard'))
+                for catalogue in self.catalogues:
+                    catalogue.reset([row for row, _, _, _ in cases])
+                decisions = http('GET', self.base+f'/release?seriesId={self.show["id"]}&seasonNumber=3', timeout=120)
+                for row, pack, approved, dual in cases:
+                    with self.subTest(profile=name, title=row['title']):
+                        matches = [d for d in decisions if d['title'] == row['title']]
+                        self.assertTrue(matches, decisions)
+                        expected = (2500 if pack else 0) + (15 if dual and name == 'Anime' else 0)
+                        if not approved:
+                            expected -= 10000
+                        for decision in matches:
+                            self.assertEqual(decision['fullSeason'], pack, decision)
+                            self.assertEqual(decision['customFormatScore'], expected, decision)
+                            formats = {item['name'] for item in decision['customFormats']}
+                            self.assertEqual('Season Pack' in formats, pack, decision)
+                            self.assertEqual('Language: Not Original' in formats, not approved, decision)
+                            self.assertEqual('Anime Dual Audio' in formats, dual, decision)
+                            self.assertEqual(decision['approved'], approved, decision)
+                            if not approved:
+                                self.assertTrue(any('custom format' in reason.lower()
+                                                    for reason in decision['rejections']), decision)
+                requests = [r for c in self.catalogues for r in c.snapshot()
+                            if r['query'].get('t') != ['caps']]
+                self.assertLessEqual(len(requests), 16)
+                self.reports.append({'test': self._testMethodName, 'profile': name,
+                                     'request_count': len(requests), 'decisions': decisions})
+
+    def test_pack_outranks_ranked_repack_episode(self):
+        """The pack bonus beats WEB Tier 01 + REPACK3, not merely unranked rows."""
+        original = http('GET', self.base+'/series/'+str(self.show['id']))
+        self.addCleanup(http, 'PUT', self.base+'/series/'+str(self.show['id']), original)
+        http('PUT', self.base+'/series/'+str(original['id']), dict(original, seriesType='standard'))
+        episode = next(e for e in http('GET', self.base+'/episode?seriesId='+str(self.show['id']))
+                       if e['seasonNumber'] == 3 and e['episodeNumber'] == 1)
+        pack = dict(self.single, title='World Trigger S03 1080p WEB-DL Japanese [Fixture]',
+                    size=5*1024**3, episode=None, absolute=None)
+        ranked = dict(pack, title='World Trigger S03E01 REPACK3 1080p WEB-DL Japanese-FLUX',
+                      size=512*1024**2, episode=1, absolute=episode.get('absoluteEpisodeNumber'))
+        for catalogue in self.catalogues:
+            catalogue.reset([pack, ranked])
+        decisions = http('GET', self.base+f'/release?seriesId={self.show["id"]}&seasonNumber=3', timeout=120)
+        scores = {}
+        for row, expected in ((pack, 2500), (ranked, 1707)):
+            matches = [d for d in decisions if d['title'] == row['title']]
+            self.assertTrue(matches, decisions)
+            for decision in matches:
+                self.assertTrue(decision['approved'], decision)
+                self.assertEqual(decision['customFormatScore'], expected, decision)
+            scores[row['title']] = matches[0]['customFormatScore']
+        self.assertGreater(scores[pack['title']], scores[ranked['title']])
+
     def test_standard_tv_keeps_quality_size_and_language_gates(self):
         show=http('GET',self.base+'/series/lookup?term=tvdb:79257')[0]
         show.update(qualityProfileId=self.default_profile['id'],rootFolderPath=str(self.root/'media'),seriesType='standard',
