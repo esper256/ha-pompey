@@ -47,6 +47,9 @@ TRASH_SONARR_LANGUAGE_PROFILES = "74aff4168620ed49dcc67e92b2c2a5b4"
 TRASH_SONARR_UNWANTED_FORMATS = "59c3af66780d08332fdc64e68297098f"
 DUAL_AUDIO_SCORE = 15
 NOT_ORIGINAL_SCORE = -10000
+# Recyclarr leaves an omitted min_format_score untouched. 0.3.7 stored -1000
+# on these Sonarr profiles, so write 0 and clear that gate on every sync.
+SONARR_MIN_FORMAT_SCORE = 0
 # Shared movie quality definitions. These correspond to about 1.5 GiB minimum
 # and 3.5 GiB preferred for a 120-minute 1080p movie.
 RADARR_1080P_MIN_MB_PER_MIN = 12.5
@@ -221,6 +224,7 @@ sonarr:
         name: Default
         reset_unmatched_scores:
           enabled: true
+        min_format_score: {SONARR_MIN_FORMAT_SCORE}
         upgrade:
           allowed: true
           until_quality: HD 1080p
@@ -240,6 +244,7 @@ sonarr:
         name: Anime
         reset_unmatched_scores:
           enabled: true
+        min_format_score: {SONARR_MIN_FORMAT_SCORE}
         upgrade:
           allowed: true
           until_quality: HD 1080p
@@ -259,6 +264,7 @@ sonarr:
         name: Max
         reset_unmatched_scores:
           enabled: true
+        min_format_score: {SONARR_MIN_FORMAT_SCORE}
         upgrade:
           allowed: true
           until_quality: WEB 2160p

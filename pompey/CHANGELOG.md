@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Reject TV releases that lack the original language. Sonarr Default, Anime, and Max now refuse them (for example an English-only anime dub), reversing the 0.3.7 preference that kept dubbed releases possible. Dual-audio releases that include the original language stay allowed, and season packs are preferred again.
+- Reset the minimum custom-format score to 0 on existing Sonarr installs.
+
 ## 0.3.7
 
 - Relax Recyclarr defaults for family-friendly libraries while keeping quality tiers and genuine junk protections.
