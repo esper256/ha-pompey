@@ -1734,6 +1734,14 @@ class WireStack(unittest.TestCase):
         self.assertIn(recyclarr.TRASH_SONARR_UNWANTED_FORMATS, body)
         self.assertIn(f"score: {recyclarr.DUAL_AUDIO_SCORE}", body)
         self.assertIn(f"score: {recyclarr.NOT_ORIGINAL_SCORE}", body)
+        radarr_body, sonarr_body = body.split("sonarr:", 1)
+        self.assertNotIn("min_format_score", radarr_body)
+        self.assertEqual(
+            sonarr_body.count(
+                f"min_format_score: {recyclarr.SONARR_MIN_FORMAT_SCORE}"
+            ),
+            3,
+        )
         self.assertIn("name: Default", body)
         self.assertIn("name: Max", body)
         self.assertIn("name: Anime", body)
