@@ -155,34 +155,77 @@ class ArrIntegration(RealArrTestCase):
         import recyclarr_sync
         data=self.root/'policy';data.mkdir(exist_ok=True)
         secrets=data/'secrets.json';secrets.write_text(json.dumps({'radarr_api_key':'a'*32,'sonarr_api_key':'a'*32}))
-        with patch.dict(os.environ,{'POMPEY_RECYCLARR':str(artifact('recyclarr')/'recyclarr'),
-                        'POMPEY_RECYCLARR_DATA':str(data/'recyclarr'),'POMPEY_SECRETS':str(secrets),
-                        'RADARR_URL':self.urls['Radarr'],'SONARR_URL':self.urls['Sonarr']}):
+
+        def sync():
             code=recyclarr_sync.main()
             if code:
                 for log in (data/'recyclarr').rglob('*.log'):
                     print(log.read_text()[-12000:])
             self.assertEqual(code,0)
-        for kind in ['Radarr','Sonarr']:
-            profiles=http('GET',self.urls[kind]+'/api/v3/qualityprofile')
-            by_name={p['name']:p for p in profiles}
-            self.assertTrue({'Default','Max','Anime'} <= by_name.keys())
-            self.assertTrue(by_name['Default']['items'])
-            self.assertTrue(http('GET',self.urls[kind]+'/api/v3/customformat'))
-            if kind=='Sonarr':
-                for name in ['Default','Max','Anime']:
+
+        def snapshot():
+            result={}
+            for kind in ['Radarr','Sonarr']:
+                base=self.urls[kind]+'/api/v3'
+                profiles=http('GET',base+'/qualityprofile')
+                by_name={p['name']:p for p in profiles}
+                self.assertTrue({'Default','Max','Anime'} <= by_name.keys())
+                self.assertTrue(by_name['Default']['items'])
+                formats=http('GET',base+'/customformat')
+                self.assertTrue(formats)
+                # Key by ID so convergence also catches replacement or duplicates.
+                result[kind]={p['id']:p for p in profiles}
+                if kind!='Sonarr':
+                    continue
+                for name in ['Default','Anime','Max']:
                     profile=by_name[name]
                     scores={item['format']:item['score'] for item in profile['formatItems']}
-                    formats=http('GET',self.urls[kind]+'/api/v3/customformat')
                     actual={item['name']:scores[item['id']] for item in formats}
-                    self.assertEqual(actual['Season Pack'],recyclarr_sync.SEASON_PACK_SCORE)
-                    self.assertEqual(actual['x265 (HD)'],0)
-                    self.assertEqual(actual['x265 (no HDR/DV)'],0)
-                    if name == 'Anime':
-                        self.assertEqual(actual['Anime Dual Audio'],recyclarr_sync.DUAL_AUDIO_SCORE)
-                    else:
-                        self.assertNotEqual(actual['Anime Dual Audio'],recyclarr_sync.DUAL_AUDIO_SCORE)
-                    self.assertEqual(profile['cutoffFormatScore'],0)
+                    with self.subTest(profile=name):
+                        self.assertEqual(profile['minFormatScore'],0)
+                        self.assertEqual(profile['cutoffFormatScore'],0)
+                        self.assertEqual(actual['Language: Not Original'],-10000)
+                        self.assertEqual(actual['Season Pack'],2500)
+                        self.assertEqual(actual['x265 (HD)'],0)
+                        self.assertEqual(actual['x265 (no HDR/DV)'],0)
+                        self.assertEqual(actual['Anime Dual Audio'],15 if name=='Anime' else 0)
+            return result
+
+        with patch.dict(os.environ,{'POMPEY_RECYCLARR':str(artifact('recyclarr')/'recyclarr'),
+                        'POMPEY_RECYCLARR_DATA':str(data/'recyclarr'),'POMPEY_SECRETS':str(secrets),
+                        'RADARR_URL':self.urls['Radarr'],'SONARR_URL':self.urls['Sonarr']}):
+            sync()
+            fresh=snapshot()
+            base=self.urls['Sonarr']+'/api/v3'
+            formats={item['name']:item['id'] for item in http('GET',base+'/customformat')}
+            legacy_scores={
+                formats['Season Pack']:250,
+                formats['Language: Not Original']:-1000,
+                formats['Anime Dual Audio']:15,
+                formats['x265 (HD)']:-10000,
+                formats['x265 (no HDR/DV)']:-10000,
+            }
+            for profile in fresh['Sonarr'].values():
+                if profile['name'] not in {'Default','Anime','Max'}:
+                    continue
+                # Reproduce the old language/pack policy, plus stale scores and
+                # a raised cutoff. Re-sync must repair the existing IDs in place.
+                legacy=dict(profile,minFormatScore=-1000,cutoffFormatScore=5000,
+                            formatItems=[dict(item,score=legacy_scores.get(item['format'],item['score']))
+                                         for item in profile['formatItems']])
+                endpoint=base+'/qualityprofile/'+str(profile['id'])
+                http('PUT',endpoint,legacy)
+                seeded=http('GET',endpoint)
+                self.assertEqual(seeded['minFormatScore'],-1000)
+                self.assertEqual(seeded['cutoffFormatScore'],5000)
+                self.assertEqual({item['format']:item['score'] for item in seeded['formatItems']
+                                  if item['format'] in legacy_scores},legacy_scores)
+
+            sync()
+            migrated=snapshot()
+            self.assertEqual(migrated,fresh,'legacy profiles must converge without replacing their IDs')
+            sync()
+            self.assertEqual(snapshot(),migrated,'a repeated sync must not change repaired profiles')
 
     def command(self, base, payload):
         command = http('POST',base+'/command',payload)
