@@ -61,12 +61,18 @@ def prepare_media(folder):
     length = 128
     if original[offset : offset + length] != bytes(length):
         raise RuntimeError("Identity padding must be inside the reserved Matroska Void")
+    end = metadata["sparsePaddingEnd"]
+    if any(original[offset + length : end]):
+        raise RuntimeError("Sparse region must contain only Matroska Void padding")
     for case in cases():
         target = folder / case.release
         target.mkdir()
-        payload = bytearray(original)
-        payload[offset : offset + length] = case.prefix.encode().ljust(length, b"\0")
-        (target / (case.release + ".mkv")).write_bytes(payload)
+        # The long zero-filled Void is stored as a sparse hole, not N disk copies.
+        with (target / (case.release + ".mkv")).open("wb") as output:
+            output.write(original[:offset])
+            output.write(case.prefix.encode().ljust(length, b"\0"))
+            output.seek(end)
+            output.write(original[end:])
         (target / (case.release + ".en.srt")).write_text(
             f"1\n00:00:00,000 --> 00:00:02,000\nSynthetic {case.prefix}\n"
         )

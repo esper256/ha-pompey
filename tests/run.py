@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build once and run focused logic, isolated packets, and the single real journey."""
+"""Build once and run logic, required isolated packets and real household batches."""
 
 import argparse
 import json
@@ -7,9 +7,10 @@ import os
 from pathlib import Path
 import shlex
 import shutil
-import subprocess
 import time
 import uuid
+from container_runtime import Runtime
+from journey.support import save_json, STARTUP_TIMEOUT, SCENARIO_TIMEOUT
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -56,34 +57,33 @@ def main():
             "--runs must be positive and --scenarios must be between 1 and 100"
         )
     command = runtime()
-    podman = "podman" in command
     results = ROOT / ".test-results"
     results.mkdir(exist_ok=True)
-    measurements = {}
-
-    def run(arguments, timeout=600, log=None, label=None):
-        before = time.monotonic()
-        print("+", shlex.join(command + arguments), flush=True)
-        if log is None:
-            subprocess.run(command + arguments, cwd=ROOT, check=True, timeout=timeout)
-        else:
-            with log.open("w") as out:
-                try:
-                    subprocess.run(
-                        command + arguments,
-                        cwd=ROOT,
-                        check=True,
-                        timeout=timeout,
-                        stdout=out,
-                        stderr=subprocess.STDOUT,
-                    )
-                finally:
-                    print(log.read_text()[-12000:], flush=True)
-        if label:
-            measurements[label] = round(time.monotonic() - before, 3)
-            print("DURATION", label, measurements[label], "seconds", flush=True)
-
     started = time.monotonic()
+    summary = {"success": False, "journeys": []}
+
+    def checkpoint():
+        summary["totalSeconds"] = round(time.monotonic() - started, 3)
+        save_json(results / "timing-summary.json", summary)
+
+    engine = Runtime(command, ROOT, checkpoint)
+    summary["sharedSeconds"] = engine.measurements
+    checkpoint()
+    try:
+        execute(args, engine, results, summary, checkpoint)
+        summary["success"] = True
+    except BaseException as exc:
+        summary["error"] = {"type": type(exc).__name__, "message": str(exc)}
+        raise
+    finally:
+        checkpoint()
+        print("Timing summary:", results / "timing-summary.json", flush=True)
+    print("Build and checks elapsed:", summary["totalSeconds"], "seconds", flush=True)
+
+
+def execute(args, engine, results, summary, checkpoint):
+    run = engine.run
+    podman = "podman" in engine.command
     build = ["build"] + (["--layers", "--format", "docker"] if podman else [])
     if not args.skip_build:
         run(
@@ -115,130 +115,90 @@ def main():
         600,
         label="test-image-build",
     )
+    test_image = engine.image_id(test_image)
     if not args.journey_only:
-        check_suite(run, test_image)
-    samples = [
-        batch(run, command, test_image, results, args.layout, args.scenarios)
-        for _ in range(args.runs)
-    ]
-    summary = {
-        "sharedSeconds": measurements,
-        "journeys": samples,
-        "totalSeconds": round(time.monotonic() - started, 3),
-    }
-    (results / "timing-summary.json").write_text(json.dumps(summary, indent=2))
-    print("Build and checks elapsed:", summary["totalSeconds"], "seconds", flush=True)
-    print("Timing summary:", results / "timing-summary.json", flush=True)
+        check_suite(engine, test_image)
+    summary["testImageId"] = test_image
+    for _ in range(args.runs):
+        sample = {
+            "layout": args.layout,
+            "runId": uuid.uuid4().hex[:10],
+            "containers": [],
+            "success": False,
+        }
+        summary["journeys"].append(sample)
+        checkpoint()
+        batch(engine, test_image, results, sample, args.scenarios)
+        checkpoint()
 
 
-def check_suite(run, test_image):
-    # No s6 or downloader launches in this check container.
-    run(
-        [
-            "run",
-            "--rm",
-            "--network",
-            "none",
-            "--security-opt",
-            "label=disable",
-            "--entrypoint",
-            "python3",
-            test_image,
-            "/tests/checks.py",
-        ],
-        label="logic-syntax-and-lint",
-    )
-    # Every firewall mutation occurs inside namespaces created by this worker.
-    run(
-        [
-            "run",
-            "--rm",
-            "--network",
-            "none",
-            "--privileged",
-            "--security-opt",
-            "label=disable",
-            "-e",
-            "POMPEY_REQUIRE_NETWORK_TESTS=1",
-            "--entrypoint",
-            "python3",
-            test_image,
-            "/tests/test_firewall.py",
-            "-v",
-        ],
-        120,
-        label="isolated-packets",
+def check_suite(engine, test_image):
+    # No s6/downloader in logic checks; packet workers modify only their own namespaces.
+    engine.worker(test_image, "/tests/checks.py", label="logic-syntax-and-lint")
+    engine.worker(
+        test_image, "/tests/test_firewall.py", privileged=True, label="isolated-packets"
     )
 
 
-def batch(run, command, test_image, results, layout, count):
-    run_id = uuid.uuid4().hex[:10]
+def batch(engine, test_image, results, sample, count):
     started = time.monotonic()
-    if layout == "shared":
-        containers = [
-            journey(
-                run, command, test_image, results, run_id, count, list(range(count))
+    try:
+        if sample["layout"] == "shared":
+            journey(engine, test_image, results, sample, count, list(range(count)))
+        else:
+            first = journey(
+                engine,
+                test_image,
+                results,
+                sample,
+                count,
+                [0],
+                export_seed=sample["layout"] == "cloned" and count > 1,
             )
-        ]
-    else:
-        first = journey(
-            run,
-            command,
-            test_image,
-            results,
-            run_id,
-            count,
-            [0],
-            export_seed=layout == "cloned" and count > 1,
-        )
-        containers = [first]
-        for index in range(1, count):
-            containers.append(
+            for index in range(1, count):
                 journey(
-                    run,
-                    command,
+                    engine,
                     test_image,
                     results,
-                    run_id,
+                    sample,
                     count,
                     [index],
                     seed=first.get("configuredSeed"),
                 )
-            )
-    sample = {
-        "layout": layout,
-        "runId": run_id,
-        "containers": containers,
-        "wallSeconds": round(time.monotonic() - started, 3),
-    }
+        sample["success"] = True
+    finally:
+        sample["wallSeconds"] = round(time.monotonic() - started, 3)
+        engine.progress()
     print(
         "BATCH",
-        layout,
+        sample["layout"],
         count,
         "scenarios:",
         sample["wallSeconds"],
         "seconds",
         flush=True,
     )
-    return sample
 
 
 def journey(
-    run,
-    command,
-    test_image,
-    results,
-    run_id,
-    count,
-    selected,
-    seed=None,
-    export_seed=False,
+    engine, test_image, results, batch, count, selected, seed=None, export_seed=False
 ):
+    run = engine.run
+    run_id = batch["runId"]
     name = "pompey-journey-" + uuid.uuid4().hex[:10]
     destination = results / name
     destination.mkdir()
     started = time.monotonic()
     snapshot_seconds = restore_seconds = 0
+    sample = {
+        "artifacts": str(destination),
+        "success": False,
+        "selectedCases": selected,
+        "testImageId": test_image,
+    }
+    batch["containers"].append(sample)
+    engine.progress()
+    report = None
     flags = [
         "--name",
         name,
@@ -266,58 +226,49 @@ def journey(
     try:
         if seed:
             run(["create", *flags, "-e", "POMPEY_TEST_CONFIGURED=1", test_image], 60)
-            before = time.monotonic()
-            for folder in ["data", "config", "media"]:
-                with (Path(seed) / (folder + ".tar")).open("rb") as archive:
-                    subprocess.run(
-                        command + ["cp", "-", name + ":/"],
-                        stdin=archive,
-                        check=True,
-                        timeout=60,
-                    )
-            restore_seconds = round(time.monotonic() - before, 3)
+            restore_seconds = engine.restore(name, seed)
             run(
                 ["start", "--attach", name],
-                240 + 60 * len(selected),
+                STARTUP_TIMEOUT + SCENARIO_TIMEOUT * len(selected) + 90,
                 log=destination / "container.log",
             )
         else:
             run(
                 ["run", *flags, test_image],
-                240 + 60 * len(selected),
+                STARTUP_TIMEOUT + SCENARIO_TIMEOUT * len(selected) + 90,
                 log=destination / "container.log",
             )
         report = json.loads((destination / "result.json").read_text())
         assert report["success"], report
         if export_seed:
-            # PID 1 has exited: no app or controller can still write these databases.
-            text = (destination / "container.log").read_text()
-            if any(
-                name + " exited (" in text
-                for name in ["Radarr", "Sonarr", "Prowlarr", "Seerr", "qBittorrent"]
-            ):
-                raise RuntimeError(
-                    "Refusing configured state after an unclean engine shutdown"
-                )
-            seed = destination / "configured-state"
-            seed.mkdir()
-            before = time.monotonic()
-            for folder in ["data", "config", "media"]:
-                with (seed / (folder + ".tar")).open("wb") as archive:
-                    subprocess.run(
-                        command + ["cp", name + ":/" + folder, "-"],
-                        stdout=archive,
-                        check=True,
-                        timeout=60,
-                    )
-            snapshot_seconds = round(time.monotonic() - before, 3)
+            seed, snapshot_seconds = engine.snapshot(name, destination)
+            sample["configuredSeed"] = seed
+        sample["success"] = True
+    except BaseException as exc:
+        sample["error"] = {"type": type(exc).__name__, "message": str(exc)}
+        raise
     finally:
-        subprocess.run(
-            command + ["rm", "--force", name],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-        print("Acceptance artifacts:", destination, flush=True)
+        try:
+            engine.remove(name)
+        except Exception as cleanup:
+            sample["cleanupError"] = str(cleanup)
+            if sample["success"]:
+                sample["success"] = False
+                raise
+        finally:
+            sample["wallSeconds"] = round(time.monotonic() - started, 3)
+            sample["snapshotExportSeconds"] = snapshot_seconds
+            sample["snapshotRestoreSeconds"] = restore_seconds
+            partial = destination / "result.json"
+            if partial.exists():
+                try:
+                    report = json.loads(partial.read_text())
+                    sample["cases"] = report.get("cases", [])
+                except ValueError:
+                    sample["resultError"] = "Container result is not valid JSON"
+            save_json(destination / "timing.json", sample)
+            engine.progress()
+            print("Acceptance artifacts:", destination, flush=True)
     elapsed = round(time.monotonic() - started, 3)
     print(
         "Startup:", report["timings"]["household-setup-complete"], "seconds", flush=True
@@ -352,18 +303,12 @@ def journey(
         elapsed,
         flush=True,
     )
-    sample = {
-        "artifacts": str(destination),
-        "startupSeconds": report["timings"]["household-setup-complete"],
-        "cases": report["cases"],
-        "lifecycleOverheadSeconds": overhead,
-        "wallSeconds": elapsed,
-        "snapshotExportSeconds": snapshot_seconds,
-        "snapshotRestoreSeconds": restore_seconds,
-    }
-    if export_seed:
-        sample["configuredSeed"] = str(seed)
-    (destination / "timing.json").write_text(json.dumps(sample, indent=2))
+    sample.update(
+        startupSeconds=report["timings"]["household-setup-complete"],
+        lifecycleOverheadSeconds=overhead,
+    )
+    save_json(destination / "timing.json", sample)
+    engine.progress()
     return sample
 
 

@@ -50,6 +50,29 @@ The complete default suite passed in 61.78 seconds: the 43.51-second batch plus 
 
 These are development-machine timings using host Podman from Fedora Distrobox, not GitHub runner guarantees. Cold image downloads/builds are additional. Repeated future scenarios may have different costs, especially TV, upgrades or restart workflows.
 
+## Adding scenarios
+
+Keep outcome assertions in scenario modules such as [`movie_requests.py`](../tests/journey/movie_requests.py). The small [`journey.py`](../tests/journey/journey.py) driver owns startup, per-scenario budgets and final verification. New scenarios should accept the household, a namespaced catalogue case and background state rather than create new global clients or bootstrap another stack.
+
+Shared operations live in:
+
+| Utility | Responsibility |
+| --- | --- |
+| [`household.py`](../tests/journey/household.py) | Real Arr/Sonarr/Prowlarr/Seerr/qBittorrent clients, first-run setup, native command completion, engine identities and background preservation |
+| [`support.py`](../tests/journey/support.py) | Cookie-aware JSON/form requests, bounded polling, independent deadlines, atomic evidence checkpoints and streaming checksums |
+| [`torrent_files.py`](../tests/journey/torrent_files.py) | Exact block reads spanning fixture files without storing every film in memory |
+| [`container_runtime.py`](../tests/container_runtime.py) | Host CLI execution, named worker cleanup, immutable image IDs and cold seed transfers |
+
+Use `household.wait` for eventual observations and `wait_command` for real native commands. Expected network startup/502–504 failures can be observed again; permanent API errors, malformed responses, failed commands and assertion failures surface immediately. Startup gets 180 seconds, each scenario gets an independent 120 seconds, and host deadlines include those budgets plus bounded diagnostics/shutdown time. Waiting never borrows a later scenario's budget, and nested HTTP requests respect the current wait's remaining time.
+
+Checkpoints update `result.json` and each case report throughout execution, with explicit running/passed/failed states. Failed runs retain the original exception, last completed checkpoint, partial timing summary and read-only native movie/queue/command/torrent/request snapshots. Diagnostic collection has a separate ten-second HTTP budget and cannot replace the original failure. Complete logs remain artifacts; successful console output stays compact. Check workers and household containers both have named, bounded cleanup, including after timeout.
+
+Background verification batches native API reads and caches file checksums only while device/inode/size/mtime/ctime remain unchanged. Every batch still ends with a full checksum pass. Global setting changes must be explicit and restored by the owning scenario; changes intentionally made to an earlier owned object must also update that object's expected evidence. The current numeric `--scenarios` option repeats movie rating parameters for timing; it does not claim coverage of distinct unimplemented features.
+
+The external world rejects fixture paths on the wrong hostname and has no generic successful metadata fallback. Small status polls omit the growing request transcript; the full timestamped transcript is collected once at exit. Synthetic source files store the zero-filled Matroska Void as sparse holes, and the peer reads blocks from files. Logical lengths, piece hashes and all bytes transferred through real qBittorrent remain unchanged. New fixture responses should model an observed external contract rather than broaden a catch-all response.
+
+Eight focused harness regressions cover permanent/transient failures, nested deadlines, durable partial reports, mandatory final checksums, cross-file/empty-file block boundaries, truncated fixtures and incorrect hosts. The reviewed default suite passed in 61.11 seconds with cached layers, including eight product logic tests, eight harness tests, eight packet tests and three real journeys. A configured-clone run also passed. An intentional real-Radarr 404 failed about 65 ms after the request checkpoint and retained the partial case and native failure snapshots.
+
 ## Scope and expansion
 
 Focused tests remain for paths/symlinks, request ownership/history discontinuities, sharing boundaries and WireGuard parsing. The previous disconnected real-engine suites, fake application HTTP servers, anime catalogue matrix, fake-VPN helper and artifact/runtime download harnesses are removed.

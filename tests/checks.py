@@ -4,6 +4,7 @@ from pathlib import Path
 import subprocess
 
 subprocess.run(["python3", "/tests/test_logic.py", "-v"], check=True)
+subprocess.run(["python3", "/tests/test_harness.py", "-v"], check=True)
 for path in Path("/usr/local/bin").glob("*.py"):
     compile(path.read_bytes(), str(path), "exec")
 for root in ["/etc/cont-init.d", "/etc/services.d", "/usr/local/bin"]:

@@ -13,6 +13,7 @@ import threading
 import time
 from urllib.parse import parse_qs, urlsplit
 from catalogue import cases
+from torrent_files import TorrentFiles
 
 PEER_IP = "10.77.0.2"
 PIECE_SIZE = 256 * 1024
@@ -47,11 +48,12 @@ def read_exact(sock, count):
 class Torrent:
     def __init__(self, case, folder):
         self.folder = folder
-        self.files = sorted(folder.iterdir())
-        self.payload = b"".join(p.read_bytes() for p in self.files)
+        self.data = TorrentFiles(folder)
+        self.files = self.data.files
+        self.size = self.data.size
         self.pieces = [
-            hashlib.sha1(self.payload[n : n + PIECE_SIZE]).digest()
-            for n in range(0, len(self.payload), PIECE_SIZE)
+            hashlib.sha1(self.data.read(n, min(PIECE_SIZE, self.size - n))).digest()
+            for n in range(0, self.size, PIECE_SIZE)
         ]
         info = {
             "name": case.release,
@@ -101,14 +103,10 @@ class Torrent:
             while True:
                 if self.release.is_set():
                     for index, begin, length in pending:
-                        block = self.payload[
-                            index * PIECE_SIZE + begin : index * PIECE_SIZE
-                            + begin
-                            + length
-                        ]
+                        block = self.data.read(index * PIECE_SIZE + begin, length)
                         send(7, struct.pack("!II", index, begin) + block)
                         self.sent += len(block)
-                        if self.sent >= len(self.payload):
+                        if self.sent >= self.size:
                             self.stamp("payload-sent")
                     pending = []
                 if not select.select([sock], [], [], 0.05)[0]:
@@ -125,22 +123,18 @@ class Torrent:
                     self.blocks += 1
                     if (
                         index >= count
-                        or size > 16384
+                        or not 0 < size <= 16384
                         or begin + size
-                        > min(PIECE_SIZE, len(self.payload) - index * PIECE_SIZE)
+                        > min(PIECE_SIZE, self.size - index * PIECE_SIZE)
                     ):
                         raise ValueError("Invalid block request")
                     if index == count - 1 and not self.release.is_set():
                         pending.append((index, begin, size))
                     else:
-                        block = self.payload[
-                            index * PIECE_SIZE + begin : index * PIECE_SIZE
-                            + begin
-                            + size
-                        ]
+                        block = self.data.read(index * PIECE_SIZE + begin, size)
                         send(7, struct.pack("!II", index, begin) + block)
                         self.sent += len(block)
-                        if self.sent >= len(self.payload):
+                        if self.sent >= self.size:
                             self.stamp("payload-sent")
         except (EOFError, OSError):
             pass
@@ -241,6 +235,14 @@ class World:
         def js(value, code=200):
             return "application/json", json.dumps(value).encode(), code
 
+        if host != PEER_IP and (
+            path.startswith(("/control/", "/download/"))
+            or path in {"/announce", "/api", "/api/", "/library/sections"}
+        ):
+            self.unknown.append(f"{host}{path}")
+            return js({"error": "Wrong fixture host"}, 404)
+        if path == "/control/transcript":
+            return js({"requests": self.requests, "unknown": self.unknown})
         if path.startswith("/control/status/"):
             torrent = self.torrents[int(path.rsplit("/", 1)[1])]
             return js(
@@ -248,9 +250,8 @@ class World:
                     "timings": torrent.timings.copy(),
                     "blocks": torrent.blocks,
                     "sent": torrent.sent,
-                    "payloadBytes": len(torrent.payload),
+                    "payloadBytes": torrent.size,
                     "infoHash": torrent.digest.hex(),
-                    "requests": self.requests,
                     "unknown": self.unknown,
                 }
             )
@@ -312,7 +313,7 @@ class World:
                 category = 5040 if tv else 2040
                 url = f"http://{PEER_IP}:18080/download/{case.movie_id}"
                 items.append(
-                    f'''<item><title>{title}</title><guid isPermaLink="false">{torrent.digest.hex()}</guid><link>{url}</link><pubDate>Mon, 26 Oct 2026 00:00:00 GMT</pubDate><category>{category}</category><enclosure url="{url}" length="{len(torrent.payload)}" type="application/x-bittorrent"/><torznab:attr name="category" value="{category}"/><torznab:attr name="size" value="{len(torrent.payload)}"/><torznab:attr name="seeders" value="1"/><torznab:attr name="peers" value="1"/><torznab:attr name="tmdbid" value="{case.movie_id}"/><torznab:attr name="imdbid" value="{case.imdb_id}"/><torznab:attr name="infohash" value="{torrent.digest.hex()}"/></item>'''
+                    f'''<item><title>{title}</title><guid isPermaLink="false">{torrent.digest.hex()}</guid><link>{url}</link><pubDate>Mon, 26 Oct 2026 00:00:00 GMT</pubDate><category>{category}</category><enclosure url="{url}" length="{torrent.size}" type="application/x-bittorrent"/><torznab:attr name="category" value="{category}"/><torznab:attr name="size" value="{torrent.size}"/><torznab:attr name="seeders" value="1"/><torznab:attr name="peers" value="1"/><torznab:attr name="tmdbid" value="{case.movie_id}"/><torznab:attr name="imdbid" value="{case.imdb_id}"/><torznab:attr name="infohash" value="{torrent.digest.hex()}"/></item>'''
                 )
             body = f'''<?xml version="1.0"?><rss version="2.0" xmlns:torznab="http://torznab.com/schemas/2015/feed" xmlns:newznab="http://www.newznab.com/DTD/2010/feeds/attributes/"><channel><title>Fixture</title><newznab:response offset="{offset}" total="{len(selected)}"/>{"".join(items)}</channel></rss>'''
             return "application/xml", body.encode(), 200
@@ -353,21 +354,6 @@ class World:
                         "results": matches,
                         "total_pages": 1,
                         "total_results": len(matches),
-                    }
-                )
-            if path in {
-                "/3/configuration",
-                "/3/configuration/languages",
-                "/3/configuration/countries",
-                "/3/genre/movie/list",
-            }:
-                return js(
-                    {
-                        "images": {
-                            "secure_base_url": "https://image.tmdb.org/t/p/",
-                            "poster_sizes": ["w500"],
-                        },
-                        "genres": [],
                     }
                 )
         if host == "plex.tv" and path == "/users/account.json":

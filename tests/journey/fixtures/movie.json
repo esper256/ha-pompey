@@ -4,5 +4,6 @@
   "durationSeconds": 60,
   "width": 1920,
   "height": 1080,
-  "identityPaddingOffset": 1024
+  "identityPaddingOffset": 1024,
+  "sparsePaddingEnd": 16777994
 }

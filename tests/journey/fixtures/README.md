@@ -2,6 +2,8 @@
 
 `movie.mkv.gz` is a deterministic compressed fixture, not downloaded media. It expands to a valid one-minute 1920×1080 Matroska video with four black FFV1 frames, silent FLAC audio and a reserved index region. The size is above the unchanged production 1080p minimum for a one-minute film. `movie.json` records its exact size, SHA256 and media properties. The harness verifies the base fixture, writes a run/case identifier into 128 bytes of the reserved Matroska Void starting at offset 1024, and generates torrent hashes from the resulting actual bytes. Each case gets a unique filename, subtitle, torrent hash and media checksum. The Void contains arbitrary padding by design, so duration, dimensions, codec data, byte length and seek positions remain valid. The real downloader transfers and verifies each distinct payload.
 
+Generated source files represent the long zero-filled Void as a sparse hole. The peer streams exact logical ranges across the media/subtitle files instead of keeping a full movie payload per case in memory.
+
 The compressed fixture is small because its video, silence and padding compress well. Compression is only for repository storage; the torrent transfers the full uncompressed payload. Arr uses the actual ffprobe included in its pinned release artifact.
 
 FFmpeg was used once to author the fixture. It is neither a production nor CI dependency. Regeneration is optional and requires reviewing/updating `movie.json`:
