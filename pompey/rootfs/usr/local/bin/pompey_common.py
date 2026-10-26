@@ -34,7 +34,12 @@ def env(name: str, default: str = "") -> str:
 
 
 def after_download() -> str:
-    raw = env("AFTER_DOWNLOAD", "stop_sharing").lower().replace("-", "_").replace(" ", "_")
+    raw = (
+        env("AFTER_DOWNLOAD", "stop_sharing")
+        .lower()
+        .replace("-", "_")
+        .replace(" ", "_")
+    )
     if raw in {"share_to_ratio", "ratio"}:
         return "share_to_ratio"
     if raw in {"share_one_day", "one_day"}:
@@ -147,17 +152,29 @@ class ApiError(RuntimeError):
 
 def object_list(value, context, required=()):
     """Validate Arr snapshots before absence can authorize a mutation."""
-    field_types = {'id': int, 'tmdbId': int, 'tvdbId': int, 'seasonNumber': int,
-                   'path': str, 'rootFolderPath': str, 'name': str, 'status': str, 'monitored': bool}
+    field_types = {
+        "id": int,
+        "tmdbId": int,
+        "tvdbId": int,
+        "seasonNumber": int,
+        "path": str,
+        "rootFolderPath": str,
+        "name": str,
+        "status": str,
+        "monitored": bool,
+    }
     if not isinstance(value, list) or any(not isinstance(row, dict) for row in value):
-        raise RuntimeError('Invalid ' + context + ' snapshot')
+        raise RuntimeError("Invalid " + context + " snapshot")
     for row in value:
         for key in required:
             item = row.get(key)
-            if item is None or item == '' or (key in field_types and type(item) is not field_types[key]):
-                raise RuntimeError('Invalid ' + context + ' snapshot: ' + key)
+            if (
+                item is None
+                or item == ""
+                or (key in field_types and type(item) is not field_types[key])
+            ):
+                raise RuntimeError("Invalid " + context + " snapshot: " + key)
     return value
-
 
 
 def as_list(value):
@@ -177,7 +194,10 @@ def as_list(value):
             inner = value.get(key)
             if isinstance(inner, list):
                 return as_list(inner)
-        if any(key in value for key in ("id", "hostname", "path", "implementation", "owned")):
+        if any(
+            key in value
+            for key in ("id", "hostname", "path", "implementation", "owned")
+        ):
             return [value]
         return []
     return []
@@ -185,11 +205,13 @@ def as_list(value):
 
 def media_root() -> str:
     from pompey_config import media_root as root
+
     return str(root())
 
 
 def library_dir(env_name: str, default: str) -> str:
     from pompey_config import library_dir as folder
+
     return str(folder(env_name, default))
 
 
@@ -212,28 +234,16 @@ def tv_kid_dir() -> str:
 AUTO_FOLDER = "By Rating"
 
 
-def sibling_auto_dir(library_path: str) -> str:
-    """0.3 staging root beside a general library. Not a Plex library."""
-    parent = library_path.rstrip("/").rsplit("/", 1)[0]
-    return f"{parent}/{AUTO_FOLDER}"
-
-
 def movies_auto_dir() -> str:
     from pompey_config import staging_dirs
+
     return str(staging_dirs()[0])
 
 
 def tv_auto_dir() -> str:
     from pompey_config import staging_dirs
+
     return str(staging_dirs()[1])
-
-
-def legacy_movies_auto_dir() -> str:
-    return sibling_auto_dir(movies_dir())
-
-
-def legacy_tv_auto_dir() -> str:
-    return sibling_auto_dir(tv_dir())
 
 
 def downloads_complete() -> str:
@@ -276,15 +286,6 @@ def plex_token() -> str:
     return env("PLEX_TOKEN")
 
 
-def indexer_url() -> str:
-    # Not an HA option. Household adds sources in Prowlarr. Integration injects.
-    return env("INDEXER_URL")
-
-
-def indexer_api_key() -> str:
-    return env("INDEXER_API_KEY")
-
-
 def qbit_url() -> str:
     return env("QBIT_URL", "http://127.0.0.1:8080").rstrip("/")
 
@@ -298,22 +299,8 @@ def radarr_url() -> str:
 
 
 def arr_api_root(base: str, api_key: str) -> str:
-    """Prefer /api/v3; use /api/v4 when v3 is gone. Do not hard-fail the wire."""
-    host = base.rstrip("/")
-    for ver in ("v3", "v4"):
-        root = f"{host}/api/{ver}"
-        try:
-            http("GET", f"{root}/qualityprofile", headers=arr_headers(api_key))
-            return root
-        except RuntimeError as exc:
-            msg = str(exc)
-            if "-> 404" in msg:
-                continue
-            if "-> 400" in msg or "-> 401" in msg:
-                return root
-            continue
-    log(f"Arr API v3/v4 missing at {host}; using /api/v3", "WARNING")
-    return f"{host}/api/v3"
+    """The manifest-pinned Arr applications expose v3; candidates must prove it."""
+    return base.rstrip("/") + "/api/v3"
 
 
 def prowlarr_url() -> str:
@@ -418,7 +405,9 @@ def log_if_new(key: str, msg: str, level: str = "INFO") -> None:
 def mark_status(step: str, label: str, percent: int, error: str = "") -> None:
     script = shutil.which("pompey_status.py")
     if not script:
-        sibling = os.path.join(os.path.dirname(os.path.abspath(__file__)), "pompey_status.py")
+        sibling = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), "pompey_status.py"
+        )
         if os.path.isfile(sibling):
             script = sibling
     if not script:
@@ -432,6 +421,18 @@ def mark_status(step: str, label: str, percent: int, error: str = "") -> None:
 def load_secrets() -> dict:
     with open(secrets_path(), encoding="utf-8") as fh:
         return json.load(fh)
+
+
+HTTP_DEADLINE = float("inf")
+
+
+def http_timeout(maximum):
+    remaining = HTTP_DEADLINE - time.monotonic()
+    if remaining <= 0:
+        raise RuntimeError(
+            "This maintenance attempt exhausted its time budget; it will retry"
+        )
+    return min(maximum, remaining)
 
 
 def http(method: str, url: str, body=None, headers=None, timeout=30):
@@ -451,7 +452,7 @@ def http(method: str, url: str, body=None, headers=None, timeout=30):
     for attempt in range(attempts):
         req = urllib.request.Request(url, data=data, method=method, headers=hdrs)
         try:
-            with urllib.request.urlopen(req, timeout=timeout) as resp:
+            with urllib.request.urlopen(req, timeout=http_timeout(timeout)) as resp:
                 raw = resp.read()
                 if not raw:
                     return None
@@ -476,11 +477,11 @@ def http(method: str, url: str, body=None, headers=None, timeout=30):
 
 def wait_http(url: str, tries: int | None = None):
     last = None
-    n = wait_tries() if tries is None else tries
+    n = 8 if tries is None else tries
     for _ in range(n):
         try:
             req = urllib.request.Request(url, method="GET")
-            with urllib.request.urlopen(req, timeout=10) as resp:
+            with urllib.request.urlopen(req, timeout=http_timeout(2)) as resp:
                 return resp.read()
         except urllib.error.HTTPError as exc:
             exc.close()
@@ -495,5 +496,3 @@ def wait_http(url: str, tries: int | None = None):
 
 def arr_headers(api_key: str) -> dict:
     return {"X-Api-Key": api_key, "Content-Type": "application/json"}
-
-

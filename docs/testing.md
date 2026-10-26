@@ -1,89 +1,29 @@
 # Release confidence
 
-## Agent workflow
+## Run the suite
 
-Follow the [no-wait PR workflow](../AGENTS.md#pr-completion-do-not-wait-for-ci): validate the change locally, push, report a single CI status snapshot, and end the turn while pending checks run. PR readiness does not mean merge or release readiness. Required CI checks and the manual HAOS gate still apply.
+Run `bash tests/run.sh`. It builds the amd64 product image once, adds an isolated test-tool directory, runs focused logic and required packet tests, then executes one real household journey. Docker or Podman is required. In Distrobox the runner detects `distrobox-host-exec podman`; override with `POMPEY_CONTAINER_COMMAND` when needed. Use `--skip-build --image IMAGE` to test an already-built product image.
 
-## CI scope and timing
+The checked-in synthetic media fixture is compressed and verified on extraction; CI does not need FFmpeg. Test tools have their own dynamic loader and libraries under `/test-tools`; installing them does not upgrade a shipped runtime library. The image's `/init`, cont-init, service scripts, controller and actual pinned applications run unchanged in the journey. No application API is faked, no binary is patched, and production quality profiles are not weakened.
 
-Pull requests run the fast/network suite, pinned-engine contracts, isolated downloader, one amd64 build with runtime smoke, and the shortened anime suite. Known documentation-only changes skip these jobs; executable, configuration, workflow, fixture and unknown paths select all checks. The always-running `CI required` job fails if any selected job fails, is cancelled or unexpectedly skips. Configure branch protection to require this check; the workflow itself cannot prevent merging. Superseded PR runs are cancelled automatically, but main/release runs are not.
+The runner uses `--network none`, verifies loopback and no external route before starting anything, then creates an internal veth underlay and a local WireGuard pair between two namespaces. A separate unprivileged fixture process serves metadata replay, one Torznab source, one tracker and a controlled synthetic BitTorrent peer. All fixture traffic stays inside the isolated container. The host firewall and default routes are never modified. Namespace creation requires NET_ADMIN and SYS_ADMIN in the isolated test container; engines drop to UID/GID 1000. Packet checks run only in namespaces created for the test and are required, not silently skipped in CI.
 
-PR anime mode (`POMPEY_ANIME_MODE=pr`) retains one native automatic season search with the 240-request ceiling and pack-versus-episode selection. Dual-versus-single audio and zero-seed fallback scenarios use real Sonarr RSS scoring and grabs, with an eight-request ceiling. Imports, subtitles, cleanup and upgrade checks still run. The interactive catalogue probe and aspirational pack-only search budget run in full mode. RSS selection does not prove interactive rejection reasons; the full mode retains those assertions.
+## The first household journey
 
-PR orchestration mode (`POMPEY_SEARCH_MODE=pr`) verifies Sonarr → Prowlarr → source wiring with a single-episode search and at most eight source requests. Full mode retains the anime season search and 120-request ceiling. Neither mode patches upstream binaries, disables their throttling, or removes readiness waits.
+The real Seerr wizard creates its first administrator against external Plex account replay. The household adds a source through real Prowlarr. The production controller installs profiles and configures both Arr applications. A Seerr movie request triggers real Radarr search through Prowlarr and a real qBittorrent transfer. The fixture withholds the last torrent piece while an Arr maintenance check confirms no incomplete import. Releasing the piece lets qBittorrent verify it and Arr import. The controller routes the PG film into the kid library. The test verifies exact media bytes, subtitles, all five engine process identities and household diagnostics with a real release search.
 
-Main pushes, scheduled runs and manual dispatches use the full pinned matrix; schedules and manual dispatches also test a candidate bundle. Local real-engine commands default to full mode. Use the two `pr` environment values above for focused CI-performance validation. Named CI steps, per-scenario `TIMING` output and anime JSON reports expose execution time. Suite commands and jobs have bounded timeouts, including the native search's real rate limits.
+The synthetic film lasts one minute. Its metadata, container runtime, catalogue size, torrent lengths and hashes agree. The real 1080p profile applies; a valid padded Matroska payload is approximately 16 MiB. The fixture implements the necessary external contracts and fails on unknown requests. Update/telemetry endpoints deliberately return an explicit unavailable response.
 
-CI builds amd64 only. The same image receives the runtime smoke test; there is no separate builder workflow or aarch64 build. Home Assistant schema validation remains in the fast suite. The add-on still declares aarch64 compatibility, but CI does not validate that architecture; validate it separately before deploying there. The single build uses the release version from `pompey/config.yaml`.
+Artifacts under `.test-results/` include stage timings, transferred bytes, library path, identities and the external request transcript. The runner bounds the journey and does not retry a whole failed run. Development runs of the current pinned bundle completed the journey in roughly 25–80 seconds, including application startup and setup; timing varies with the production maintenance schedule. These are local measurements, not a GitHub runner guarantee; cold image builds also download and extract the bundled applications.
 
-## Automated layers
+## Scope and expansion
 
-`bash tests/run.sh` runs the fast suite: configuration validation, HTTP wiring contracts, file-preservation and sharing policy, complete request pagination, update failure/SQLite rollback/crash recovery, actual shell boundaries, VPN rendering, isolated IPv4/IPv6 packet tests, and the wait-screen preview. Packet and live handshake tests skip explicitly when the host lacks the required namespace/kernel capability. CI sets `POMPEY_REQUIRE_NETWORK_TESTS=1` so these cannot silently skip there.
+Focused tests remain for paths/symlinks, request ownership/history discontinuities, sharing boundaries and WireGuard parsing. The previous disconnected real-engine suites, fake application HTTP servers, anime catalogue matrix, fake-VPN helper and artifact/runtime download harnesses are removed.
 
-On Linux install Python 3.12+, PyYAML, jq, shellcheck, nftables, iproute2, iputils-ping and wireguard-tools. Use passwordless sudo for isolated namespaces. Never install a kill switch in the host namespace. Only the dedicated peerless qBittorrent harness may launch a torrent client, after verifying a fresh loopback-only network namespace. No test contacts peers; all other downloader tests use HTTP fixtures.
+This first scenario establishes the foundation. Subsequent scenarios must cover TV/season imports, upgrades, all sharing policies, direct grabs and ambiguous imports, request removal/history reset, failures and restart behavior, and VPN outages/rotation. Broader coverage is required before unattended dependency merge/release is enabled. The first journey alone is not evidence that those behaviors have passed.
 
-```sh
-POMPEY_REAL_ENGINES=1 python3 tests/test_engine_artifacts.py -v
-POMPEY_REAL_ENGINES=1 python3 tests/test_arr_integration.py -v
-python3 tests/test_seerr_real.py -v
-```
+The automated acceptance suite replaces the manual release gate. Actual Supervisor installation, Ingress forwarding on HAOS, NAS permission/hardlink behavior and Plex discovery/playback remain explicit unautomated boundaries. A local Docker/Podman run does not reproduce them. Recovery relies on HA cold backups; automatic binary/database rollback and old-layout migration are not product guarantees.
 
-Real-engine tests download manifest-pinned artifacts into digest-keyed caches. Arr tests require ffmpeg and the native ICU libraries; they use synthetic audio/video and a fake downloader WebAPI, with public metadata lookup only. They assert incomplete files stay out of the library, completed imports and upgrades are performed by Arr, multi-episode TV files and subtitles import through Sonarr, and the real Recyclarr configuration creates usable profiles. Both glibc and musl artifact layouts are checked. Seerr’s initialization contract uses its official musl image under chroot and requires sudo.
+## PR completion
 
-`tests/smoke_runtime.py` runs **inside the built add-on image**, using the production extraction code, app layout and Node executable. CI checks Arr API startup, Seerr’s native sqlite load and the Recyclarr/.NET runtime without booting Supervisor or a download engine. The runtime job builds and tests amd64 once. Weekly candidate tests resolve upstream versions into a separate manifest; they never replace the checked-in release bundle.
-
-Fast HTTP fakes make faults deterministic. Real API tests catch upstream shape and lifecycle differences. Neither proves NAS semantics, actual VPN behavior, Plex discovery or HAOS startup; those are the manual gate below.
-
-Focused regression cases cover restart recovery with a missing readiness marker, validation descendants stopped before rollback, repair of Prowlarr destinations/credentials/sync mode, legacy download fallback, and known-version downgrade rejection. Version checks use metadata fixtures; there is no historical database upgrade test matrix.
-
-## Anime season acceptance
-
-```sh
-python3 tests/test_anime_fixtures.py -v
-POMPEY_REAL_ENGINES=1 python3 tests/test_anime_integration.py -v
-# Turn the documented acceptance gaps into hard failures:
-POMPEY_REAL_ENGINES=1 POMPEY_ANIME_STRICT=1 python3 tests/test_anime_integration.py -v
-```
-
-The anime suite uses the pinned Sonarr binary, Pompey's actual Recyclarr Default profile, media-management settings and downloader configuration. Two local Torznab mirrors serve the captured World Trigger catalogue; a fake qBittorrent HTTP API records actual automatic grabs. Prowlarr source scraping and torrent peer traffic are outside this test. Public TVDB/SkyHook metadata and pinned profile downloads require internet access. Metadata service failures fail setup rather than silently skipping coverage.
-
-The catalogue contains 203 copied results from seven sources. Titles, sizes, availability, duplicates, multilingual names, manga and ambiguous batches are preserved. Controlled scenarios use the captured 4.9 GiB x265 dual-audio WEBRip and authentic episode rows, with a matched synthetic single-audio pack. They deliberately vary seeds to isolate availability and audio preference. Episode-query routing is simulated, but Sonarr itself parses, scores, rejects and chooses releases. The complete-catalogue probe keeps every captured row. See `tests/fixtures/anime/README.md` for provenance and limits.
-
-Tests cover a live dual pack versus single audio and episodes, zero-seed dual audio rejection, captured-pack eligibility, complete-catalogue request counts, and native completed-download handling of fourteen generated episodes with subtitles and miscellaneous release files. The latter asserts incomplete files stay out of the library, every episode and subtitle imports, download payloads are removed, and repeated download maintenance issues no indexer requests.
-
-The captured-pack and pack-selection checks are required passes in the full matrix; PR RSS checks also require the captured dual-audio pack to win. Ordinary-TV cases retain size, language and quality rejection checks. RSS replays after a fourteen-episode import verify that Default and Max do not replace files just to regain pack scores; Max must still accept a real resolution upgrade. Sonarr groups WEB and Blu-ray 1080p as equivalent, prefers season packs through its native custom format, and uses custom-format scoring for repacks. Its shared 1080p size minimum is 5 MiB/minute; upper limits remain guide-backed. Score-only upgrades stop at a cutoff score of zero.
-
-The aspirational pack-only search budget remains an explicit expected failure in the full matrix; strict mode fails it. A separate required regression ceiling permits at most 120 catalogue requests per indexer (240 for the two-source fixture), for both interactive and automatic searches. Exceeding that measured baseline fails both PR and full CI. Sonarr 4.0.19.2979 made 240 catalogue requests for this season, including 224 episode queries, even when a pack existed. Setup/search errors remain errors. An unexpected pass fails the full matrix so the marker can be removed when upstream behavior improves. The budget is eight catalogue requests per indexer (four ID/name variants with two pages each), including pagination and excluding capability/setup calls.
-
-`POMPEY_ANIME_REPORT` defaults to `/tmp/pompey-anime-report.json`. Reports contain each query, response counts, elapsed time, actual grabs, rejection reasons and custom-format scores; Sonarr logs are copied next to the report. CI uploads these even after failure. Searches retain Sonarr's real throttling, so allow several minutes per scenario. Existing real Arr tests separately cover multi-episode files and upgrades.
-
-## Manual HAOS acceptance
-
-Use a disposable or backed-up installation, a known legal test download, and the household’s actual share. Record the Pompey version and bundle manifest with the result.
-
-1. **Fresh setup:** install through Supervisor, paste a WireGuard file, complete the Plex wizard, configure a source. Confirm Ingress remains available throughout and both movie and TV request connections work after initialization.
-2. **Warm restart/offline release fetch:** restart with existing app databases and engines. Confirm configuration is preserved and search returns. An unavailable release endpoint must allow a complete installed bundle to start.
-3. **VPN failure and rotation:** interrupt the tunnel, verify public IPv4 and IPv6 cannot leave through the container’s non-VPN interface, and confirm LAN/Ingress access remains. Restore it and paste another valid endpoint; jobs and traffic should recover without reinstalling.
-4. **Movie and TV:** request one movie, one episode, a multi-episode/season release, and a higher-quality replacement. Incomplete media must stay out of Plex; finished media and subtitles must land in the intended library. Confirm an existing file is not used as a reason to delete its upgrade.
-5. **Sharing/storage:** exercise stop-sharing, ratio 1.0 and one-day policies. Verify below-goal transfers continue seeding. On a non-hardlink share, account for a second copy. After the goal and import, ordinary download entries and payloads should be cleaned by Arr. Replaced files remain recoverable in the recycle folder for seven days.
-6. **Manual grabs:** try an accepted Prowlarr grab, a rejected downgrade, an unknown title and extras. Accepted matches import; ambiguous and rejected files remain for review. Inspect the durable receipt before retrying an uncertain command.
-7. **Requests and routing:** remove a known request and verify it becomes unmonitored without deleting files. Declined requests remain declined; directly managed Arr titles remain unchanged. Check By Rating, explicit kid/general choices and unknown ratings.
-8. **Recovery:** on the disposable installation interrupt a staged update, then restart. Verify the journal restores/reconciles binary and database versions together and services run. Test a deliberately bad candidate health check and confirm rollback. Check free-space behavior with insufficient staging space.
-9. **Health and discovery:** stop an engine temporarily, confirm the sidebar reports failure and later recovery, and confirm Plex discovers the imported media. Check Debug off/on and published host ports on the actual Supervisor installation.
-
-A release is accepted only after these household checks pass; a Docker build or green fake suite is insufficient.
-
-## Recovery and cross-service contracts
-
-`tests/test_recovery.py` covers missing/orphaned import commands, per-receipt failure isolation, malformed snapshots, delayed/failed library moves, waiting on the mutation lock, blocked-import notices, and overlapping season requests. Routing fakes deliberately separate request acceptance from file movement.
-
-```sh
-POMPEY_REAL_ENGINES=1 python3 tests/test_orchestration.py -v
-POMPEY_REAL_ENGINES=1 POMPEY_REAL_QBIT=1 python3 tests/test_qbit_integration.py -v
-```
-
-The orchestration suite verifies a real Sonarr move preserves payloads and subtitles, exercises season cancellation with Seerr-shaped paginated HTTP responses, and sends an automatic anime search through real Sonarr and Prowlarr to a local Torznab fixture. The source records every upstream request; the one-source scenario permits at most 120 requests and requires one successful grab. Seerr itself is covered separately by its real API suite.
-
-The downloader suite requires `sudo`, `unshare`, `ip`, ffmpeg and the pinned Sonarr/qBittorrent artifacts. It fetches metadata and artifacts before isolation. Its dedicated worker verifies a different network namespace, loopback as the only interface, and no external routes; it then drops root privileges before starting any engine. It disables discovery and forwarding, uses private trackerless torrent metadata with synthetic local files, and rechecks those files without peers. The suite verifies all sharing configurations across restart, live policy changes, category paths, completion state, real Sonarr imports, subtitle preservation, below-goal retention, and cleanup after stopping sharing. Failure to establish isolation is a failure when this suite is enabled, never permission to run on the host network. It does not test downloading from peers or elapsed real-world seeding goals; deterministic policy tests cover ratio/time boundaries.
-
-Release and candidate CI both require the downloader and orchestration suites. Candidates also run anime selection/import tests and retain their search reports. The existing HAOS/NAS manual gate remains required.
+Validate locally, push and take at most one non-waiting CI snapshot. Report passed, failed and pending checks accurately, then end the turn. Do not poll or wait for CI unless the user explicitly asks. `CI required` remains the stable aggregate branch-protection check. Candidate discovery is separate from acceptance and promotion.

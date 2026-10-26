@@ -4,7 +4,7 @@ set -euo pipefail
 # shellcheck source=/dev/null
 source "$(command -v pompey-env)"
 
-INGRESS_PORT="$(bashio::addon.ingress_port)"
+INGRESS_PORT="${INGRESS_PORT:-8099}"
 INGRESS_CONF="${NGINX_INGRESS_CONF:-/etc/nginx/http.d/ingress.conf}"
 DEBUG_INC="${NGINX_DEBUG_INC:-$(dirname "${INGRESS_CONF}")/ingress-debug.inc}"
 WWW="${POMPEY_WWW:-/usr/share/pompey}"
@@ -17,7 +17,7 @@ sed -i \
   -e "s|%%debug_inc%%|${DEBUG_INC}|g" \
   "${INGRESS_CONF}"
 
-if bashio::config.true debug; then
+if [[ "${POMPEY_DEBUG}" == 1 ]]; then
   bashio::log.info "Ingress nginx will listen on port ${INGRESS_PORT} (Supervisor 172.30.32.2 only). Debug consoles are on."
 else
   bashio::log.info "Ingress nginx will listen on port ${INGRESS_PORT} (Supervisor 172.30.32.2 only)"

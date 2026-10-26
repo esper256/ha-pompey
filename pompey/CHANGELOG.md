@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## 0.4.0
+
+- Target fresh amd64 installations; migration from earlier layouts is not supported.
+- Bundle pinned current stable applications and quality resources during the Supervisor build. Remove runtime application downloads and replacement/rollback machinery.
+- Run applications and household maintenance as one unprivileged user; keep VPN setup privileged and engine DNS blocked outside the tunnel. Local applications start without a fresh VPN handshake.
+- Use Home Assistant cold backups for recovery, and pause request closeout when search history appears reset or bulk-deleted.
+- Add household diagnostics with explicit release searches and real Arr rejection reasons.
+- Replace the old disconnected integration suites with one real request-to-library journey, synthetic media and isolated external fixtures. Expand coverage before enabling automatic dependency promotion/releases.
+
 ## 0.3.7
 
 - Relax Recyclarr defaults for family-friendly libraries while keeping quality tiers and genuine junk protections.

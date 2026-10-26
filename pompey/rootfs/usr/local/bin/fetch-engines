@@ -1,7 +1,0 @@
-#!/command/with-contenv bashio
-# shellcheck shell=bash
-set -euo pipefail
-# shellcheck source=/dev/null
-source "$(command -v pompey-env)"
-export POMPEY_ENGINES POMPEY_CONFIG POMPEY_READY POMPEY_DATA
-exec python3 "$(command -v engine_manager.py)" "$@"

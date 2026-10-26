@@ -58,3 +58,8 @@ configuration:
       Optional numeric gateway address from a VPN provider that supports
       NAT-PMP. Leave empty to disable port forwarding. This is separate
       from the DNS servers in your WireGuard file.
+  lan_networks:
+    name: Local networks
+    description: >-
+      Optional comma-separated network ranges for local Plex servers or sources,
+      for example 192.168.1.0/24. Internet and DNS continue to require the VPN.

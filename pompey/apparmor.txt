@@ -37,13 +37,14 @@ profile pompey flags=(attach_disconnected,mediate_deleted) {
   /dev/tty rw,
   /dev/net/tun rw,
 
-  # bashio + tmp. rwk (no chmod/exec) made GNU tar fail on /tmp with
-  # "Cannot change mode ... Operation not permitted". Engine archives
-  # unpack under /data/engines; keep /tmp usable for everything else.
+  # bashio and temporary working files.
   /usr/lib/bashio/** ix,
   /tmp/** rwlix,
 
-  # HA options, addon config, fetched engines
+  # Immutable bundled applications and resources
+  /opt/pompey/** rix,
+
+  # HA options and mutable application configuration
   /data/** rwlix,
   /config/** rwlix,
   /share/** rw,

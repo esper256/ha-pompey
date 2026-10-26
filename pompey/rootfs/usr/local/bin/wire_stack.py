@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """Reconcile localhost engine configuration. Imports and request policy run separately."""
+
 from __future__ import annotations
 import json
 import os
+from pathlib import Path
 import subprocess
 import sys
 import time
@@ -11,8 +13,6 @@ import urllib.error
 import urllib.parse
 from pompey_common import (
     ready_dir,
-    wait_tries,
-    wait_sleep,
     env,
     after_download,
     apply_qbit_queue,
@@ -21,24 +21,18 @@ from pompey_common import (
     movies_kid_dir,
     tv_dir,
     tv_kid_dir,
-    legacy_movies_auto_dir,
-    legacy_tv_auto_dir,
     movies_auto_dir,
     tv_auto_dir,
     downloads_complete,
     downloads_manual,
     downloads_recycle,
     paths_overlap,
-    media_root,
     plex_url,
     plex_token,
-    indexer_url,
-    indexer_api_key,
     qbit_url,
     sonarr_url,
     radarr_url,
     arr_api_root,
-    object_list,
     prowlarr_url,
     prowlarr_arr_url,
     seerr_url,
@@ -49,16 +43,18 @@ from pompey_common import (
     mark_status,
     load_secrets,
     http,
+    http_timeout,
     wait_http,
     arr_headers,
     SEERR_HOUSEHOLD_PERMS,
-    SEERR_REQUEST_ADVANCED,
 )
 import pompey_state as persist
 
 
 def ensure_root_folder(base: str, api_key: str, path: str) -> None:
-    if paths_overlap(path, downloads_complete()) or paths_overlap(path, downloads_manual()):
+    if paths_overlap(path, downloads_complete()) or paths_overlap(
+        path, downloads_manual()
+    ):
         raise ValueError(f"Arr root overlaps a download folder: {path}")
     existing = as_list(http("GET", f"{base}/rootfolder", headers=arr_headers(api_key)))
     if any(item.get("path", "").rstrip("/") == path.rstrip("/") for item in existing):
@@ -77,156 +73,10 @@ def wanted_arr_roots(kind: str) -> tuple[str, str, str]:
     return movies_auto_dir(), movies_dir(), movies_kid_dir()
 
 
-LEGACY_ROOT_NAMES = {"tv", "movies", "kid friendly tv", "kid friendly movies"}
-
-
-def in_root(path: str, root: str) -> bool:
-    path = (path or "").rstrip("/")
-    root = (root or "").rstrip("/")
-    return bool(root) and (path == root or path.startswith(root + "/"))
-
-
-def is_retired_staging_root(path: str, kind: str) -> bool:
-    """Earlier releases staged By Rating beside the general library."""
-    path = (path or "").rstrip("/")
-    legacy = legacy_movies_auto_dir() if kind == "radarr" else legacy_tv_auto_dir()
-    return bool(path) and path == legacy.rstrip("/")
-
-
-def staging_holds_files(path: str) -> bool:
-    """True when the folder contains a file. Empty directories do not count."""
-    try:
-        for _dirpath, _dirnames, filenames in os.walk(path, followlinks=False):
-            if filenames:
-                return True
-    except OSError:
-        return True
-    return False
-
-
-def remove_empty_staging_tree(path: str) -> None:
-    """Remove a retired staging folder once only empty directories remain."""
-    folder = (path or "").rstrip("/")
-    if not folder or not os.path.isdir(folder) or staging_holds_files(folder):
-        return
-    try:
-        for dirpath, _dirnames, filenames in os.walk(folder, topdown=False, followlinks=False):
-            if filenames or os.path.islink(dirpath):
-                return
-            os.rmdir(dirpath)
-    except OSError as exc:
-        log(f"empty staging folder {folder} left in place: {exc}", "WARNING")
-        return
-    log(f"removed empty staging folder {folder}")
-
-
-def is_known_legacy_root(path: str, wanted: set[str]) -> bool:
-    """True for unused 0.2.20 / 0.2.21 Pompey names, not an arbitrary extra library."""
-    path = (path or "").rstrip("/")
-    if not path or path in wanted:
-        return False
-    name = path.rsplit("/", 1)[-1].lower()
-    if name not in LEGACY_ROOT_NAMES:
-        return False
-    parent = path.rsplit("/", 1)[0] if "/" in path else ""
-    allowed = {media_root().rstrip("/"), "/media"}
-    for household in wanted:
-        folder = household.rstrip("/")
-        if "/" in folder:
-            allowed.add(folder.rsplit("/", 1)[0])
-    return parent in allowed
-
-
-def root_is_occupied(path: str, titles: list, lists: list, registered: list[str]) -> bool:
-    leftover = (path or "").rstrip("/")
-    if not leftover:
-        return False
-    others = [item.rstrip("/") for item in registered if item.rstrip("/") and item.rstrip("/") != leftover]
-    for item in titles:
-        assigned = str(item.get("rootFolderPath") or "").rstrip("/")
-        if assigned == leftover:
-            return True
-        if assigned:
-            continue
-        loc = title_library_path(item)
-        if loc and in_root(loc, leftover) and not any(in_root(loc, other) for other in others):
-            return True
-    for item in lists:
-        if str(item.get("rootFolderPath") or "").rstrip("/") == leftover:
-            return True
-    return False
-
-
-def prune_root_folders(base: str, api_key: str, kind: str) -> list[str]:
-    """Unregister empty historical Pompey roots. Never move media or drop a used library."""
-    auto, gen, kid = wanted_arr_roots(kind)
-    wanted = {auto.rstrip("/"), gen.rstrip("/"), kid.rstrip("/")}
-    notices: list[str] = []
-    try:
-        existing = object_list(http("GET", f"{base}/rootfolder", headers=arr_headers(api_key)), "root folders", ("id", "path"))
-    except RuntimeError as exc:
-        log(f"{kind} root folders: {exc}", "WARNING")
-        return [f"{kind} library folders could not be checked; extra roots were left registered"]
-    registered = [str(item.get("path") or "").rstrip("/") for item in existing]
-    try:
-        titles = object_list(
-            http("GET", f"{base}/{arr_title_collection(kind)}", headers=arr_headers(api_key)), "library titles", ("id", "path")
-        )
-        lists = object_list(http("GET", f"{base}/importlist", headers=arr_headers(api_key)), "import lists", ("id", "rootFolderPath"))
-    except RuntimeError as exc:
-        log(f"{kind} leftover roots: {exc}", "WARNING")
-        return [f"{kind} library contents could not be checked; extra roots were left registered"]
-    for item in existing:
-        path = (item.get("path") or "").rstrip("/")
-        ident = item.get("id")
-        if not path or path in wanted:
-            continue
-        label = "movie" if kind == "radarr" else "TV"
-        retired_staging = is_retired_staging_root(path, kind)
-        if not retired_staging and not is_known_legacy_root(path, wanted):
-            msg = f"Extra {label} library folder left registered: {path}"
-            log(msg, "WARNING")
-            notices.append(msg)
-            continue
-        if retired_staging and staging_holds_files(path):
-            msg = f"Historical {label} staging folder still has files, left registered: {path}"
-            log(msg, "WARNING")
-            notices.append(msg)
-            continue
-        if root_is_occupied(path, titles, lists, registered):
-            msg = f"Historical {label} library folder still in use, left registered: {path}"
-            log(msg, "WARNING")
-            notices.append(msg)
-            continue
-        if ident is None:
-            msg = f"Historical {label} library folder has no id, left registered: {path}"
-            log(msg, "WARNING")
-            notices.append(msg)
-            continue
-        try:
-            http(
-                "DELETE",
-                f"{base}/rootfolder/{ident}",
-                headers=arr_headers(api_key),
-            )
-            log(f"removed unused leftover root folder {path}")
-            if retired_staging:
-                remove_empty_staging_tree(path)
-        except RuntimeError as extra:
-            msg = f"Could not unregister unused {label} library folder {path}"
-            log(f"{msg}: {extra}", "WARNING")
-            notices.append(msg)
-    legacy = (legacy_movies_auto_dir() if kind == "radarr" else legacy_tv_auto_dir()).rstrip("/")
-    if legacy and legacy not in registered and not staging_holds_files(legacy):
-        remove_empty_staging_tree(legacy)
-    return notices
-
-
 def sync_root_folders(base: str, api_key: str, kind: str) -> list[str]:
-    auto, gen, kid = wanted_arr_roots(kind)
-    for path in (auto, gen, kid):
+    for path in wanted_arr_roots(kind):
         ensure_root_folder(base, api_key, path)
-    return prune_root_folders(base, api_key, kind)
+    return []
 
 
 def schema_impl(schema, name: str):
@@ -344,11 +194,17 @@ def apply_download_client(item: dict, values: dict, remove: bool) -> dict:
 def ensure_download_client(base: str, api_key: str, secrets: dict, kind: str) -> None:
     remove = True
     cat, values = qbit_client_values(secrets, kind)
-    existing = as_list(http("GET", f"{base}/downloadclient", headers=arr_headers(api_key)))
+    existing = as_list(
+        http("GET", f"{base}/downloadclient", headers=arr_headers(api_key))
+    )
     for item in existing:
         if item.get("implementation") != "QBittorrent" or item.get("id") is None:
             continue
-        if download_client_ready(item, cat, remove) and all(app_field(item, k) == v for k, v in values.items() if app_field(item, k) is not None):
+        if download_client_ready(item, cat, remove) and all(
+            app_field(item, k) == v
+            for k, v in values.items()
+            if app_field(item, k) is not None
+        ):
             return
         updated = apply_download_client(item, values, remove)
         http(
@@ -357,14 +213,18 @@ def ensure_download_client(base: str, api_key: str, secrets: dict, kind: str) ->
             updated,
             headers=arr_headers(api_key),
         )
-        log(f"{kind} download client category={cat} after_download={after_download()} remove={remove}")
+        log(
+            f"{kind} download client category={cat} after_download={after_download()} remove={remove}"
+        )
         return
     schema = http("GET", f"{base}/downloadclient/schema", headers=arr_headers(api_key))
     client = apply_download_client(schema_impl(schema, "QBittorrent"), values, remove)
     client["name"] = "qBittorrent"
     client["priority"] = 1
     http("POST", f"{base}/downloadclient", client, headers=arr_headers(api_key))
-    log(f"{kind} download client category={cat} after_download={after_download()} remove={remove}")
+    log(
+        f"{kind} download client category={cat} after_download={after_download()} remove={remove}"
+    )
 
 
 def ensure_prowlarr_download_client(prowlarr: str, pkey: str, secrets: dict) -> None:
@@ -378,11 +238,17 @@ def ensure_prowlarr_download_client(prowlarr: str, pkey: str, secrets: dict) -> 
     """
     remove = False
     cat, values = qbit_client_values(secrets, "prowlarr")
-    existing = as_list(http("GET", f"{prowlarr}/api/v1/downloadclient", headers=arr_headers(pkey)))
+    existing = as_list(
+        http("GET", f"{prowlarr}/api/v1/downloadclient", headers=arr_headers(pkey))
+    )
     for item in existing:
         if item.get("implementation") != "QBittorrent" or item.get("id") is None:
             continue
-        if download_client_ready(item, cat, remove) and all(app_field(item, k) == v for k, v in values.items() if app_field(item, k) is not None):
+        if download_client_ready(item, cat, remove) and all(
+            app_field(item, k) == v
+            for k, v in values.items()
+            if app_field(item, k) is not None
+        ):
             return
         updated = apply_download_client(item, values, remove)
         http(
@@ -393,7 +259,9 @@ def ensure_prowlarr_download_client(prowlarr: str, pkey: str, secrets: dict) -> 
         )
         log(f"prowlarr download client category={cat} removeCompleted={remove}")
         return
-    schema = http("GET", f"{prowlarr}/api/v1/downloadclient/schema", headers=arr_headers(pkey))
+    schema = http(
+        "GET", f"{prowlarr}/api/v1/downloadclient/schema", headers=arr_headers(pkey)
+    )
     client = apply_download_client(schema_impl(schema, "QBittorrent"), values, remove)
     client["name"] = "qBittorrent"
     client["priority"] = 1
@@ -415,7 +283,9 @@ def ensure_media_management(base: str, api_key: str, kind: str) -> None:
     profiles and Seerr still need to wire.
     """
     try:
-        cfg = http("GET", f"{base}/config/mediamanagement", headers=arr_headers(api_key))
+        cfg = http(
+            "GET", f"{base}/config/mediamanagement", headers=arr_headers(api_key)
+        )
     except RuntimeError as exc:
         raise RuntimeError(f"{kind} media management failed") from exc
     if not isinstance(cfg, dict):
@@ -505,44 +375,26 @@ def ensure_download_client_handling(base: str, api_key: str, kind: str) -> None:
     log(f"{kind} completed-download handling on (no auto re-download)")
 
 
-def title_library_path(item: dict) -> str:
-    path = item.get("path") or item.get("rootFolderPath") or ""
-    if isinstance(path, str) and path.strip():
-        return path.strip()
-    return ""
-
-
-def arr_title_collection(kind: str) -> str:
-    return "movie" if kind == "radarr" else "series"
-
-
-def recyclarr_marker() -> str:
-    return os.path.join(ready_dir(), "recyclarr")
-
-
 def recyclarr_is_fresh() -> bool:
-    """True when Recyclarr already synced recently. Skip a redundant sync."""
-    path = recyclarr_marker()
-    if not os.path.isfile(path):
+    """A durable record is valid only while this image and its actual profiles match."""
+    import hashlib
+    from pathlib import Path
+
+    manifest = Path("/usr/share/pompey/engines.json")
+    record = persist.load("profiles")
+    if record.get("bundle") != hashlib.sha256(manifest.read_bytes()).hexdigest():
         return False
-    try:
-        max_age = float(env("POMPEY_RECYCLARR_MAX_AGE", "86400") or "86400")
-    except ValueError:
-        max_age = 86400.0
-    try:
-        return (time.time() - os.path.getmtime(path)) < max_age
-    except OSError:
-        return False
+    for kind, host in [("radarr", radarr_url()), ("sonarr", sonarr_url())]:
+        key = load_secrets()[kind + "_api_key"]
+        profiles = http(
+            "GET", arr_api_root(host, key) + "/qualityprofile", headers=arr_headers(key)
+        )
+        if not {"Default", "Max", "Anime"} <= {p.get("name") for p in profiles}:
+            return False
+    return True
 
 
 def recyclarr_sync_script() -> str:
-    override = env("POMPEY_RECYCLARR_SYNC")
-    if override:
-        return override
-    here = os.path.dirname(os.path.abspath(__file__))
-    sibling = os.path.join(here, "recyclarr_sync.py")
-    if os.path.isfile(sibling):
-        return sibling
     return "/usr/local/bin/recyclarr_sync.py"
 
 
@@ -550,7 +402,7 @@ def recyclarr_binary() -> str:
     override = env("POMPEY_RECYCLARR")
     if override:
         return override
-    root = os.path.join(env("POMPEY_ENGINES", "/data/engines"), "recyclarr")
+    root = os.path.join(env("POMPEY_ENGINES", "/opt/pompey/engines"), "recyclarr")
     nested = os.path.join(root, "recyclarr")
     if os.path.isfile(nested) and os.access(nested, os.X_OK):
         return nested
@@ -579,7 +431,7 @@ def run_recyclarr(*, force: bool = False) -> bool:
         proc = subprocess.run(
             [sys.executable, script],
             check=False,
-            timeout=int(env("POMPEY_RECYCLARR_TIMEOUT", "600") or "600"),
+            timeout=http_timeout(100),
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
         log(f"Recyclarr: {exc}", "WARNING")
@@ -587,9 +439,17 @@ def run_recyclarr(*, force: bool = False) -> bool:
     if proc.returncode != 0:
         return False
     os.makedirs(ready_dir(), exist_ok=True)
-    marker = recyclarr_marker()
-    with open(marker, "w", encoding="utf-8") as fh:
-        fh.write("ok\n")
+    import hashlib
+    from pathlib import Path
+
+    persist.save(
+        "profiles",
+        {
+            "bundle": hashlib.sha256(
+                Path("/usr/share/pompey/engines.json").read_bytes()
+            ).hexdigest()
+        },
+    )
     return True
 
 
@@ -604,31 +464,52 @@ def profile_id_of(item: dict) -> int | None:
 
 def household_quality_profile(base: str, api_key: str, kind: str):
     """Recyclarr owns Default/Max. Never advertise unconfigured placeholders."""
-    profiles = as_list(http("GET", f"{base}/qualityprofile", headers=arr_headers(api_key)))
+    profiles = as_list(
+        http("GET", f"{base}/qualityprofile", headers=arr_headers(api_key))
+    )
     names = {row.get("name"): row for row in profiles}
     if not {"Default", "Max"} <= names.keys():
-        raise RuntimeError(f"{kind}: waiting for Recyclarr to configure Default and Max")
+        raise RuntimeError(
+            f"{kind}: waiting for Recyclarr to configure Default and Max"
+        )
     template = names["Default"]
     anything = json.loads(json.dumps(names.get("Anything") or template))
     anything.pop("id", None)
-    anything.update(name="Anything", upgradeAllowed=False, minFormatScore=0, cutoffFormatScore=0, minUpgradeFormatScore=1)
+    anything.update(
+        name="Anything",
+        upgradeAllowed=False,
+        minFormatScore=0,
+        cutoffFormatScore=0,
+        minUpgradeFormatScore=1,
+    )
+
     def allow(items):
         for item in items:
             item["allowed"] = True
             allow(item.get("items") or [])
+
     allow(anything.get("items") or [])
-    anything["formatItems"] = [{**item, "score": 0} for item in anything.get("formatItems") or []]
+    anything["formatItems"] = [
+        {**item, "score": 0} for item in anything.get("formatItems") or []
+    ]
     existing = names.get("Anything")
     if existing is None:
         http("POST", f"{base}/qualityprofile", anything, headers=arr_headers(api_key))
     elif any(existing.get(k) != v for k, v in anything.items()):
-        http("PUT", f"{base}/qualityprofile/{existing['id']}", anything, headers=arr_headers(api_key))
+        http(
+            "PUT",
+            f"{base}/qualityprofile/{existing['id']}",
+            anything,
+            headers=arr_headers(api_key),
+        )
     return template["id"], "Default"
 
 
 def anime_quality_profile(base: str, api_key: str, kind: str):
     """Require the Recyclarr-managed Anime profile before wiring anime requests."""
-    profiles = as_list(http("GET", f"{base}/qualityprofile", headers=arr_headers(api_key)))
+    profiles = as_list(
+        http("GET", f"{base}/qualityprofile", headers=arr_headers(api_key))
+    )
     anime = next((row for row in profiles if row.get("name") == "Anime"), None)
     if anime is None or anime.get("id") is None:
         raise RuntimeError(f"{kind}: waiting for Recyclarr to configure Anime")
@@ -654,11 +535,13 @@ def prowlarr_app_values(impl: str, base_url: str, api_key: str) -> dict:
 
 
 def prowlarr_app_matches(existing: dict, values: dict) -> bool:
-    if existing.get('syncLevel') != 'fullSync':
+    if existing.get("syncLevel") != "fullSync":
         return False
-    if str(app_field(existing, 'baseUrl') or '').rstrip('/') != values['baseUrl'].rstrip('/'):
+    if str(app_field(existing, "baseUrl") or "").rstrip("/") != values[
+        "baseUrl"
+    ].rstrip("/"):
         return False
-    if app_field(existing, 'apiKey') not in {values['apiKey'], '********'}:
+    if app_field(existing, "apiKey") not in {values["apiKey"], "********"}:
         return False
     current = str(app_field(existing, "prowlarrUrl") or "").rstrip("/")
     if current != str(values.get("prowlarrUrl") or "").rstrip("/"):
@@ -672,28 +555,37 @@ def prowlarr_app_matches(existing: dict, values: dict) -> bool:
     return True
 
 
-def ensure_prowlarr_app(prowlarr: str, pkey: str, name: str, impl: str, base_url: str, api_key: str) -> None:
+def ensure_prowlarr_app(
+    prowlarr: str, pkey: str, name: str, impl: str, base_url: str, api_key: str
+) -> None:
     values = prowlarr_app_values(impl, base_url, api_key)
     want = values["prowlarrUrl"]
     want_cats = values["syncCategories"]
-    apps = as_list(http("GET", f"{prowlarr}/api/v1/applications", headers=arr_headers(pkey)))
+    apps = as_list(
+        http("GET", f"{prowlarr}/api/v1/applications", headers=arr_headers(pkey))
+    )
     for existing in apps:
         if existing.get("name") != name:
             continue
         if prowlarr_app_matches(existing, values):
-            if app_field(existing, 'apiKey') != '********':
+            if app_field(existing, "apiKey") != "********":
                 return
             # Prowlarr masks secrets on GET. Test the stored connection rather
             # than rewriting a healthy one or accepting a broken hidden key.
             try:
-                http('POST', f'{prowlarr}/api/v1/applications/test', existing, headers=arr_headers(pkey))
+                http(
+                    "POST",
+                    f"{prowlarr}/api/v1/applications/test",
+                    existing,
+                    headers=arr_headers(pkey),
+                )
                 return
             except RuntimeError:
                 pass  # Reapply the managed credentials; PUT validates them.
         if existing.get("id") is None:
-            raise RuntimeError(f'Prowlarr app {name} has no ID')
+            raise RuntimeError(f"Prowlarr app {name} has no ID")
         updated = json.loads(json.dumps(existing))
-        updated['syncLevel'] = 'fullSync'
+        updated["syncLevel"] = "fullSync"
         set_app_fields(updated, values)
         http(
             "PUT",
@@ -703,7 +595,9 @@ def ensure_prowlarr_app(prowlarr: str, pkey: str, name: str, impl: str, base_url
         )
         log(f"prowlarr app {name} Arr URL {want} cats {want_cats[0]}s")
         return
-    schema = http("GET", f"{prowlarr}/api/v1/applications/schema", headers=arr_headers(pkey))
+    schema = http(
+        "GET", f"{prowlarr}/api/v1/applications/schema", headers=arr_headers(pkey)
+    )
     app = schema_impl(schema, impl)
     set_app_fields(app, values)
     app["name"] = name
@@ -714,36 +608,11 @@ def ensure_prowlarr_app(prowlarr: str, pkey: str, name: str, impl: str, base_url
 
 
 def ensure_indexer(prowlarr: str, pkey: str) -> None:
-    if not indexer_url():
-        log("no source URL configured yet")
-        return
-    indexers = as_list(http("GET", f"{prowlarr}/api/v1/indexer", headers=arr_headers(pkey)))
-    if indexers:
-        return
-    schema = http("GET", f"{prowlarr}/api/v1/indexer/schema", headers=arr_headers(pkey))
-    impl = "Newznab" if "newznab" in indexer_url().lower() else "Torznab"
-    try:
-        indexer = schema_impl(schema, impl)
-    except RuntimeError:
-        indexer = schema_impl(schema, "Newznab" if impl == "Torznab" else "Torznab")
-    fill_fields(
-        indexer,
-        {
-            "baseUrl": indexer_url().rstrip("/"),
-            "apiPath": "/api",
-            "apiKey": indexer_api_key(),
-        },
-    )
-    indexer["name"] = "Source"
-    indexer["enable"] = True
-    indexer["enableRss"] = True
-    indexer["enableAutomaticSearch"] = True
-    indexer["enableInteractiveSearch"] = True
-    indexer["priority"] = 25
-    indexer["appProfileId"] = 1
-    indexer["tags"] = []
-    http("POST", f"{prowlarr}/api/v1/indexer", indexer, headers=arr_headers(pkey))
-    log("added source")
+    indexers = http("GET", prowlarr + "/api/v1/indexer", headers=arr_headers(pkey))
+    if not any(
+        item.get("enable") and item.get("protocol") == "torrent" for item in indexers
+    ):
+        raise RuntimeError("Add an enabled torrent source in Prowlarr")
 
 
 def qbit_category(name: str, save_path: str) -> None:
@@ -785,7 +654,7 @@ class Seerr:
             headers=self._headers(),
         )
         try:
-            with urllib.request.urlopen(req, timeout=45) as resp:
+            with urllib.request.urlopen(req, timeout=http_timeout(10)) as resp:
                 cookies = []
                 if hasattr(resp.headers, "get_all"):
                     cookies = resp.headers.get_all("Set-Cookie") or []
@@ -804,7 +673,9 @@ class Seerr:
         except urllib.error.HTTPError as exc:
             err = exc.read().decode(errors="replace")
             exc.close()
-            raise RuntimeError(f"seerr {method} {path} -> {exc.code} {err[:400]}") from exc
+            raise RuntimeError(
+                f"seerr {method} {path} -> {exc.code} {err[:400]}"
+            ) from exc
 
 
 def parse_plex(url: str):
@@ -835,16 +706,11 @@ def pick_plex_server(servers, host: str):
     return pool[0] if pool else None
 
 
-def configure_seerr(secrets: dict, radarr_profile, sonarr_profile, sonarr_anime_profile, sonarr_lang) -> None:
+def configure_seerr(
+    secrets: dict, radarr_profile, sonarr_profile, sonarr_anime_profile, sonarr_lang
+) -> None:
     s = Seerr()
-    for _ in range(wait_tries()):
-        try:
-            s.call("GET", "/api/v1/settings/public")
-            break
-        except Exception:  # noqa: BLE001
-            time.sleep(wait_sleep())
-    else:
-        raise RuntimeError("Seerr never became ready")
+    wait_http(seerr_url() + "/api/v1/settings/public")
 
     s.api_key = seerr_api_key_from_disk()
     have_plex = bool(plex_url() and plex_token())
@@ -921,7 +787,11 @@ def configure_seerr(secrets: dict, radarr_profile, sonarr_profile, sonarr_anime_
                 if not lib_id:
                     continue
                 try:
-                    s.call("PUT", f"/api/v1/settings/plex/library/{lib_id}", {"enabled": True})
+                    s.call(
+                        "PUT",
+                        f"/api/v1/settings/plex/library/{lib_id}",
+                        {"enabled": True},
+                    )
                 except RuntimeError as exc:
                     log(f"plex library {lib_id}: {exc}", "WARNING")
             log("plex libraries enabled")
@@ -993,15 +863,18 @@ def configure_seerr(secrets: dict, radarr_profile, sonarr_profile, sonarr_anime_
                 dir_changed = bool(want and want != have) or bool(
                     want_anime and want_anime != have_anime
                 )
-                profile_changed = (
-                    match.get("activeProfileId") != payload.get("activeProfileId")
-                    or (match.get("activeProfileName") or "") != (payload.get("activeProfileName") or "")
+                profile_changed = match.get("activeProfileId") != payload.get(
+                    "activeProfileId"
+                ) or (match.get("activeProfileName") or "") != (
+                    payload.get("activeProfileName") or ""
                 )
                 # Seerr's Radarr/Sonarr scan declines in-flight requests as
                 # "orphaned" when the add has not landed yet. Availability
                 # comes from Plex; keep Arr library-scan off.
                 sync_changed = match.get("syncEnabled") != payload.get("syncEnabled")
-                if server_id is not None and any(match.get(k) != v for k, v in payload.items()):
+                if server_id is not None and any(
+                    match.get(k) != v for k, v in payload.items()
+                ):
                     update = dict(match)
                     update.update(payload)
                     # Seerr OpenAPI marks id read-only; it belongs in the URL.
@@ -1024,13 +897,21 @@ def configure_seerr(secrets: dict, radarr_profile, sonarr_profile, sonarr_anime_
                 log(f"seerr {kind} waits until the Plex wizard creates the first admin")
                 return False
             if "403" in str(exc):
-                raise RuntimeError("seerr has no Radarr/Sonarr after initialize") from exc
+                raise RuntimeError(
+                    "seerr has no Radarr/Sonarr after initialize"
+                ) from exc
             raise
 
     wired_arr = upsert_arr("radarr", radarr_payload)
     wired_sonarr = upsert_arr("sonarr", sonarr_payload)
     wired_arr = wired_arr and wired_sonarr
     if wired_arr:
+        for kind, payload in [("radarr", radarr_payload), ("sonarr", sonarr_payload)]:
+            connection = {
+                key: payload[key]
+                for key in ["hostname", "port", "apiKey", "useSsl", "urlBase"]
+            }
+            s.call("POST", f"/api/v1/settings/{kind}/test", connection)
         open(os.path.join(ready_dir(), "seerr-arr"), "w").close()
     elif initialized:
         raise RuntimeError("seerr has no Radarr/Sonarr after initialize")
@@ -1041,11 +922,17 @@ def configure_seerr(secrets: dict, radarr_profile, sonarr_profile, sonarr_anime_
             s.call("POST", path, desired)
 
     try:
-        ensure_settings("/api/v1/settings/main", {
-            "applicationTitle": "Pompey", "applicationUrl": "",
-            "defaultPermissions": SEERR_HOUSEHOLD_PERMS, "hideAvailable": False,
-            "localLogin": True, "newPlexLogin": True,
-        })
+        ensure_settings(
+            "/api/v1/settings/main",
+            {
+                "applicationTitle": "Pompey",
+                "applicationUrl": "",
+                "defaultPermissions": SEERR_HOUSEHOLD_PERMS,
+                "hideAvailable": False,
+                "localLogin": True,
+                "newPlexLogin": True,
+            },
+        )
     except RuntimeError as exc:
         log(f"seerr main settings: {exc}", "WARNING")
 
@@ -1085,13 +972,20 @@ def configure_seerr(secrets: dict, radarr_profile, sonarr_profile, sonarr_anime_
 
 
 def main() -> int:
+    import pompey_common
+
+    pompey_common.HTTP_DEADLINE = time.monotonic() + 150
+    os.makedirs(ready_dir(), exist_ok=True)
+    for name in ["downloads-wired", "roots-wired", "seerr-arr"]:
+        Path(ready_dir(), name).unlink(missing_ok=True)
     secrets = load_secrets()
     wait_http(f"{qbit_url()}/api/v2/app/version")
-    wait_http(f"{prowlarr_url()}/ping")
-    wait_http(f"{sonarr_url()}/ping")
-    wait_http(f"{radarr_url()}/ping")
 
-    sk, rk, pk = secrets["sonarr_api_key"], secrets["radarr_api_key"], secrets["prowlarr_api_key"]
+    sk, rk, pk = (
+        secrets["sonarr_api_key"],
+        secrets["radarr_api_key"],
+        secrets["prowlarr_api_key"],
+    )
     sonarr = arr_api_root(sonarr_url(), sk)
     radarr = arr_api_root(radarr_url(), rk)
     prowlarr = prowlarr_url()
@@ -1107,13 +1001,16 @@ def main() -> int:
     qbit_category("sonarr", complete)
     qbit_category("radarr", complete)
     qbit_category("prowlarr", manual)
+    Path(ready_dir(), "downloads-wired").touch()
+    wait_http(sonarr_url() + "/ping")
+    wait_http(radarr_url() + "/ping")
     notices = sync_root_folders(sonarr, sk, "sonarr")
     notices += sync_root_folders(radarr, rk, "radarr")
+    open(os.path.join(ready_dir(), "roots-wired"), "w").close()
     persist.save("arr-roots", {"notices": notices})
     ensure_download_client(sonarr, sk, secrets, "sonarr")
     ensure_download_client(radarr, rk, secrets, "radarr")
-    ensure_prowlarr_download_client(prowlarr, pk, secrets)
-    # Never accept legacy placeholders or a failed sync as configured profiles.
+    # Required profiles come from the bundled Recyclarr resources.
     if not run_recyclarr():
         raise RuntimeError("Recyclarr has not successfully configured quality profiles")
     sp = household_quality_profile(sonarr, sk, "sonarr")
@@ -1123,21 +1020,41 @@ def main() -> int:
     for kind, base, key in each_arr(radarr, rk, sonarr, sk):
         ensure_media_management(base, key, kind)
         ensure_download_client_handling(base, key, kind)
+    sl = language_profile_id(sonarr, sk)
+    configure_seerr(secrets, rp, sp, sap, sl)
+    wait_http(prowlarr_url() + "/ping")
+    ensure_prowlarr_download_client(prowlarr, pk, secrets)
     ensure_prowlarr_app(prowlarr, pk, "Sonarr", "Sonarr", sonarr_url(), sk)
     ensure_prowlarr_app(prowlarr, pk, "Radarr", "Radarr", radarr_url(), rk)
     ensure_indexer(prowlarr, pk)
+    for kind, base, key in each_arr(radarr, rk, sonarr, sk):
+        for _ in range(50):
+            indexers = http("GET", base + "/indexer", headers=arr_headers(key))
+            if any(
+                str(app_field(item, "baseUrl")).startswith(
+                    prowlarr_url().rstrip("/") + "/"
+                )
+                and item.get("enableAutomaticSearch")
+                for item in indexers
+            ):
+                break
+            time.sleep(0.2)
+        else:
+            raise RuntimeError(
+                "Waiting for Prowlarr source synchronization into " + kind
+            )
 
-    sl = language_profile_id(sonarr, sk)
-
-    os.makedirs(ready_dir(), exist_ok=True)
-    open(os.path.join(ready_dir(), "arr-wired"), "w").close()
-
-    configure_seerr(secrets, rp, sp, sap, sl)
     port = os.environ.get("SEERR_PORT", "5055")
     sources = os.environ.get("PROWLARR_PORT", "9696")
-    log(f"search is on 0.0.0.0:{port}; sources on 0.0.0.0:{sources}; Ingress stays Pompey")
-    # Marker first so a concurrent fetch/vpn writer cannot rewind the bar.
-    open(os.path.join(ready_dir(), "wired"), "w").close()
+    log(
+        f"search is on 0.0.0.0:{port}; sources on 0.0.0.0:{sources}; Ingress stays Pompey"
+    )
+    from pompey_runtime import atomic_json
+
+    atomic_json(
+        Path(ready_dir()) / "configuration.json",
+        {"ok": True, "updated": time.time(), "error": ""},
+    )
     mark_status("ready", "Ready", 100)
     log("done")
     return 0
@@ -1145,12 +1062,14 @@ def main() -> int:
 
 def housekeep() -> int:
     from media_policy import maintain_downloads
+
     maintain_downloads()
     return 0
 
 
 def closeout() -> int:
     from request_policy import reconcile_requests
+
     reconcile_requests()
     return 0
 
@@ -1164,6 +1083,24 @@ if __name__ == "__main__":
         raise SystemExit(main())
     except Exception as exc:  # noqa: BLE001
         log(str(exc), "ERROR")
-        # Re-wire after an engine swap must not flip the wait screen off search.
-        mark_status("wire", "Could not connect search", 80, "Retrying. Check the app log for details.")
+        if len(sys.argv) == 1:
+            from pompey_runtime import atomic_json
+
+            try:
+                message = str(exc)
+                for secret in load_secrets().values():
+                    if isinstance(secret, str) and len(secret) >= 8:
+                        message = message.replace(secret, "***")
+                atomic_json(
+                    Path(ready_dir()) / "configuration.json",
+                    {"ok": False, "updated": time.time(), "error": message},
+                )
+            except (OSError, ValueError):
+                pass
+            mark_status(
+                "wire",
+                "Could not connect search",
+                80,
+                "Retrying. Check the app log for details.",
+            )
         raise SystemExit(1)

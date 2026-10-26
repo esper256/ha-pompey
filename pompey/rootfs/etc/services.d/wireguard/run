@@ -51,28 +51,6 @@ mark_vpn_up() {
 trap 'rm -f "${POMPEY_READY}/vpn-up"' EXIT
 pompey-log start "WireGuard"
 
-if [[ "${POMPEY_FAKE_VPN:-}" == "1" ]]; then
-  bashio::log.info "Fake wg0 (agent/dev): not VPN"
-  pompey_status.py vpn "Bringing up fake wg0" 10 || true
-  pompey-dev-vpn up
-  POMPEY_STATUS_NEED_VPN=0 pompey_status.py vpn "Fake wg0 is up" 15 || true
-  wait-for-vpn 10
-  mark_vpn_up
-  while wait-for-vpn 1; do
-    sleep 30
-  done
-  bashio::log.error "Fake wg0 went away"
-  exit 1
-fi
-
-# Stay running while we wait. Ingress is Supervisor INPUT (not the kill
-# switch). Exiting used to halt the whole container and take nginx with it.
-# Restore the pre-tunnel resolver for endpoint hostname lookup after a lost
-# tunnel. HAOS's LAN resolver remains allowed by the firewall.
-if [[ -f "${POMPEY_READY}/bootstrap-resolv.conf" ]]; then
-  # Write through Supervisor's resolver mount/symlink without replacing it.
-  cat "${POMPEY_READY}/bootstrap-resolv.conf" > "${POMPEY_RESOLV}"
-fi
 until apply-vpn-config; do
   need_vpn
   sleep 2
@@ -88,9 +66,7 @@ done
 pompey-wg-routes
 
 # Filter tables sometimes appear only after the interface exists. Retry once.
-if [[ "${POMPEY_FAKE_VPN:-}" != "1" ]]; then
-  vpn-killswitch "${POMPEY_WG_CONF}"
-fi
+vpn-killswitch "${POMPEY_WG_CONF}"
 
 bashio::log.info "Waiting for VPN connection on wg0"
 pompey_status.py vpn "Waiting for VPN connection" 15 || true

@@ -4,4 +4,4 @@ set -euo pipefail
 # shellcheck source=/dev/null
 source "$(command -v pompey-env)"
 export POMPEY_SECRETS POMPEY_CONFIG POMPEY_READY POMPEY_DATA POMPEY_ENGINES
-exec python3 /usr/local/bin/pompey_controller.py
+exec s6-setuidgid pompey python3 /usr/local/bin/pompey_controller.py

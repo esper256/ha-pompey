@@ -1,22 +1,14 @@
 # syntax=docker/dockerfile:1
-# Pompey — thin local image: supervisor, nginx, WireGuard.
-# Engines and Seerr are fetched at runtime after the tunnel is up.
+# Supervisor builds this image locally. The complete pinned bundle ships in it.
 
 FROM ghcr.io/home-assistant/base@sha256:93ef607824e3f27e868f11b10938283a98bf880ed57bcf8eaa81c6c2d521f6f5
 
-ARG BUILD_ARCH
-ARG BUILD_DATE
-ARG BUILD_DESCRIPTION="Search for a movie or show; VPN WireGuard for all internet"
-ARG BUILD_NAME="Pompey"
-ARG BUILD_REF
-ARG BUILD_REPOSITORY="esper256/ha-pompey"
-ARG BUILD_VERSION="0.3.3"
+ARG BUILD_ARCH=amd64
 
 RUN apk add --no-cache \
     bind-tools \
     ca-certificates \
     curl \
-    git \
     icu-data-full \
     icu-libs \
     nftables \
@@ -36,20 +28,34 @@ RUN apk add --no-cache \
     xz \
     zlib
 
-# crane unpacks Seerr's published image at runtime. Not an engine.
-RUN case "${BUILD_ARCH}" in \
-      aarch64) crane_arch="Linux_arm64" ;; \
-      *) crane_arch="Linux_x86_64" ;; \
-    esac \
- && curl -fsSL "https://github.com/google/go-containerregistry/releases/download/v0.22.0/go-containerregistry_${crane_arch}.tar.gz" \
+# Build-only tools never enter the final runtime filesystem.
+RUN test "${BUILD_ARCH}" = amd64 \
+ && apk add --no-cache --virtual .vendor-tools git \
+ && curl -fsSL "https://github.com/google/go-containerregistry/releases/download/v0.22.0/go-containerregistry_Linux_x86_64.tar.gz" \
     | tar -xz -C /usr/local/bin crane \
  && chmod +x /usr/local/bin/crane
 
+COPY rootfs/usr/share/pompey/engines.json /usr/share/pompey/engines.json
+COPY vendor_bundle.py /tmp/vendor_bundle.py
+RUN python3 /tmp/vendor_bundle.py \
+ && rm /tmp/vendor_bundle.py /usr/local/bin/crane \
+ && apk del .vendor-tools
+
 COPY rootfs/ /
+
+ARG BUILD_DATE=""
+ARG BUILD_DESCRIPTION="Search for a movie or show; VPN WireGuard for all internet"
+ARG BUILD_NAME="Pompey"
+ARG BUILD_REF=""
+ARG BUILD_REPOSITORY="esper256/ha-pompey"
+ARG BUILD_VERSION="0.4.0"
+
 
 ENV BUILD_VERSION="${BUILD_VERSION}"
 
-RUN rm -f /etc/nginx/http.d/default.conf \
+RUN addgroup -g 1000 pompey \
+    && adduser -D -H -u 1000 -G pompey -h /data/pompey pompey \
+    && rm -f /etc/nginx/http.d/default.conf \
     && chmod +x \
       /etc/cont-init.d/*.sh \
       /etc/services.d/*/run \

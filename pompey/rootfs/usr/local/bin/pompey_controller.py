@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
 """Independent bounded jobs with current health, retry backoff and one mutation lock."""
+
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 import os
+import json
 from pathlib import Path
 import sys
 import time
 import urllib.request
-from engine_manager import HEALTH, atomic_json, stack_lock, run_process
+from pompey_runtime import HEALTH, atomic_json, stack_lock, run_process
 from media_policy import attention
 
 
@@ -21,19 +23,21 @@ class Job:
     due: float = 0
     failures: int = 0
     future: object = None
-    phase: str = 'idle'
+    phase: str = "idle"
     last_success: float | None = None
     started: float | None = None
-    error: str = ''
+    error: str = ""
 
     def complete(self, now, success):
-        self.phase = 'idle'
+        self.phase = "idle"
         if success:
             self.last_success = time.time()
-            self.error = ''
+            self.error = ""
 
         self.failures = 0 if success else self.failures + 1
-        self.due = now + (self.interval if success else min(300, 5 * 2 ** min(self.failures, 6)))
+        self.due = now + (
+            self.interval if success else min(300, 5 * 2 ** min(self.failures, 6))
+        )
         self.future = None
 
 
@@ -41,14 +45,14 @@ def execute(job):
     if job.exclusive:
         try:
             with stack_lock(blocking=False):
-                job.phase = 'running'
+                job.phase = "running"
                 job.started = time.time()
                 run_process(job.args, job.timeout)
         except BlockingIOError:
-            job.phase = 'waiting'
+            job.phase = "waiting"
             return False
     else:
-        job.phase = 'running'
+        job.phase = "running"
         job.started = time.time()
         run_process(job.args, job.timeout)
     return True
@@ -56,13 +60,25 @@ def execute(job):
 
 def dispatch(jobs, pool, now, ready):
     """Configure Arr first; routine jobs wait until the stack is wired."""
-    candidates = jobs if (ready / 'arr-wired').exists() else [j for j in jobs if j.name == 'configuration']
+    candidates = [
+        j
+        for j in jobs
+        if j.name == "configuration"
+        or (
+            ready
+            / {
+                "downloads": "downloads-wired",
+                "requests": "seerr-arr",
+                "routing": "roots-wired",
+            }[j.name]
+        ).exists()
+    ]
     busy = any(j.exclusive and j.future is not None for j in candidates)
-    priority = {'downloads': 0, 'requests': 1, 'routing': 2, 'configuration': 3, 'updates': 4}
+    priority = {"downloads": 0, "requests": 1, "routing": 2, "configuration": 3}
     for job in sorted(candidates, key=lambda j: priority[j.name]):
         if job.future is not None or now < job.due:
             continue
-        job.phase = 'waiting'
+        job.phase = "waiting"
         if job.exclusive and busy:
             continue
         job.future = pool.submit(execute, job)
@@ -70,9 +86,15 @@ def dispatch(jobs, pool, now, ready):
 
 
 def job_status(job, now):
-    return {'failures': job.failures, 'running': job.phase == 'running', 'phase': job.phase,
-            'lastSuccess': job.last_success, 'started': job.started, 'error': job.error,
-            'overdue': job.phase == 'waiting' and now - job.due > max(60, job.interval)}
+    return {
+        "failures": job.failures,
+        "running": job.phase == "running",
+        "phase": job.phase,
+        "lastSuccess": job.last_success,
+        "started": job.started,
+        "error": job.error,
+        "overdue": job.phase == "waiting" and now - job.due > max(60, job.interval),
+    }
 
 
 def health(ready):
@@ -83,18 +105,70 @@ def health(ready):
                 result[name] = response.status == 200
         except OSError:
             result[name] = False
-    result['vpn'] = (ready/'vpn-up').exists()
+    result["vpn"] = (ready / "vpn-up").exists()
     return result
+
+
+def current_status(ready, services):
+    from pompey_status import default_status
+
+    data = default_status(search=services.get("seerr", False))
+    try:
+        configuration = json.loads((ready / "configuration.json").read_text())
+    except (OSError, ValueError):
+        configuration = {}
+    need_vpn = not Path(
+        os.environ.get("POMPEY_WG_FILE", "/config/wireguard/wg0.conf")
+    ).is_file()
+    initialized = (ready / "seerr-arr").exists()
+    complete = all(services.values()) and configuration.get("ok") and initialized
+    data.update(
+        updated=time.time(),
+        need_vpn=need_vpn,
+        search=services.get("seerr", False),
+        step="ready" if complete else "wire",
+        percent=100 if complete else 80,
+        label="Ready" if complete else "Services need attention",
+        error="",
+    )
+    if not services.get("vpn"):
+        data["label"] = "VPN unavailable; local services remain accessible"
+    if need_vpn:
+        data["label"] = "Add your VPN configuration"
+    if configuration.get("error"):
+        data["error"] = configuration["error"]
+    elif not initialized:
+        data["error"] = "Complete search setup to connect requests to your libraries."
+    from pompey_vpn_stats import sample
+
+    data["vpn"] = sample()
+    return data
 
 
 def main():
     here = Path(__file__).resolve().parent
-    ready = Path(os.environ.get('POMPEY_READY','/tmp/pompey'))
-    jobs = [Job('configuration',[sys.executable,str(here/'wire_stack.py')],300,240),
-            Job('requests',[sys.executable,str(here/'wire_stack.py'),'closeout'],15,120),
-            Job('downloads',[sys.executable,str(here/'wire_stack.py'),'housekeep'],30,120),
-            Job('routing',[sys.executable,str(here/'route_rating.py'),'--once'],60,120),
-            Job('updates',['fetch-engines'],86400,1800,False,due=time.monotonic()+86400)]
+    ready = Path(os.environ.get("POMPEY_READY", "/tmp/pompey"))
+    jobs = [
+        Job("configuration", [sys.executable, str(here / "wire_stack.py")], 60, 180),
+        Job(
+            "requests",
+            [sys.executable, str(here / "wire_stack.py"), "closeout"],
+            120,
+            60,
+        ),
+        Job(
+            "downloads",
+            [sys.executable, str(here / "wire_stack.py"), "housekeep"],
+            30,
+            120,
+        ),
+        Job(
+            "routing",
+            [sys.executable, str(here / "route_rating.py"), "--once"],
+            60,
+            120,
+        ),
+    ]
     for job in jobs:
         if job.due == 0:
             job.due = time.monotonic()
@@ -109,13 +183,14 @@ def main():
                         if job.future.result():
                             job.complete(now, True)
                         else:
-                            job.future = None  # Lock busy: waiting is not a failed operation.
+                            job.future = (
+                                None  # Lock busy: waiting is not a failed operation.
+                            )
                     except Exception as exc:
                         job.error = str(exc)
-                        print(f'{job.name}: {exc}',flush=True)
+                        print(f"{job.name}: {exc}", flush=True)
                         job.complete(now, False)
-            if (ready/'engines-ready').exists():
-                dispatch(jobs, pool, now, ready)
+            dispatch(jobs, pool, now, ready)
             if now >= next_health:
                 current = health(ready)
                 if any(current.get(k) and not observed.get(k) for k in current):
@@ -124,12 +199,28 @@ def main():
                 try:
                     notices = attention()
                 except (OSError, ValueError, TypeError) as exc:
-                    notices = ['Policy state could not be read: ' + str(exc)]
-                atomic_json(ready/'health.json',{'updated':time.time(),'services':current,'attention':notices,
-                            'jobs':{j.name:job_status(j, now) for j in jobs}})
-                next_health = now + 10
+                    notices = ["Policy state could not be read: " + str(exc)]
+                atomic_json(
+                    ready / "health.json",
+                    {
+                        "updated": time.time(),
+                        "services": current,
+                        "attention": notices,
+                        "jobs": {j.name: job_status(j, now) for j in jobs},
+                    },
+                )
+                from pompey_status import lock_status
+                import fcntl
+
+                lock = lock_status()
+                try:
+                    atomic_json(ready / "status.json", current_status(ready, current))
+                finally:
+                    fcntl.flock(lock, fcntl.LOCK_UN)
+                    os.close(lock)
+                next_health = now + 5
             time.sleep(1)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

@@ -5,7 +5,7 @@
 set -euo pipefail
 
 POMPEY_DATA="${POMPEY_DATA:-/data/pompey}"
-POMPEY_ENGINES="${POMPEY_ENGINES:-/data/engines}"
+POMPEY_ENGINES="${POMPEY_ENGINES:-/opt/pompey/engines}"
 POMPEY_SECRETS="${POMPEY_SECRETS:-${POMPEY_DATA}/secrets.json}"
 POMPEY_READY="${POMPEY_READY:-/tmp/pompey}"
 POMPEY_CONFIG="${POMPEY_CONFIG:-/config}"
@@ -13,31 +13,33 @@ POMPEY_WG_ETC="${POMPEY_WG_ETC:-/etc/wireguard}"
 POMPEY_WG_CONF="${POMPEY_WG_CONF:-${POMPEY_WG_ETC}/wg0.conf}"
 POMPEY_WG_FILE="${POMPEY_WG_FILE:-${POMPEY_CONFIG}/wireguard/wg0.conf}"
 
-POMPEY_LAN_NETWORKS="${POMPEY_LAN_NETWORKS:-10.0.0.0/8,172.16.0.0/12,192.168.0.0/16}"
+POMPEY_LAN_NETWORKS="${POMPEY_LAN_NETWORKS:-}"
 POMPEY_VPN_TMP="${POMPEY_VPN_TMP:-/tmp/vpn}"
 POMPEY_LAN_FILE="${POMPEY_LAN_FILE:-/etc/pompey-lan-networks}"
 POMPEY_RESOLV="${POMPEY_RESOLV:-/etc/resolv.conf}"
 POMPEY_NGINX_RUN="${POMPEY_NGINX_RUN:-/run/nginx}"
 NGINX_INGRESS_CONF="${NGINX_INGRESS_CONF:-/etc/nginx/http.d/ingress.conf}"
 
-if declare -F bashio::config >/dev/null 2>&1; then
-  : "${MEDIA_ROOT:=$(bashio::config 'media_folder')}"
-  : "${MEDIA_MOVIES:=$(bashio::config 'movies_folder')}"
-  : "${MEDIA_MOVIES_KID:=$(bashio::config 'movies_kid_folder')}"
-  : "${MEDIA_TV:=$(bashio::config 'tv_folder')}"
-  : "${MEDIA_TV_KID:=$(bashio::config 'tv_kid_folder')}"
-  : "${NAT_PMP_GATEWAY:=$(bashio::config 'nat_pmp_gateway')}"
-  : "${AFTER_DOWNLOAD:=$(bashio::config 'after_download')}"
-  : "${SIMULTANEOUS_DOWNLOADS:=$(bashio::config 'simultaneous_downloads')}"
-  if declare -F bashio::config.true >/dev/null 2>&1 && bashio::config.true debug; then
+# Supervisor supplies this file. Reading it directly also permits an isolated
+# production boot without emulating Supervisor's HTTP API.
+pompey_option() { jq -r --arg key "$1" '.[$key] // empty' /data/options.json; }
+if [[ -f /data/options.json ]]; then
+  : "${MEDIA_ROOT:=$(pompey_option media_folder)}"
+  : "${MEDIA_MOVIES:=$(pompey_option movies_folder)}"
+  : "${MEDIA_MOVIES_KID:=$(pompey_option movies_kid_folder)}"
+  : "${MEDIA_TV:=$(pompey_option tv_folder)}"
+  : "${MEDIA_TV_KID:=$(pompey_option tv_kid_folder)}"
+  : "${POMPEY_LAN_NETWORKS:=$(pompey_option lan_networks)}"
+  : "${NAT_PMP_GATEWAY:=$(pompey_option nat_pmp_gateway)}"
+  : "${AFTER_DOWNLOAD:=$(pompey_option after_download)}"
+  : "${SIMULTANEOUS_DOWNLOADS:=$(pompey_option simultaneous_downloads)}"
+  if [[ "$(pompey_option debug)" == true ]]; then
     : "${POMPEY_DEBUG:=1}"
-  else
-    : "${POMPEY_DEBUG:=0}"
   fi
 fi
 NAT_PMP_GATEWAY="${NAT_PMP_GATEWAY:-}"
 [[ "${NAT_PMP_GATEWAY}" != "null" ]] || NAT_PMP_GATEWAY=""
-export NAT_PMP_GATEWAY
+export NAT_PMP_GATEWAY POMPEY_LAN_NETWORKS
 MEDIA_ROOT="${MEDIA_ROOT:-/media/dlna}"
 MEDIA_MOVIES="${MEDIA_MOVIES:-Movies/Not Kid Friendly}"
 MEDIA_MOVIES_KID="${MEDIA_MOVIES_KID:-Movies/Kid Friendly}"
@@ -52,8 +54,7 @@ python3 "$(command -v pompey_config.py)"
 
 mkdir -p \
   "${POMPEY_DATA}" \
-  "${POMPEY_ENGINES}" \
-  "${POMPEY_READY}" \
+    "${POMPEY_READY}" \
   "${POMPEY_CONFIG}/wireguard" \
   "${POMPEY_CONFIG}/sonarr" \
   "${POMPEY_CONFIG}/radarr" \
