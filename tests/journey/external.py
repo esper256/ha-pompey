@@ -9,6 +9,7 @@ import socket
 import ssl
 import struct
 import threading
+import time
 from urllib.parse import parse_qs, urlsplit
 
 TITLE = "Pompey.Foundation.2024.1080p.WEB-DL"
@@ -71,6 +72,11 @@ class World:
         self.blocks = 0
         self.sent = 0
         self.servers = []
+        self.started = float(Path("/tmp/world/started").read_text())
+        self.timings = {}
+
+    def stamp(self, name):
+        self.timings.setdefault(name, round(time.monotonic() - self.started, 3))
 
     def start(self, cert, key):
         world = self
@@ -92,6 +98,9 @@ class World:
                 if not path.startswith("/control/"):
                     world.requests.append(
                         {
+                            "elapsedSeconds": round(
+                                time.monotonic() - world.started, 3
+                            ),
                             "host": host,
                             "path": path,
                             "query": {
@@ -155,6 +164,7 @@ class World:
         if path == "/control/status":
             return js(
                 {
+                    "timings": self.timings,
                     "blocks": self.blocks,
                     "sent": self.sent,
                     "payloadBytes": len(self.payload),
@@ -163,9 +173,11 @@ class World:
                 }
             )
         if path == "/control/release":
+            self.stamp("final-piece-released")
             self.release.set()
             return js({"ok": True})
         if path == "/announce":
+            self.stamp("tracker-announced")
             peers = socket.inet_aton(PEER_IP) + struct.pack("!H", 18181)
             return (
                 "text/plain",
@@ -175,6 +187,7 @@ class World:
                 200,
             )
         if path == "/download":
+            self.stamp("torrent-served")
             return "application/x-bittorrent", self.torrent, 200
         if path in {"/api", "/api/"}:
             if query.get("apikey") != ["fixture"]:
@@ -344,6 +357,7 @@ class World:
                 + self.digest
                 + b"-PF0001-000000000000"
             )
+            self.stamp("peer-connected")
             count = len(self.pieces)
             bits = bytearray((count + 7) // 8)
             for n in range(count):
@@ -365,6 +379,8 @@ class World:
                         ]
                         send(7, struct.pack("!II", index, begin) + block)
                         self.sent += len(block)
+                        if self.sent >= len(self.payload):
+                            self.stamp("payload-sent")
                     pending = []
                 if not select.select([sock], [], [], 0.05)[0]:
                     continue
@@ -376,6 +392,7 @@ class World:
                 message = read_exact(sock, length)
                 if message[0] == 6:
                     index, begin, size = struct.unpack("!III", message[1:])
+                    self.stamp("first-block-requested")
                     self.blocks += 1
                     if (
                         index >= count
@@ -394,6 +411,8 @@ class World:
                         ]
                         send(7, struct.pack("!II", index, begin) + block)
                         self.sent += len(block)
+                        if self.sent >= len(self.payload):
+                            self.stamp("payload-sent")
         except (EOFError, OSError):
             pass
         finally:

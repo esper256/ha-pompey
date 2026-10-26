@@ -18,6 +18,7 @@ def run(*args, **kwargs):
 
 
 def prepare():
+    started = time.monotonic()
     links = json.loads(subprocess.check_output(["ip", "-j", "link"]))
     if {r["ifname"] for r in links} != {"lo"}:
         raise RuntimeError("Acceptance requires --network none (loopback only)")
@@ -34,7 +35,14 @@ def prepare():
             raise RuntimeError("Acceptance refuses external routes")
     Path("/etc/resolv.conf").write_text("nameserver 127.0.0.1\n")
     Path("/tmp/world").mkdir(exist_ok=True)
-    Path("/tmp/world/started").write_text(str(time.monotonic()))
+    Path("/tmp/world/started").write_text(str(started))
+    timings = {}
+
+    def stamp(name):
+        timings[name] = round(time.monotonic() - started, 3)
+        Path("/tmp/world/bootstrap-timings.json").write_text(json.dumps(timings))
+
+    stamp("isolation-verified")
     Path("/artifacts").mkdir(exist_ok=True)
     Path("/artifacts/isolation.json").write_text(
         json.dumps(
@@ -88,6 +96,7 @@ def prepare():
         stderr=subprocess.DEVNULL,
     )
     run("update-ca-certificates", stdout=subprocess.DEVNULL)
+    stamp("certificate-ready")
     client = subprocess.check_output(["wg", "genkey"]).strip()
     server = subprocess.check_output(["wg", "genkey"]).strip()
     client_pub = (
@@ -147,6 +156,7 @@ PersistentKeepalive = 1
             raise RuntimeError("Fixture namespace creation failed")
         time.sleep(0.05)
     run("ip", "link", "set", "fixture-peer", "netns", str(worker.pid))
+    stamp("fixtures-prepared")
     os.execv("/init", ["/init", "python3", "-u", "/tests/journey/journey.py"])
 
 

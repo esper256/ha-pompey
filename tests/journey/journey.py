@@ -16,7 +16,7 @@ from external import TITLE, MOVIE_ID, PEER_IP
 
 started = float(Path("/tmp/world/started").read_text())
 DEADLINE = started + 180
-timings = {}
+timings = json.loads(Path("/tmp/world/bootstrap-timings.json").read_text())
 world = None
 opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(CookieJar()))
 
@@ -146,10 +146,12 @@ def main():
         name="Synthetic source", enable=True, appProfileId=1, priority=25, tags=[]
     )
     prow("POST", "/indexer", indexer)
+    stamp("source-added")
     # Complete first-admin creation through the real public Plex sign-in API.
     call("POST", seerr + "/auth/plex", {"authToken": "synthetic-token"})
     settings = call("GET", seerr + "/settings/main")
     skey = settings["apiKey"]
+    stamp("seerr-account-ready")
 
     def search(method, path, body=None):
         return call(method, seerr + path, body, skey)
@@ -166,6 +168,7 @@ def main():
     stamp("household-setup-complete")
     results = search("GET", "/search?query=Pompey%20Foundation")
     assert any(row.get("id") == MOVIE_ID for row in results["results"]), results
+    stamp("catalogue-searched")
     request = search("POST", "/request", {"mediaType": "movie", "mediaId": MOVIE_ID})
     assert request.get("id"), request
     stamp("requested")
@@ -174,6 +177,7 @@ def main():
         "Request did not produce an actual BitTorrent block request",
         90,
     )
+    stamp("first-peer-block")
     torrents = qbit("torrents/info")
     assert len(torrents) == 1 and torrents[0]["progress"] < 1, torrents
     # Force the real Arr check while a piece is deliberately withheld.
@@ -219,6 +223,7 @@ def main():
     imported = wait(
         library_file, "Controller did not route PG media into the kid library", 90
     )
+    stamp("library-routed")
     assert hashlib.sha256(imported.read_bytes()).hexdigest() == expected, (
         "Imported bytes differ"
     )
@@ -288,6 +293,7 @@ def main():
             {
                 "success": True,
                 "timings": timings,
+                "externalTimings": evidence["timings"],
                 "payloadBytes": evidence["payloadBytes"],
                 "transferredBytes": evidence["sent"],
                 "sha256": expected,
