@@ -391,6 +391,15 @@ class Background:
                     "seasons",
                     movie["seasons"],
                 )
+            if row.get("unwantedFiles"):
+                library_files = {
+                    str(p) for p in Path(row["path"]).parent.rglob("*") if p.is_file()
+                }
+                require(
+                    library_files == {row["path"], row["subtitle"]},
+                    "unexpected library files",
+                    sorted(library_files),
+                )
             for path, key in [
                 (row["path"], "sha256"),
                 (row["subtitle"], "subtitleSha256"),
