@@ -14,7 +14,7 @@ Do not use CI watch commands, repeated polling, sleep loops, background watchers
 
 Fix failures already observed within the task's scope, run the relevant local checks, and push the fix without waiting for the new CI run. Revisit later results when the user requests it. Only wait for CI when the user explicitly asks to wait or a requested merge requires checking completion. Keep required CI checks intact; never bypass them to merge or release.
 
-The integration foundation replaces the previous matrices with one real-application journey, then expands household coverage. Build amd64 only. `CI required` remains the stable aggregate check. Dependency promotion and automatic release must wait until the expanded acceptance suite is enabled.
+The integration foundation replaces the previous matrices with a real-application movie batch, then expands household coverage. Keep one empty fresh-install journey; additional namespaced scenarios may share the running household or clone same-candidate cold state. Preserve and verify background requests/media, keep complete failure logs, and never retry away a failed scenario. Build amd64 only. `CI required` remains the stable aggregate check. Dependency promotion and automatic release must wait until the expanded acceptance suite is enabled.
 
 ## Runtime constraints
 

@@ -14,7 +14,7 @@ The basic journey uses the shipped image, real Seerr, Arr, Prowlarr, qBittorrent
 
 The runner proves a new isolated network namespace has no external interface or route before launching a downloader or peer. Local WireGuard fixtures may then be created inside that namespace. No external torrent traffic, discovery or host firewall/default-route changes are permitted.
 
-First prove one movie request reaches the correct library and measure preparation, startup, search, transfer and import separately. Preserve diagnostics and explicitly distinguish fixture failure, timeout and application failure. Do not use whole-suite retries. Keep focused logic tests for difficult boundaries and required isolated packet tests; remove tests that restate implementation.
+Keep one empty fresh-install movie journey, then reuse the running household for namespaced PG/R/unknown-rating variants, retaining and verifying earlier requests and media as background noise. Cold configured clones from the same candidate support scenarios that need separate global state. Measure preparation, startup, search, transfer and import separately. Preserve diagnostics and explicitly distinguish fixture failure, timeout and application failure. Do not use whole-suite retries. Keep focused logic tests for difficult boundaries and required isolated packet tests; remove tests that restate implementation.
 
 ## Delivery
 

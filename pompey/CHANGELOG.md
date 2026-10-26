@@ -11,7 +11,7 @@
 - Run applications and household maintenance as one unprivileged user; keep VPN setup privileged and engine DNS blocked outside the tunnel. Local applications start without a fresh VPN handshake.
 - Use Home Assistant cold backups for recovery, and pause request closeout when search history appears reset or bulk-deleted.
 - Add household diagnostics with explicit release searches and real Arr rejection reasons.
-- Replace the old disconnected integration suites with one real request-to-library journey, synthetic media and isolated external fixtures. Expand coverage before enabling automatic dependency promotion/releases.
+- Replace the old disconnected integration suites with a real fresh-install request-to-library journey and additional namespaced rating scenarios on the same household. Use TCP-only peers, shorter test scheduling intervals and optional cold configured clones. Expand coverage before enabling automatic dependency promotion/releases.
 
 ## 0.3.7
 

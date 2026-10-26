@@ -39,11 +39,22 @@ def main():
         "--runs",
         type=int,
         default=1,
-        help="Independent fresh journeys for timing; any failure stops the run",
+        help="Independent batches for timing; any failure stops the run",
+    )
+    parser.add_argument(
+        "--scenarios", type=int, default=3, help="Distinct household journeys per batch"
+    )
+    parser.add_argument(
+        "--layout",
+        choices=["shared", "cloned", "fresh"],
+        default="shared",
+        help="Reuse a running household, clone cold configured state, or start fresh per scenario",
     )
     args = parser.parse_args()
-    if args.runs < 1:
-        parser.error("--runs must be positive")
+    if args.runs < 1 or not 1 <= args.scenarios <= 100:
+        parser.error(
+            "--runs must be positive and --scenarios must be between 1 and 100"
+        )
     command = runtime()
     podman = "podman" in command
     results = ROOT / ".test-results"
@@ -106,7 +117,10 @@ def main():
     )
     if not args.journey_only:
         check_suite(run, test_image)
-    samples = [journey(run, command, test_image, results) for _ in range(args.runs)]
+    samples = [
+        batch(run, command, test_image, results, args.layout, args.scenarios)
+        for _ in range(args.runs)
+    ]
     summary = {
         "sharedSeconds": measurements,
         "journeys": samples,
@@ -157,33 +171,146 @@ def check_suite(run, test_image):
     )
 
 
-def journey(run, command, test_image, results):
+def batch(run, command, test_image, results, layout, count):
+    run_id = uuid.uuid4().hex[:10]
+    started = time.monotonic()
+    if layout == "shared":
+        containers = [
+            journey(
+                run, command, test_image, results, run_id, count, list(range(count))
+            )
+        ]
+    else:
+        first = journey(
+            run,
+            command,
+            test_image,
+            results,
+            run_id,
+            count,
+            [0],
+            export_seed=layout == "cloned" and count > 1,
+        )
+        containers = [first]
+        for index in range(1, count):
+            containers.append(
+                journey(
+                    run,
+                    command,
+                    test_image,
+                    results,
+                    run_id,
+                    count,
+                    [index],
+                    seed=first.get("configuredSeed"),
+                )
+            )
+    sample = {
+        "layout": layout,
+        "runId": run_id,
+        "containers": containers,
+        "wallSeconds": round(time.monotonic() - started, 3),
+    }
+    print(
+        "BATCH",
+        layout,
+        count,
+        "scenarios:",
+        sample["wallSeconds"],
+        "seconds",
+        flush=True,
+    )
+    return sample
+
+
+def journey(
+    run,
+    command,
+    test_image,
+    results,
+    run_id,
+    count,
+    selected,
+    seed=None,
+    export_seed=False,
+):
     name = "pompey-journey-" + uuid.uuid4().hex[:10]
     destination = results / name
     destination.mkdir()
     started = time.monotonic()
+    snapshot_seconds = restore_seconds = 0
+    flags = [
+        "--name",
+        name,
+        "--network",
+        "none",
+        "--cap-add",
+        "NET_ADMIN",
+        "--cap-add",
+        "SYS_ADMIN",
+        "--security-opt",
+        "label=disable",
+        "-v",
+        str(destination) + ":/artifacts",
+        "-e",
+        "POMPEY_TEST_RUN_ID=" + run_id,
+        "-e",
+        "S6_SERVICES_GRACETIME=30000",
+        "-e",
+        "POMPEY_TEST_CASES=" + str(count),
+        "-e",
+        "POMPEY_TEST_SELECTED_CASES=" + json.dumps(selected),
+        "-e",
+        "POMPEY_JOB_INTERVALS=" + json.dumps({"configuration": 2, "routing": 1}),
+    ]
     try:
-        run(
-            [
-                "run",
-                "--rm",
-                "--name",
-                name,
-                "--network",
-                "none",
-                "--cap-add",
-                "NET_ADMIN",
-                "--cap-add",
-                "SYS_ADMIN",
-                "--security-opt",
-                "label=disable",
-                "-v",
-                str(destination) + ":/artifacts",
-                test_image,
-            ],
-            240,
-            log=destination / "container.log",
-        )
+        if seed:
+            run(["create", *flags, "-e", "POMPEY_TEST_CONFIGURED=1", test_image], 60)
+            before = time.monotonic()
+            for folder in ["data", "config", "media"]:
+                with (Path(seed) / (folder + ".tar")).open("rb") as archive:
+                    subprocess.run(
+                        command + ["cp", "-", name + ":/"],
+                        stdin=archive,
+                        check=True,
+                        timeout=60,
+                    )
+            restore_seconds = round(time.monotonic() - before, 3)
+            run(
+                ["start", "--attach", name],
+                240 + 60 * len(selected),
+                log=destination / "container.log",
+            )
+        else:
+            run(
+                ["run", *flags, test_image],
+                240 + 60 * len(selected),
+                log=destination / "container.log",
+            )
+        report = json.loads((destination / "result.json").read_text())
+        assert report["success"], report
+        if export_seed:
+            # PID 1 has exited: no app or controller can still write these databases.
+            text = (destination / "container.log").read_text()
+            if any(
+                name + " exited (" in text
+                for name in ["Radarr", "Sonarr", "Prowlarr", "Seerr", "qBittorrent"]
+            ):
+                raise RuntimeError(
+                    "Refusing configured state after an unclean engine shutdown"
+                )
+            seed = destination / "configured-state"
+            seed.mkdir()
+            before = time.monotonic()
+            for folder in ["data", "config", "media"]:
+                with (seed / (folder + ".tar")).open("wb") as archive:
+                    subprocess.run(
+                        command + ["cp", name + ":/" + folder, "-"],
+                        stdout=archive,
+                        check=True,
+                        timeout=60,
+                    )
+            snapshot_seconds = round(time.monotonic() - before, 3)
     finally:
         subprocess.run(
             command + ["rm", "--force", name],
@@ -191,27 +318,51 @@ def journey(run, command, test_image, results):
             stderr=subprocess.DEVNULL,
         )
         print("Acceptance artifacts:", destination, flush=True)
-    report = json.loads((destination / "result.json").read_text())
-    assert report["success"], report
     elapsed = round(time.monotonic() - started, 3)
-    stages = {}
-    previous = 0
-    print("Journey section durations (seconds):", flush=True)
-    for name, cumulative in report["timings"].items():
-        stages[name] = round(cumulative - previous, 3)
-        previous = cumulative
-        print(f"  {name:30} {stages[name]:7.3f}", flush=True)
-    # Includes container launch, teardown and CLI overhead; separate from assertions.
-    overhead = round(elapsed - previous, 3)
-    print(f"  {'container lifecycle overhead':30} {overhead:7.3f}", flush=True)
-    print(f"  {'total container wall time':30} {elapsed:7.3f}", flush=True)
+    print(
+        "Startup:", report["timings"]["household-setup-complete"], "seconds", flush=True
+    )
+    for case in report["cases"]:
+        print(
+            "CASE",
+            case["prefix"],
+            "certification",
+            repr(case["certification"]),
+            "seconds",
+            case["timings"]["correct-library-verified"],
+            "prior titles preserved",
+            case["priorTitlesVerified"],
+            flush=True,
+        )
+        previous = 0
+        for stage, cumulative in case["timings"].items():
+            print(f"  {stage:30} {cumulative - previous:7.3f}", flush=True)
+            previous = cumulative
+    overhead = round(
+        elapsed
+        - report["timings"]["batch-complete"]
+        - snapshot_seconds
+        - restore_seconds,
+        3,
+    )
+    print(
+        "Container lifecycle overhead:",
+        overhead,
+        "seconds; wall time:",
+        elapsed,
+        flush=True,
+    )
     sample = {
         "artifacts": str(destination),
-        "stageSeconds": stages,
-        "externalTimings": report["externalTimings"],
+        "startupSeconds": report["timings"]["household-setup-complete"],
+        "cases": report["cases"],
         "lifecycleOverheadSeconds": overhead,
         "wallSeconds": elapsed,
+        "snapshotExportSeconds": snapshot_seconds,
+        "snapshotRestoreSeconds": restore_seconds,
     }
+    if export_seed:
+        sample["configuredSeed"] = str(seed)
     (destination / "timing.json").write_text(json.dumps(sample, indent=2))
     return sample
 

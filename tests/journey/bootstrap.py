@@ -1,8 +1,6 @@
 """Prepare only the isolated external world, then exec the image's actual /init."""
 
 import json
-import gzip
-import hashlib
 import os
 from pathlib import Path
 import subprocess
@@ -10,7 +8,8 @@ import sys
 import time
 
 sys.path.insert(0, "/tests/journey")
-from external import PEER_IP, TITLE
+from external import PEER_IP
+from catalogue import prepare_media
 
 
 def run(*args, **kwargs):
@@ -135,20 +134,7 @@ PersistentKeepalive = 1
 """
     Path("/config/wireguard/wg0.conf").write_text(config)
     Path("/config/wireguard/wg0.conf").chmod(0o600)
-    source = Path("/tmp/world") / TITLE
-    source.mkdir()
-    fixture = Path("/tests/journey/fixtures")
-    media = gzip.decompress((fixture / "movie.mkv.gz").read_bytes())
-    metadata = json.loads((fixture / "movie.json").read_text())
-    if (
-        len(media) != metadata["bytes"]
-        or hashlib.sha256(media).hexdigest() != metadata["sha256"]
-    ):
-        raise RuntimeError("Synthetic media fixture is corrupted")
-    (source / (TITLE + ".mkv")).write_bytes(media)
-    (source / (TITLE + ".en.srt")).write_text(
-        "1\n00:00:00,000 --> 00:00:02,000\nSynthetic acceptance subtitle\n"
-    )
+    prepare_media(Path("/tmp/world"))
     worker = subprocess.Popen(["python3", "-u", "/tests/journey/world.py"])
     deadline = time.monotonic() + 10
     while not Path("/tmp/world/namespace-ready").exists():
@@ -157,7 +143,16 @@ PersistentKeepalive = 1
         time.sleep(0.05)
     run("ip", "link", "set", "fixture-peer", "netns", str(worker.pid))
     stamp("fixtures-prepared")
-    os.execv("/init", ["/init", "python3", "-u", "/tests/journey/journey.py"])
+    os.execv(
+        "/init",
+        [
+            "/init",
+            "/command/with-contenv",
+            "python3",
+            "-u",
+            "/tests/journey/journey.py",
+        ],
+    )
 
 
 if __name__ == "__main__":

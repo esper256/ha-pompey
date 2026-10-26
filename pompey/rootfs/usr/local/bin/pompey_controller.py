@@ -169,7 +169,19 @@ def main():
             120,
         ),
     ]
+    # The acceptance harness accelerates scheduling, not job bodies or deadlines.
+    # Normal installations retain the intervals above.
+    intervals = json.loads(os.environ.get("POMPEY_JOB_INTERVALS", "{}"))
+    if not isinstance(intervals, dict) or intervals.keys() - {j.name for j in jobs}:
+        raise ValueError("Unknown controller interval override")
     for job in jobs:
+        if job.name in intervals:
+            value = intervals[job.name]
+            if type(value) not in {int, float} or not 1 <= value <= 3600:
+                raise ValueError(
+                    "Controller intervals must be between 1 and 3600 seconds"
+                )
+            job.interval = value
         if job.due == 0:
             job.due = time.monotonic()
     with ThreadPoolExecutor(max_workers=2) as pool:

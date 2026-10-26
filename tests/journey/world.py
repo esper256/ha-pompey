@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 import subprocess
 import time
-from external import World, TITLE, PEER_IP
+from external import World, PEER_IP
 
 
 def run(*args):
@@ -49,7 +49,7 @@ def main():
     )
     run("ip", "link", "set", "wg-fixture", "up")
     run("ip", "route", "add", "10.77.0.1/32", "dev", "wg-fixture")
-    world = World(Path("/tmp/world") / TITLE)
+    world = World(Path("/tmp/world"))
     world.start(
         "/usr/local/share/ca-certificates/pompey-test.crt", "/tmp/world/key.pem"
     )

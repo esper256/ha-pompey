@@ -3,5 +3,6 @@
   "bytes": 16808169,
   "durationSeconds": 60,
   "width": 1920,
-  "height": 1080
+  "height": 1080,
+  "identityPaddingOffset": 1024
 }
