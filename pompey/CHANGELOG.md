@@ -11,7 +11,8 @@
 - Run applications and household maintenance as one unprivileged user; keep VPN setup privileged and engine DNS blocked outside the tunnel. Local applications start without a fresh VPN handshake.
 - Use Home Assistant cold backups for recovery, and pause request closeout when search history appears reset or bulk-deleted.
 - Add household diagnostics with explicit release searches and real Arr rejection reasons.
-- Replace the old disconnected integration suites with a real fresh-install request-to-library journey and additional namespaced rating scenarios on the same household. Use TCP-only peers, shorter test scheduling intervals and optional cold configured clones. Expand coverage before enabling automatic dependency promotion/releases.
+- Verify real movie and TV imports, selected seasons, language/anime preferences, quality profiles, unwanted-file cleanup, request deletion, same-container restart and configured-clone preservation. Keep automatic dependency promotion disabled pending broader and forward-upgrade coverage.
+- Known issue: an interrupted download can remain stalled after VPN connectivity recovers. Local applications remain available and the kill switch stays active. The strict recovery scenario runs as advisory CI for this release; other acceptance and packet checks remain required.
 
 ## 0.3.7
 

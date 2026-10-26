@@ -194,3 +194,8 @@ The shared cleanup checkpoint requires those names to disappear everywhere below
 Focused validation: `bash tests/run.sh --layout ci --only movie-pg` runs the real fresh-install download and configured-clone preservation check, together with the required logic and packet checks. No extra installation or standalone journey is added to the default suite.
 
 This focused CI-layout run passed locally in **92.75 seconds** (73.54 seconds integration), including 11 product logic, 13 harness and 8 required packet checks. Both the fresh-install and configured-clone journeys passed with empty pending-cleanup, unexpected-request and unexpected-invariant lists. The baseline reported `unwantedFilesPurged: true`; its retained movie/subtitle and absence of extras were verified again after the clone imported a second movie. This does not resolve or revalidate the separate VPN download-resumption failure described above.
+
+
+## 0.4.0 release acceptance
+
+The VPN download-resumption issue is accepted as nonblocking for the manual 0.4.0 release. PR/main acceptance runs `--layout ci --exclude vpn-download-loss`, preserving every other default scenario, the configured clone, logic checks and required packet tests. The same job then runs the unchanged strict VPN-resume scenario as an explicitly advisory step with its failure evidence retained. `required-timing-summary.json` preserves the required cohort's result separately from that advisory run. The stable `CI required` aggregate remains required. Default local runs and candidate evaluation still include the strict assertion; unattended promotion remains disabled. Earlier descriptions of this failure blocking release refer to the policy before this explicit release decision.

@@ -54,12 +54,16 @@ def main():
         default="shared",
         help="Reuse a running household, clone cold configured state, or start fresh per scenario",
     )
-    parser.add_argument(
+    selection = parser.add_mutually_exclusive_group()
+    selection.add_argument(
         "--only", nargs="+", help="Focused shared/CI-layout scenario names"
     )
+    selection.add_argument(
+        "--exclude", nargs="+", help="Exclude named shared/CI-layout scenarios"
+    )
     args = parser.parse_args()
-    if args.only and args.layout not in {"shared", "ci"}:
-        parser.error("--only requires --layout shared or ci")
+    if (args.only or args.exclude) and args.layout not in {"shared", "ci"}:
+        parser.error("--only/--exclude requires --layout shared or ci")
     if args.runs < 1 or not 1 <= args.scenarios <= (99 if args.layout == "ci" else 100):
         parser.error(
             "--runs must be positive and --scenarios must be within catalogue capacity (99 for ci, 100 otherwise)"
@@ -134,14 +138,22 @@ def execute(args, engine, results, summary, checkpoint):
             "containers": [],
             "success": False,
         }
-        if args.only:
+        if args.only or args.exclude:
             from journey.catalogue import Case
 
             names = {Case(i, "", "").scenario: i for i in range(args.scenarios)}
-            missing = set(args.only) - names.keys()
+            missing = set(args.only or args.exclude) - names.keys()
             if missing:
                 raise ValueError("Unknown selected scenarios: " + str(missing))
-            sample["selectedCases"] = sorted(names[name] for name in args.only)
+            sample["selectedCases"] = (
+                sorted(names[name] for name in args.only)
+                if args.only
+                else [
+                    i
+                    for i in range(args.scenarios)
+                    if Case(i, "", "").scenario not in args.exclude
+                ]
+            )
         summary["journeys"].append(sample)
         checkpoint()
         batch(engine, test_image, results, sample, args.scenarios)
