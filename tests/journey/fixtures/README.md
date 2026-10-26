@@ -13,3 +13,9 @@ ffmpeg -hide_banner -loglevel error -f lavfi -i color=black:s=1920x1080:r=1/15 \
   -f lavfi -i anullsrc=r=8000:cl=mono -t 60 -c:v ffv1 -c:a flac \
   -reserve_index_space 16777216 synthetic-movie.mkv
 ```
+
+`movie-480p.mkv.gz` is a second valid one-minute fixture at 854×480 with the same reserved-void technique. It lets the Default/Anything acceptance checks distinguish genuinely lower-resolution media. Its JSON records its own exact hash, size and padding boundaries. It was authored once with the host's FFmpeg using `color=black:s=854x480:r=1/15`, silent 8 kHz mono audio, FFV1/FLAC and 16 MiB of reserved index space. Neither runtime nor CI installs FFmpeg.
+
+TV offers contain one or two individually named one-minute episode files and matching subtitles. Every offered alternative has its own torrent name, hash and payload identity. A pack's reported size is the sum of its actual files; no advertised multi-gigabyte sizes are substituted.
+
+The `tv-*.mkv.gz` fixtures contain real silent FLAC tracks tagged `eng`, `jpn`, `deu`, `jpn+eng`, or `eng+deu`. Dual-audio offers contain two tracks, rather than simply claiming dual audio in their names. Native Sonarr media probing asserts the imported stream count. All variants use the same one-minute 1080p FFV1/padding recipe and have separately verified manifests. The identity region combines the case prefix with a digest of the offer and episode filename, so every episode and alternative has distinct bytes.

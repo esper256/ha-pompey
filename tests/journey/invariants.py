@@ -71,10 +71,10 @@ class CommandHistory:
 
 
 class Invariants:
-    def __init__(self, client, background):
+    def __init__(self, client, background, *, since=None):
         self.client = client
         self.background = background
-        self.since = client.ready_at
+        self.since = client.ready_at if since is None else since
         self.commands = CommandHistory()
         self.checkpoints = []
         # Retain startup events too, but only initialized-household failures are
@@ -120,7 +120,11 @@ class Invariants:
     def pending_cleanup(self):
         client = self.client
         torrents = {t["hash"].lower(): t for t in client.qbit("torrents/info")}
-        queue = client.arr("GET", "/queue?page=1&pageSize=100")["records"]
+        queues = {"radarr": client.arr("GET", "/queue?page=1&pageSize=100")["records"]}
+        if any(r.get("kind") == "sonarr" for r in self.background.ledger):
+            queues["sonarr"] = client.sonarr("GET", "/queue?page=1&pageSize=100")[
+                "records"
+            ]
         leftovers = [
             p
             for root in ["By Rating", "complete", "manual"]
@@ -129,11 +133,14 @@ class Invariants:
         ]
         pending = []
         for row in self.background.ledger:
+            kind = row.get("kind", "radarr")
+            queue = queues[kind]
+            id_key = "seriesId" if kind == "sonarr" else "movieId"
             for condition, field in [
                 (row["infoHash"] not in torrents, "torrent retained"),
                 (
                     not any(
-                        q.get("movieId") == row["arrId"]
+                        q.get(id_key) == row["arrId"]
                         or (q.get("downloadId") or "").lower() == row["infoHash"]
                         for q in queue
                     ),
@@ -183,6 +190,8 @@ class Invariants:
         self.assert_events()
         pending_owners = {r["owner"] for r in pending}
         for case in client.evidence.data["cases"]:
+            if "infoHash" not in case:
+                continue
             case["stopSharingVerified"] = case["prefix"] not in pending_owners
             save_json(client.evidence.root / (case["prefix"] + ".json"), case)
         self.checkpoints.append(
@@ -190,7 +199,8 @@ class Invariants:
                 "label": label,
                 "fullChecksums": full,
                 "freshHealth": fresh_since is not None,
-                "titlesVerified": len(ledger),
+                "titlesVerified": len({r["prefix"] for r in ledger}),
+                "filesVerified": len(ledger),
                 "pendingCleanup": pending,
                 "seconds": round(time.monotonic() - started, 3),
             }

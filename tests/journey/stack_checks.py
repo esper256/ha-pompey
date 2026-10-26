@@ -1,6 +1,8 @@
 """Observe the shipped controller, ingress, firewall and real outage/reconnect path."""
 
 import json
+from pathlib import Path
+import re
 import subprocess
 import sys
 import time
@@ -59,9 +61,17 @@ def assert_firewall(client):
 
 
 def outage(client):
+    previous = client.session.deadline
+    try:
+        client.session.deadline = Deadline(previous.remaining(90))
+        _outage(client)
+    finally:
+        client.session.deadline = previous
+
+
+def _outage(client):
     started = time.monotonic()
     client.evidence.stamp("vpn-outage-begin")
-    client.session.deadline = Deadline(90)
     assert_firewall(client)
     assert probe(PEER_IP, 53, "dns")["connected"], (
         "VPN DNS did not answer the engine identity"
@@ -123,3 +133,67 @@ def outage(client):
         "detection": "remote link loss plus native peer reset",
     }
     client.evidence.checkpoint()
+
+
+def rotate(client):
+    started = time.monotonic()
+    old_public = subprocess.check_output(
+        ["wg", "show", "wg0", "public-key"], text=True
+    ).strip()
+    private = subprocess.check_output(["wg", "genkey"], text=True).strip()
+    public = subprocess.check_output(["wg", "pubkey"], input=private, text=True).strip()
+    path = Path("/config/wireguard/wg0.conf")
+    config = path.read_text()
+    config = re.sub(r"(?m)^PrivateKey\s*=.*", "PrivateKey = " + private, config)
+    config = re.sub(r"(?m)^Endpoint\s*=.*", "Endpoint = 198.18.0.2:51822", config)
+    Path("/tmp/world/rotation.json").write_text(
+        json.dumps({"oldPublicKey": old_public, "publicKey": public, "port": 51822})
+    )
+    assert_firewall(client)
+    fixture_control("rotate")
+    response = client.session.call(
+        "POST", "http://127.0.0.1:8099/setup/vpn", {"config": config}
+    )
+    assert response.get("ok"), response
+
+    def changed():
+        return (
+            subprocess.run(
+                ["wg", "show", "wg0", "public-key"], capture_output=True, text=True
+            ).stdout.strip()
+            == public
+        )
+
+    client.wait(changed, "Saved WireGuard rotation was not applied", 45)
+    client.healthy(time.time())
+    assert probe(PEER_IP, 53, "dns")["connected"], "Rotated VPN DNS failed"
+    assert_firewall(client)
+    client.evidence.active["vpnRotation"] = {
+        "seconds": round(time.monotonic() - started, 3),
+        "publicKeyChanged": True,
+        "endpointPort": 51822,
+    }
+
+
+def rotation_scenario(client, case, background, _ledger_file):
+    """Rotation proves the saved configuration and engine network access.
+
+    In-flight transfer recovery is independently asserted by vpn-download-loss.
+    """
+    client.evidence.begin(case)
+    rotate(client)
+    rows = client.arr("GET", "/movie/lookup?term=tmdb:" + str(case.movie_id))
+    assert any(
+        row["tmdbId"] == case.movie_id and row["title"] == case.title for row in rows
+    ), rows
+    from urllib.parse import quote
+
+    results = client.search("GET", "/search?query=" + quote(case.title))
+    assert any(row.get("id") == case.movie_id for row in results["results"]), results
+    assert client.peer(case)["blocks"] == 0, (
+        "Metadata lookup unexpectedly grabbed a torrent"
+    )
+    client.evidence.active.update(
+        kind="network",
+        priorTitlesVerified=len({r["prefix"] for r in background.ledger}),
+    )

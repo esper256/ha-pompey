@@ -41,7 +41,7 @@ def main():
         "set",
         "wg-fixture",
         "listen-port",
-        "51821",
+        Path("/tmp/world/server-port").read_text().strip(),
         "private-key",
         "/tmp/world/server.key",
         "peer",

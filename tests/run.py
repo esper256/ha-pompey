@@ -43,7 +43,10 @@ def main():
         help="Independent batches for timing; any failure stops the run",
     )
     parser.add_argument(
-        "--scenarios", type=int, default=4, help="Distinct household journeys per batch"
+        "--scenarios",
+        type=int,
+        default=12,
+        help="Distinct household journeys per batch",
     )
     parser.add_argument(
         "--layout",
@@ -51,7 +54,12 @@ def main():
         default="shared",
         help="Reuse a running household, clone cold configured state, or start fresh per scenario",
     )
+    parser.add_argument(
+        "--only", nargs="+", help="Focused shared/CI-layout scenario names"
+    )
     args = parser.parse_args()
+    if args.only and args.layout not in {"shared", "ci"}:
+        parser.error("--only requires --layout shared or ci")
     if args.runs < 1 or not 1 <= args.scenarios <= (99 if args.layout == "ci" else 100):
         parser.error(
             "--runs must be positive and --scenarios must be within catalogue capacity (99 for ci, 100 otherwise)"
@@ -126,6 +134,14 @@ def execute(args, engine, results, summary, checkpoint):
             "containers": [],
             "success": False,
         }
+        if args.only:
+            from journey.catalogue import Case
+
+            names = {Case(i, "", "").scenario: i for i in range(args.scenarios)}
+            missing = set(args.only) - names.keys()
+            if missing:
+                raise ValueError("Unknown selected scenarios: " + str(missing))
+            sample["selectedCases"] = sorted(names[name] for name in args.only)
         summary["journeys"].append(sample)
         checkpoint()
         batch(engine, test_image, results, sample, args.scenarios)
@@ -153,7 +169,7 @@ def batch(engine, test_image, results, sample, count):
                 results,
                 sample,
                 count + (sample["layout"] == "ci"),
-                list(range(count)),
+                sample.get("selectedCases", list(range(count))),
                 export_seed=sample["layout"] == "ci",
             )
             if sample["layout"] == "ci":
@@ -193,7 +209,7 @@ def batch(engine, test_image, results, sample, count):
     print(
         "BATCH",
         sample["layout"],
-        count + (sample["layout"] == "ci"),
+        sum(len(c.get("cases", [])) for c in sample["containers"]),
         "scenarios:",
         sample["wallSeconds"],
         "seconds",
@@ -262,6 +278,33 @@ def journey(
                 log=destination / "container.log",
             )
         report = json.loads((destination / "result.json").read_text())
+        if report.get("restartRequired"):
+            assert report.get("phaseComplete") and not report.get("error"), report
+            engine.assert_clean_stop(destination)
+            for filename in [
+                "container.log",
+                "external-requests.json",
+                "unexpected-requests.json",
+                "result.json",
+            ]:
+                (destination / filename).rename(destination / ("boot1-" + filename))
+            sample["containerRestarts"] = 1
+            run(
+                ["start", "--attach", name],
+                STARTUP_TIMEOUT
+                + SCENARIO_TIMEOUT
+                * (
+                    sum(c["status"] in {"waiting", "paused"} for c in report["cases"])
+                    + len(selected)
+                    - len(report["cases"])
+                )
+                + 180,
+                log=destination / "container.log",
+            )
+            report = json.loads((destination / "result.json").read_text())
+            assert not report.get("restartRequired"), (
+                "Unexpected second restart request"
+            )
         assert report["success"], report
         engine.assert_clean_stop(destination)
         if export_seed:
@@ -309,7 +352,7 @@ def journey(
             "certification",
             repr(case["certification"]),
             "seconds",
-            case["timings"]["correct-library-verified"],
+            case["durationSeconds"],
             "prior titles preserved",
             case["priorTitlesVerified"],
             flush=True,

@@ -160,12 +160,17 @@ class Evidence:
     def stamp(self, name):
         target = self.active if self.active else self.data
         origin = target["started"] if self.active else self.started
-        target["timings"][name] = round(time.monotonic() - origin, 3)
+        key = (
+            "restart-" + name
+            if not self.active and self.data.get("resumedContainer")
+            else name
+        )
+        target["timings"][key] = round(time.monotonic() - origin, 3)
         print(
             "TIMING",
             self.active["prefix"] if self.active else "startup",
             name,
-            target["timings"][name],
+            target["timings"][key],
             flush=True,
         )
         self.checkpoint()
@@ -173,6 +178,7 @@ class Evidence:
     def begin(self, case):
         self.active = {
             "prefix": case.prefix,
+            "scenario": getattr(case, "scenario", "movie"),
             "tmdbId": case.movie_id,
             "certification": case.certification,
             "library": case.library,
@@ -187,7 +193,10 @@ class Evidence:
 
     def finish(self):
         self.active["status"] = "passed"
-        self.stamp("correct-library-verified")
+        self.active["durationSeconds"] = round(
+            time.monotonic() - self.active["started"], 3
+        )
+        self.stamp("outcome-verified")
         self.active = None
 
     def fail(self, exc):

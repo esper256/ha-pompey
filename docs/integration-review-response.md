@@ -22,16 +22,16 @@ The late-certification case temporarily stops the real controller service, impor
 
 | Household promise | Current position |
 | --- | --- |
-| TV requests, season packs, kid/general TV routing and season monitoring | Planned; Sonarr setup/source health is checked, imports are not yet covered. |
+| TV requests, season packs, kid/general TV routing and season monitoring | Implemented assertions for single episodes, two-episode packs, selected seasons, kid/general routing and preserved episode/season monitoring. |
 | Non-admin household requests and automatic approval permissions | Planned; the current wizard/request path uses the first administrator. |
 | Sharing to ratio and for one day, copy/hardlink behavior | Planned; stop-sharing torrent/queue/payload cleanup is now asserted. |
-| Request deletion/decline, overlapping seasons and history-reset brake | Planned end to end; difficult ownership/history boundaries retain focused logic tests. |
-| Explicit libraries and Max/other profile selections | Planned; current films exercise By Rating and the actual default quality profile. |
+| Request deletion/decline, overlapping seasons and history-reset brake | Deletion of completed movie/TV requests and a partial movie is exercised. Pending-request decline, overlaps and history-reset brake remain stretch goals; difficult ownership/history boundaries retain focused logic tests. |
+| Explicit libraries and Max/other profile selections | Default rejects actual 480p and Anything imports it. Explicit libraries and Max remain stretch goals. |
 | Direct grabs, unmatched/rejected releases and ambiguous receipts | Planned end to end; conservative receipt safety retains focused logic tests. |
 | Blocked-request diagnostics and rejected-release explanations | Planned; linked happy-path diagnostics and explicit real search already run through nginx. |
-| Existing-state restart and reconciliation | Now run in CI through a same-candidate cold clone; not an HA restore or cross-version migration proof. |
-| VPN paste/rotation, boot without a tunnel, prolonged outages | Planned; the new fault checks continued local access and native reconnect after startup. |
-| NAT-PMP and anime behavior | Planned. Configuring profiles does not prove those journeys. |
+| Existing-state restart and reconciliation | A declared same-container stop/start preserves waiting, partial and completed state; a same-candidate cold clone also remains in CI. Neither proves HA restore or cross-version migration. |
+| VPN paste/rotation, boot without a tunnel, prolonged outages | Rotation and in-flight VPN loss have dedicated assertions. Startup without a tunnel and prolonged-outage behavior remain stretch goals. |
+| NAT-PMP and anime behavior | Anime native pack/dual-audio selection and real episode import are exercised. NAT-PMP remains stretch coverage. |
 | Forward upgrade of existing application databases/configuration | Required before unattended promotion; not proven by fresh installs or same-candidate clones. |
 
 No item is dropped merely because it sounds slow. Ratio/time policies need acceleration at a declared time/ratio boundary with small real payloads; longer-lived behavior needs a separate targeted design. A 24-hour wall-clock wait is not an acceptable default CI implementation. Each added scenario still needs honest assertions about what it accelerates and what it proves.
@@ -51,3 +51,7 @@ Of the earlier 12 issues: 1/2/5/6 gain DNS, process-tree, Ready, clean-stop and 
 `bash tests/run.sh --layout ci` passed locally with host Podman: 9 product logic checks, 9 harness checks, 8 required packet tests, four shared real movie journeys, a real VPN fault/reconnect and one configured-clone journey. Total with cached layers: 132.61 seconds. Both HTTP/DNS unexpected-request lists were empty. The earlier focused fresh/outage/clone check also passed; timing and coverage limits are recorded in [testing.md](testing.md). Docker/HAOS AppArmor and real Supervisor/NAS/Plex behavior are not claimed as locally validated.
 
 The shared-invariant follow-up measured 123.71 seconds for the full CI layout (104.50 seconds integration), versus 132.61/113.72 before consolidation and cleanup overlap. Ordinary checkpoints cost about 0.1 seconds. All five journeys finished with cleanup verified; controller/source evidence and owned native command history remain cumulative. Exact scope, regressions and timing limits are documented in the testing guide.
+
+The first household expansion and remaining boundaries are recorded in [the numbered scenario catalogue](integration-scenarios.md) and [testing guide](testing.md). Active assertions are not a claim that every new product behavior currently passes.
+
+The expanded focused CI cohort passed twelve reported journeys (eleven shared outcomes plus a configured-clone control) in 265.70 seconds with cached layers, including 11 product logic, 13 harness and 8 required packet checks. The separate in-flight VPN-loss assertion currently fails its 60-second download-completion wait after successful tunnel recovery. It remains required in default acceptance; see the testing guide for the observation, reproduction command and unresolved diagnosis. The passing focused cohort does not establish full release readiness. Approved Seerr requests cannot be declined through its public API; completed-content closeout uses deletion, and genuinely pending-request decline remains stretch coverage.

@@ -2,7 +2,7 @@
 
 ## Run the suite
 
-Run `bash tests/run.sh`. It builds the amd64 product image once, adds an isolated test-tool directory, runs focused logic and required packet tests, then executes a fresh-install movie journey followed by three journeys on the same running household. Docker or Podman is required. In Distrobox the runner detects `distrobox-host-exec podman`; override with `POMPEY_CONTAINER_COMMAND` when needed. Use `--skip-build --image IMAGE` to test an already-built product image.
+Run `bash tests/run.sh`. It builds the amd64 product image once, adds an isolated test-tool directory, runs focused logic and required packet tests, then executes the twelve named household scenarios, starting with a fresh installation and retaining shared state. Docker or Podman is required. In Distrobox the runner detects `distrobox-host-exec podman`; override with `POMPEY_CONTAINER_COMMAND` when needed. Use `--skip-build --image IMAGE` to test an already-built product image.
 
 The checked-in synthetic media fixture is compressed and verified on extraction; CI does not need FFmpeg. Test tools have their own dynamic loader and libraries under `/test-tools`; installing them does not upgrade a shipped runtime library. The image's `/init`, cont-init, service scripts, controller job bodies and actual pinned applications run in the journey. Tests set qBittorrent to TCP-only because the synthetic peer supports TCP, and set all four controller intervals to two seconds. Production defaults, job deadlines, failure backoff, locks and quality profiles are unchanged. No application API is faked and no application binary is patched.
 
@@ -20,11 +20,11 @@ Artifacts under `.test-results/` include per-scenario prefixes/IDs, stage timing
 
 ### State reuse and timing
 
-The default `bash tests/run.sh` uses `--layout shared --scenarios 4`: one fresh install, then independent movie identities on the same running apps. This avoids repeated startup, configuration and shutdown while preserving realistic background state. Scenarios currently run sequentially; global settings are deliberately shared, and a future scenario changing them must declare and restore its changes. Destructive/restart scenarios can choose a separate configured clone.
+The default `bash tests/run.sh` uses `--layout shared --scenarios 12`: one fresh install, then the named movie, TV, request-closeout, same-container restart and VPN scenarios in [the household catalogue](integration-scenarios.md). This avoids repeated startup, configuration and shutdown while preserving realistic background state. Scenarios currently run sequentially; global settings are deliberately shared, and a scenario changing them must declare its changes and either restore them or carry the new expected state into subsequent checks. VPN rotation deliberately persists the replacement configuration into the cold clone. Destructive/restart scenarios can choose a separate configured clone.
 
 `--layout cloned` first runs the complete fresh-install journey, waits for the container to stop, and exports `/data`, `/config` and `/media` as tar streams. Every completed journey is checked for an unclean engine shutdown; an unclean shutdown rejects the snapshot. The shipped image sets the same 30-second service grace and 3-second kill grace as acceptance, within Supervisor’s 300-second stop timeout. Each additional scenario imports a copy into a new container before startup. The clone retains the first title as background noise, then verifies that title/request/files while exercising a new identity. The seed is created using the current candidate during the current batch, never checked in or reused across engine versions. This is test state reuse, not a product database-recovery or migration guarantee. Every new container independently verifies network isolation and builds its local WireGuard fixture before starting clients.
 
-CI uses `--layout ci`: the four shared cases plus one new movie in a cold configured clone, verifying all four retained titles. It exercises a second boot and reconciliation, with explicit test-only downloader settings retained; it is not a cross-version upgrade test.
+CI uses `--layout ci`: the twelve shared scenarios plus one new movie in a cold configured clone, verifying the retained movie/TV files, request states and monitoring ledger. It exercises a second boot and reconciliation, with explicit test-only downloader settings retained; it is not a cross-version upgrade test.
 
 Use `--layout fresh` for a fresh-install control per scenario. Use `--runs 3` to repeat independent batches for timing; this never retries a failure. All layouts share one product/test image build and one set of logic/packet checks within a command. For focused measurements after the full suite has passed:
 
@@ -104,7 +104,7 @@ Use `household.wait` for eventual observations and `wait_command` for real nativ
 
 Checkpoints update `result.json` and each case report throughout execution, with explicit running/passed/failed states. Failed runs retain the original exception, last completed checkpoint, partial timing summary and read-only native movie/queue/command/history/blocklist/source/torrent/request snapshots and real log tails. Categories distinguish fixture contracts, timeout stages, native command failure, HTTP failure, assertion and background ownership/field regressions. Diagnostic collection has a separate ten-second HTTP budget and cannot replace the original failure. Complete logs remain artifacts; successful console output stays compact. Check workers and household containers both have named, bounded cleanup, including after timeout.
 
-The shared invariant checkpoint verifies all owned titles, including the just-completed journey, once per journey. It also checks all owned torrent/queue/staging cleanup and the native command history for earlier titles, so late failures remain attributable. Configured clones get an initial baseline check; batch completion and VPN recovery retain full checksum sweeps. Background verification batches native API reads and caches file checksums only while device/inode/size/mtime/ctime remain unchanged. Every batch still ends with a full checksum pass. Global setting changes must be explicit and restored by the owning scenario; changes intentionally made to an earlier owned object must also update that object's expected evidence. The current numeric `--scenarios` option repeats movie rating parameters for timing; it does not claim coverage of distinct unimplemented features.
+The shared invariant checkpoint verifies all owned titles, including the just-completed journey, once per journey. It also checks all owned torrent/queue/staging cleanup and the native command history for earlier titles, so late failures remain attributable. Configured clones get an initial baseline check; batch completion and VPN recovery retain full checksum sweeps. Background verification batches native API reads and caches file checksums only while device/inode/size/mtime/ctime remain unchanged. Every batch still ends with a full checksum pass. Global setting changes must be explicit and either restored or deliberately carried forward as new expected state; changes intentionally made to an earlier owned object must also update that object's expected evidence. The first twelve numeric cases map to named household scenarios; additional identities are movie controls. Use `--only NAME ...` with the shared or CI layout for focused validation. The CI layout still adds its configured-clone check after the selected shared cohort succeeds.
 
 The fixture serves UDP/TCP DNS with explicit A/AAAA/negative replay and records queries; application hostnames are not inserted into `/etc/hosts`. Final evidence requires real Radarr/TMDB lookups over WireGuard. Known unavailable telemetry domains return NXDOMAIN; other unknown DNS/HTTP requests fail the contract.
 
@@ -126,7 +126,7 @@ The harness retains fresh-job waits where lifecycle changes justify them. Ordina
 
 Focused tests remain for paths/symlinks, request ownership/history discontinuities, sharing boundaries and WireGuard parsing. The previous disconnected real-engine suites, fake application HTTP servers, anime catalogue matrix, fake-VPN helper and artifact/runtime download harnesses are removed.
 
-These movie scenarios establish the foundation. Subsequent scenarios must cover TV/season imports, non-admin requests, forward application/database upgrades, all sharing policies and hardlinks, explicit libraries/quality choices, direct grabs and ambiguous imports, request removal/history reset, blocked diagnostics, failure isolation, VPN paste/rotation and startup without a tunnel, NAT-PMP and anime. Basic same-version restart and continued-access/reconnect checks now run. See [the review response](integration-review-response.md) for each comment’s disposition and exact limits. Broader coverage is required before unattended dependency merge/release is enabled. The first journey alone is not evidence that those behaviors have passed.
+The first expansion covers TV episodes, season packs, selected seasons, genuine 480p through Anything, anime pack/dual-audio preference, original-language decisions, waiting-request RSS fulfilment, request deletion, same-container restart and VPN changes. [The numbered catalogue](integration-scenarios.md) distinguishes implemented assertions from stretch goals. Pending-request decline, non-admin permissions, forward upgrades, other sharing policies/hardlinks, Max, direct grabs, history-reset safeguards, failure isolation, cold startup without a tunnel and NAT-PMP remain unproven. Broader coverage and passing acceptance are required before unattended dependency merge/release is enabled.
 
 The automated acceptance suite replaces the manual release gate. Actual Supervisor installation, Ingress forwarding on HAOS, NAS permission/hardlink behavior and Plex discovery/playback remain explicit unautomated boundaries. A local Docker/Podman run does not reproduce them. Recovery relies on HA cold backups; automatic binary/database rollback and old-layout migration are not product guarantees.
 
@@ -136,6 +136,50 @@ Validate locally, push and take at most one non-waiting CI snapshot. Report pass
 
 ## Network fault check
 
-After the shared movie batch, UID 1000 probes a fixture listener and DNS on the veth underlay; both must be blocked by the shipped firewall. The live nftables output chain must have drop policy. The remote WireGuard link is then taken down and the actual client peer removed to accelerate native fault detection. Status must report VPN unavailable while local Seerr, Prowlarr, Arr and downloader APIs remain reachable. DNS and underlay access must stay blocked. The production WireGuard service reconnects after restoration; fresh controller health, DNS, a real metadata refresh and prior media are verified again.
+In the dedicated VPN scenarios, UID 1000 probes a fixture listener and DNS on the veth underlay; both must be blocked by the shipped firewall. The live nftables output chain must have drop policy. The remote WireGuard link is then taken down and the actual client peer removed to accelerate native fault detection. Status must report VPN unavailable while local Seerr, Prowlarr, Arr and downloader APIs remain reachable. DNS and underlay access must stay blocked. The production WireGuard service reconnects after restoration; fresh controller health, DNS, a real metadata refresh and prior media are verified again.
 
-This checks the native reconnect loop, not the production 180-second stale-handshake detection delay or initial startup without VPN. It never edits readiness markers or mocks the VPN service. The fault has a separate 90-second budget. Product firewall rules are observed through actual packets rather than compared with their own generator.
+This checks the native reconnect loop, not the production 180-second stale-handshake detection delay or initial startup without VPN. It never edits readiness markers or mocks the VPN service. The fault has a nested 90-second budget bounded by its journey deadline. The download-loss scenario additionally requires the original incomplete torrent to finish after recovery, without a forced resume or reannounce. Product firewall rules are observed through actual packets rather than compared with their own generator.
+
+
+## First household expansion
+
+The synthetic TV catalogue provides valid Skyhook/TMDB responses and real one-minute episode containers. Packs contain two distinct episode files and subtitles. Anime releases include actual Japanese/English audio tracks; foreign-only alternatives have matching tagged tracks and complete downloadable payloads. Native Sonarr scores, chosen release, imported episode coordinates, audio stream counts, routing and exact bytes are asserted. Default excludes the real 480p quality; Anything imports it with native 854×480 media information. Production quality profiles remain intact.
+
+One waiting movie and one partial download span a declared clean stop/start of the same container, while completed movie/TV media remain background state. The original request IDs and partial bytes must survive. After restart, the test publishes the missing release and invokes native RSS sync. Deleting requests uses Seerr's API, then observes Pompey stopping monitoring while preserving partial downloads and completed movie/TV files. Seerr cannot decline an already approved request (HTTP 409); a future decline test must create a genuinely pending request rather than edit its database.
+
+Rotation submits a new WireGuard key and endpoint through setup, requires native reconnection and real engine metadata queries, and probes the firewall for underlay leaks. In-flight download resumption is the separate `vpn-download-loss` scenario. Assertions remain active when they reveal a product bug; focused passing subsets do not establish full acceptance.
+
+### Expansion measurement (2026-10-26)
+
+The focused eleven-scenario shared cohort plus one configured-clone control passed in **265.70 seconds**, including cached builds, 11 product logic checks, 13 harness checks and 8 required isolated packet tests. The command was:
+
+```sh
+bash tests/run.sh --layout ci --only movie-pg movie-r anything-480p late-certification waiting-content single-episode season-pack selected-seasons anime-dual-audio restart-partial vpn-rotation
+```
+
+| Section | Seconds |
+| --- | ---: |
+| Shared cohort, including same-container restart, seed export and lifecycle | 212.96 |
+| Initial household setup | 23.97 |
+| PG / R / Anything 480p | 7.22 / 6.51 / 6.16 |
+| Late-certification move | 11.41 |
+| Single episode / season pack / selected seasons | 7.65 / 5.96 / 5.82 |
+| Anime dual-audio pack | 24.33 |
+| Waiting request / partial-download restart, elapsed across handoff | 84.87 / 78.10 |
+| VPN rotation | 15.51 |
+| Configured clone, including lifecycle and restore | 32.56 |
+| Clone household setup / new movie | 13.88 / 5.91 |
+| Combined integration batch | 245.52 |
+
+Waiting and partial-restart durations include elapsed work by other cases and the clean stop/start, so those rows overlap and must not be summed. The native downloader's reconnect timing remains visible rather than being hidden by a forced resume. Ordinary checkpoints remained under 0.3 seconds; the clone's final cleanup barrier took 4.34 seconds. Full final sweeps verified 13 movie/episode files in the shared household and 14 in the clone, with subtitles and native ownership links. Both external unknown-request lists and cumulative unexpected invariant lists were empty.
+
+This focused command deliberately omits the independently diagnosed `vpn-download-loss` assertion. It is not a passing full acceptance claim; default shared and CI layouts retain that scenario without skipping or quarantining it. The old five-journey benchmark above has less coverage and is not a direct speed comparison. GitHub runner timings and HAOS behavior remain unmeasured.
+
+
+### Remaining failing assertion
+
+`bash tests/run.sh --only vpn-download-loss` reproduced a failure after VPN loss during an incomplete transfer. Native tunnel/DNS recovery took 11.81 seconds and all six service health flags returned true. qBittorrent still reported `stalledDL`, 99.815% complete, one seed and zero download speed when the normal 60-second completion wait expired. The torrent retained 16,777,216 of 16,808,281 payload bytes. External unknown requests and cumulative invariant failures were empty. This is an unresolved download-resumption failure under the test budget, not an established root-cause diagnosis or proof that it never recovers. Investigate native reconnection/request timing and the peer interaction before changing production behavior or tuning a test timeout.
+
+Failure evidence includes native torrent properties/trackers, application logs, and controlled-peer state. The assertion remains in default acceptance. It is not marked expected-failure, retried, bypassed by a manual resume/reannounce, or treated as passing because health recovered. Broader unattended release acceptance therefore remains blocked.
+
+A second focused reproduction with peer snapshots failed at the same byte boundary. The fixture recorded the final-piece release and handed all 16,808,281 payload bytes to its TCP socket; qBittorrent remained at 16,777,216 bytes. A successful socket write is not evidence of client receipt. The saved peer state rules out an accidentally unreleased fixture gate, while leaving connection/timeout behavior for diagnosis. No test workaround or production fix is included in this expansion.

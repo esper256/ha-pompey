@@ -13,6 +13,7 @@ HOSTS = (
     "api.themoviedb.org",
     "api.radarr.video",
     "skyhook.sonarr.tv",
+    "thexem.info",
     "plex.tv",
     "image.tmdb.org",
     "api.github.com",
@@ -131,6 +132,28 @@ def control(action):
                 ["ip", "route", "replace", "10.77.0.1/32", "dev", "wg-fixture"],
                 check=True,
             )
+    elif action == "rotate":
+        data = json.loads(open("/tmp/world/rotation.json").read())
+        subprocess.run(
+            ["wg", "set", "wg-fixture", "peer", data["oldPublicKey"], "remove"],
+            check=True,
+        )
+        subprocess.run(
+            [
+                "wg",
+                "set",
+                "wg-fixture",
+                "listen-port",
+                str(data["port"]),
+                "peer",
+                data["publicKey"],
+                "allowed-ips",
+                "10.77.0.1/32",
+                "endpoint",
+                "198.18.0.1:51820",
+            ],
+            check=True,
+        )
     elif action == "underlay-listening":
         with socket.create_connection(("198.18.0.2", 18080), timeout=1):
             pass

@@ -1,0 +1,9 @@
+{
+  "sha256": "b00baad3d8e9989b65d8a4581585b617c856cffc81e53213602c103001126900",
+  "bytes": 16796176,
+  "durationSeconds": 60,
+  "width": 854,
+  "height": 480,
+  "identityPaddingOffset": 1024,
+  "sparsePaddingEnd": 16777993
+}

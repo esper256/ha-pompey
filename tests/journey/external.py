@@ -1,6 +1,7 @@
 """External HTTP replay and deterministic tracker/peer. Never a downloader fake."""
 
 import hashlib
+from email.utils import formatdate
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import re
@@ -12,7 +13,8 @@ import struct
 import threading
 import time
 from urllib.parse import parse_qs, urlsplit
-from catalogue import cases
+from catalogue import cases, offers
+from tv_replay import skyhook, tv as tv_metadata, season as tv_season
 from torrent_files import TorrentFiles
 from fixture_network import PEER_IP, DnsServer
 from support import save_json
@@ -146,7 +148,11 @@ class Torrent:
 class World:
     def __init__(self, folder):
         self.cases = cases()
-        self.torrents = {c.movie_id: Torrent(c, folder / c.release) for c in self.cases}
+        self.offers = {o.movie_id: o for c in self.cases for o in offers(c)}
+        self.torrents = {
+            token: Torrent(offer, folder / offer.release)
+            for token, offer in self.offers.items()
+        }
         self.by_hash = {t.digest: t for t in self.torrents.values()}
         self.unknown = []
         self.servers = []
@@ -267,6 +273,11 @@ class World:
         ):
             self.unexpected(f"{host}{path}")
             return js({"error": "Wrong fixture host"}, 404)
+        if path.startswith("/control/publish/"):
+            ident = path.rsplit("/", 1)[1]
+            self.controls["visible:" + ident] = time.time()
+            save_json(self.control_file, self.controls)
+            return js({"ok": True})
         if path.startswith("/control/certify/"):
             ident = path.rsplit("/", 1)[1]
             case = next(c for c in self.cases if str(c.movie_id) == ident)
@@ -279,6 +290,7 @@ class World:
                 {
                     "timings": torrent.timings.copy(),
                     "blocks": torrent.blocks,
+                    "released": torrent.release.is_set(),
                     "sent": torrent.sent,
                     "payloadBytes": torrent.size,
                     "infoHash": torrent.digest.hex(),
@@ -311,7 +323,7 @@ class World:
             if query.get("t") == ["caps"]:
                 return (
                     "application/xml",
-                    b"""<caps><server version="1.0" title="Fixture"/><limits max="100" default="100"/><searching><search available="yes" supportedParams="q"/><movie-search available="yes" supportedParams="q,imdbid,tmdbid"/><tv-search available="yes" supportedParams="q,season,ep,tvdbid"/></searching><categories><category id="2000" name="Movies"><subcat id="2040" name="Movies/HD"/></category><category id="5000" name="TV"><subcat id="5040" name="TV/HD"/></category></categories></caps>""",
+                    b"""<caps><server version="1.0" title="Fixture"/><limits max="100" default="100"/><searching><search available="yes" supportedParams="q"/><movie-search available="yes" supportedParams="q,imdbid,tmdbid"/><tv-search available="yes" supportedParams="q,season,ep,tvdbid"/></searching><categories><category id="2000" name="Movies"><subcat id="2040" name="Movies/HD"/></category><category id="5000" name="TV"><subcat id="5040" name="TV/HD"/><subcat id="5070" name="TV/Anime"/></category></categories></caps>""",
                     200,
                 )
             tv = query.get("t") == ["tvsearch"] or any(
@@ -319,7 +331,15 @@ class World:
                 for n in ",".join(query.get("cat", [])).split(",")
                 if n.isdigit()
             )
-            selected = self.cases[:1] if tv else self.cases
+            selected = [
+                c
+                for c in self.cases
+                if (c.kind == "tv") == tv
+                and (
+                    c.index != 4
+                    or self.controls.get("visible:" + str(c.movie_id), False)
+                )
+            ]
             if "tmdbid" in query:
                 selected = [c for c in selected if query["tmdbid"] == [str(c.movie_id)]]
             if "imdbid" in query:
@@ -329,25 +349,47 @@ class World:
                     if query["imdbid"][0].removeprefix("tt") == c.imdb_id
                 ]
             q = re.sub(r"[^a-z0-9]", "", " ".join(query.get("q", [])).lower())
-            if q and not tv:
+            if "tvdbid" in query:
+                selected = [c for c in selected if query["tvdbid"] == [str(c.tvdb_id)]]
+            if q:
                 selected = [
                     c
                     for c in selected
                     if q in re.sub(r"[^a-z0-9]", "", c.title.lower())
                 ]
+            selected_offers = [o for c in selected for o in offers(c)]
             offset = int(query.get("offset", ["0"])[0])
             items = []
-            for case in selected[offset : offset + 100]:
-                torrent = self.torrents[case.movie_id]
-                title = case.title + " S01E01 1080p WEB-DL" if tv else case.release
-                category = 5040 if tv else 2040
-                url = f"http://{PEER_IP}:18080/download/{case.movie_id}"
-                items.append(
-                    f'''<item><title>{title}</title><guid isPermaLink="false">{torrent.digest.hex()}</guid><link>{url}</link><pubDate>Mon, 26 Oct 2026 00:00:00 GMT</pubDate><category>{category}</category><enclosure url="{url}" length="{torrent.size}" type="application/x-bittorrent"/><torznab:attr name="category" value="{category}"/><torznab:attr name="size" value="{torrent.size}"/><torznab:attr name="seeders" value="1"/><torznab:attr name="peers" value="1"/><torznab:attr name="tmdbid" value="{case.movie_id}"/><torznab:attr name="imdbid" value="{case.imdb_id}"/><torznab:attr name="infohash" value="{torrent.digest.hex()}"/></item>'''
+            for offer in selected_offers[offset : offset + 100]:
+                case = offer.case
+                torrent = self.torrents[offer.movie_id]
+                category = (5070 if case.anime else 5040) if tv else 2040
+                url = f"http://{PEER_IP}:18080/download/{offer.movie_id}"
+                published = formatdate(
+                    self.controls.get("visible:" + str(case.movie_id), 1792972800),
+                    usegmt=True,
                 )
-            body = f'''<?xml version="1.0"?><rss version="2.0" xmlns:torznab="http://torznab.com/schemas/2015/feed" xmlns:newznab="http://www.newznab.com/DTD/2010/feeds/attributes/"><channel><title>Fixture</title><newznab:response offset="{offset}" total="{len(selected)}"/>{"".join(items)}</channel></rss>'''
+                items.append(
+                    f'''<item><title>{offer.release}</title><guid isPermaLink="false">{torrent.digest.hex()}</guid><link>{url}</link><pubDate>{published}</pubDate><category>{category}</category><enclosure url="{url}" length="{torrent.size}" type="application/x-bittorrent"/><torznab:attr name="category" value="{category}"/><torznab:attr name="size" value="{torrent.size}"/><torznab:attr name="seeders" value="1"/><torznab:attr name="peers" value="1"/><torznab:attr name="tmdbid" value="{case.movie_id}"/><torznab:attr name="tvdbid" value="{case.tvdb_id}"/><torznab:attr name="imdbid" value="{case.imdb_id}"/><torznab:attr name="infohash" value="{torrent.digest.hex()}"/></item>'''
+                )
+            body = f'''<?xml version="1.0"?><rss version="2.0" xmlns:torznab="http://torznab.com/schemas/2015/feed" xmlns:newznab="http://www.newznab.com/DTD/2010/feeds/attributes/"><channel><title>Fixture</title><newznab:response offset="{offset}" total="{len(selected_offers)}"/>{"".join(items)}</channel></rss>'''
             return "application/xml", body.encode(), 200
         for case in self.cases:
+            if case.kind == "tv":
+                if (
+                    host == "skyhook.sonarr.tv"
+                    and path == f"/v1/tvdb/shows/en/{case.tvdb_id}"
+                ):
+                    return js(skyhook(case))
+                if host == "api.themoviedb.org":
+                    if path == f"/3/tv/{case.movie_id}":
+                        return js(tv_metadata(case))
+                    if path == f"/3/tv/{case.movie_id}/content_ratings":
+                        return js(tv_metadata(case)["content_ratings"])
+                    for number in case.seasons:
+                        if path == f"/3/tv/{case.movie_id}/season/{number}":
+                            return js(tv_season(case, number))
+                continue
             if host == "api.radarr.video" and path == f"/v1/movie/{case.movie_id}":
                 movie = json.loads(
                     Path("/tests/journey/replay/radarr-movie.json").read_text()
@@ -371,12 +413,16 @@ class World:
             ):
                 return js(self.movie(case)["release_dates"])
         if host == "api.themoviedb.org":
-            if path in {"/3/search/multi", "/3/search/movie"}:
+            if path in {"/3/search/multi", "/3/search/movie", "/3/search/tv"}:
                 query_text = " ".join(query.get("query", [])).lower()
                 matches = [
-                    dict(self.movie(c), media_type="movie")
+                    dict(
+                        tv_metadata(c) if c.kind == "tv" else self.movie(c),
+                        media_type=c.kind,
+                    )
                     for c in self.cases
                     if query_text in c.title.lower()
+                    and (path == "/3/search/multi" or path.endswith("/" + c.kind))
                 ]
                 return js(
                     {
@@ -409,6 +455,19 @@ class World:
                         "machineIdentifier": "fixture-plex",
                         "friendlyName": "Fixture Plex",
                     }
+                }
+            )
+        if host == "thexem.info" and path in {
+            "/map/havemap",
+            "/map/allNames",
+            "/map/all",
+        }:
+            # There are no alternate scene names/numbers for our fictional series.
+            return js(
+                {
+                    "result": "success",
+                    "data": {} if path == "/map/allNames" else [],
+                    "message": "",
                 }
             )
         # These external checks are intentionally unavailable, not fake successes.

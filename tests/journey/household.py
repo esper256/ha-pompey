@@ -317,6 +317,17 @@ class Background:
         if not self.ledger:
             return
         movies = {row["id"]: row for row in client.arr("GET", "/movie")}
+        shows = (
+            {row["id"]: row for row in client.sonarr("GET", "/series")}
+            if any(r.get("kind") == "sonarr" for r in self.ledger)
+            else {}
+        )
+        episodes = {}
+        for series_id in {r["arrId"] for r in self.ledger if r.get("kind") == "sonarr"}:
+            for episode in client.sonarr("GET", "/episode?seriesId=" + str(series_id)):
+                episodes[
+                    (series_id, episode["seasonNumber"], episode["episodeNumber"])
+                ] = episode
         requests = {}
         skip = 0
         while True:
@@ -337,17 +348,23 @@ class Background:
                     raise BackgroundRegression(row["prefix"], field, actual)
 
             request = requests.get(row["requestId"])
-            require(
-                request and request["media"]["tmdbId"] == row["tmdbId"],
-                "request",
-                request,
-            )
-            movie = movies.get(row["arrId"])
+            tv = row.get("kind") == "sonarr"
+            external_key = "tvdbId" if tv else "tmdbId"
+            external = row[external_key]
+            if row.get("requestState") == "deleted":
+                require(request is None, "request deletion", request)
+            else:
+                require(
+                    request and request["media"][external_key] == external,
+                    "request",
+                    request,
+                )
+            movie = (shows if tv else movies).get(row["arrId"])
             require(
                 movie
-                and movie["tmdbId"] == row["tmdbId"]
+                and movie[external_key] == external
                 and movie["title"] == row["prefix"]
-                and movie["hasFile"],
+                and (tv or movie["hasFile"]),
                 "title",
                 movie,
             )
@@ -356,6 +373,24 @@ class Background:
                 "monitored",
                 movie.get("monitored"),
             )
+            if tv:
+                require(
+                    episodes.get(
+                        (row["arrId"], row["seasonNumber"], row["episodeNumber"]), {}
+                    ).get("hasFile"),
+                    "episode link",
+                    row["path"],
+                )
+                require(
+                    {
+                        str(s["seasonNumber"]): s["monitored"]
+                        for s in movie["seasons"]
+                        if s["seasonNumber"] > 0
+                    }
+                    == {str(k): v for k, v in row["seasons"].items()},
+                    "seasons",
+                    movie["seasons"],
+                )
             for path, key in [
                 (row["path"], "sha256"),
                 (row["subtitle"], "subtitleSha256"),

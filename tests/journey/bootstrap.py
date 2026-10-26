@@ -1,6 +1,7 @@
 """Prepare only the isolated external world, then exec the image's actual /init."""
 
 import json
+import shutil
 import configparser
 import os
 from pathlib import Path
@@ -34,6 +35,10 @@ def prepare():
         ):
             raise RuntimeError("Acceptance refuses external routes")
     Path("/etc/resolv.conf").write_text("nameserver 127.0.0.1\n")
+    # Same-container restart gets a fresh external namespace and identical
+    # synthetic payloads, while preserving the applications' real state.
+    if Path("/tmp/world").exists():
+        shutil.rmtree("/tmp/world")
     Path("/tmp/world").mkdir(exist_ok=True)
     Path("/tmp/world/started").write_text(str(started))
     timings = {}
@@ -84,8 +89,19 @@ def prepare():
     )
     run("update-ca-certificates", stdout=subprocess.DEVNULL)
     stamp("certificate-ready")
-    client = subprocess.check_output(["wg", "genkey"]).strip()
-    server = subprocess.check_output(["wg", "genkey"]).strip()
+    network_file = Path("/data/pompey-fixture/network.json")
+    source = Path("/config/wireguard/wg0.conf")
+    prior = json.loads(network_file.read_text()) if network_file.exists() else None
+    if prior and source.exists():
+        parsed = configparser.RawConfigParser()
+        parsed.read(source)
+        client = parsed["Interface"]["PrivateKey"].encode()
+        server = prior["serverPrivateKey"].encode()
+        port = int(parsed["Peer"]["Endpoint"].rsplit(":", 1)[1])
+    else:
+        client = subprocess.check_output(["wg", "genkey"]).strip()
+        server = subprocess.check_output(["wg", "genkey"]).strip()
+        port = 51821
     client_pub = (
         subprocess.check_output(["wg", "pubkey"], input=client).decode().strip()
     )
@@ -116,11 +132,16 @@ DNS = {PEER_IP}
 
 [Peer]
 PublicKey = {server_pub}
-Endpoint = 198.18.0.2:51821
+Endpoint = 198.18.0.2:{port}
 AllowedIPs = 0.0.0.0/0
 PersistentKeepalive = 1
 """
-    Path("/config/wireguard/wg0.conf").write_text(config)
+    if not prior:
+        Path("/config/wireguard/wg0.conf").write_text(config)
+    network_file.parent.mkdir(exist_ok=True)
+    network_file.write_text(json.dumps({"serverPrivateKey": server.decode()}))
+    network_file.chmod(0o600)
+    Path("/tmp/world/server-port").write_text(str(port))
     Path("/config/wireguard/wg0.conf").chmod(0o600)
     # Disable public discovery before the real downloader starts; production
     # config generation preserves these unrelated native preferences.
