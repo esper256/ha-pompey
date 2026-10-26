@@ -33,6 +33,16 @@ class Case:
         }.get(self.index, "movie-control")
 
     @property
+    def unwanted_files(self):
+        if self.index != 0:
+            return {}
+        return {
+            f"{self.prefix}.release.nfo": "<movie><plot>Synthetic release notes</plot></movie>\n",
+            f"{self.prefix}.README.txt": "Synthetic release notes, not library content.\n",
+            f"{self.prefix}.website.url": "[InternetShortcut]\nURL=https://example.invalid/\n",
+        }
+
+    @property
     def kind(self):
         return "tv" if self.index in {5, 6, 7, 8} else "movie"
 
@@ -254,3 +264,6 @@ def prepare_media(folder):
                 (target / Path(name).with_suffix(".en.srt")).write_text(
                     f"1\n00:00:00,000 --> 00:00:02,000\nSynthetic {case.prefix} {name}\n"
                 )
+            if offer.variant == 0:
+                for name, contents in case.unwanted_files.items():
+                    (target / name).write_text(contents)

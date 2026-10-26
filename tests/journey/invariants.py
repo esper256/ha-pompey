@@ -131,6 +131,14 @@ class Invariants:
             for p in (Path("/media/dlna/downloads") / root).rglob("*")
             if p.is_file()
         ]
+        unwanted = {
+            name: list(Path("/media/dlna").rglob(name))
+            for name in {
+                name
+                for row in self.background.ledger
+                for name in row.get("unwantedFiles", [])
+            }
+        }
         pending = []
         for row in self.background.ledger:
             kind = row.get("kind", "radarr")
@@ -138,6 +146,10 @@ class Invariants:
             id_key = "seriesId" if kind == "sonarr" else "movieId"
             for condition, field in [
                 (row["infoHash"] not in torrents, "torrent retained"),
+                (
+                    not any(unwanted[name] for name in row.get("unwantedFiles", [])),
+                    "unwanted release files retained",
+                ),
                 (
                     not any(
                         q.get(id_key) == row["arrId"]
@@ -193,6 +205,12 @@ class Invariants:
             if "infoHash" not in case:
                 continue
             case["stopSharingVerified"] = case["prefix"] not in pending_owners
+            if case.get("unwantedFilesIncluded"):
+                case["unwantedFilesPurged"] = not any(
+                    item["owner"] == case["prefix"]
+                    and item["field"] == "unwanted release files retained"
+                    for item in pending
+                )
             save_json(client.evidence.root / (case["prefix"] + ".json"), case)
         self.checkpoints.append(
             {

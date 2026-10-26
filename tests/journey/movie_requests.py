@@ -206,6 +206,18 @@ def _movie_request(client, case, background, ledger_file, *, resume):
             "Incomplete movie imported during VPN interruption"
         )
         before = tunnel_bytes()
+    if case.unwanted_files:
+        entries = client.qbit("torrents/files?hash=" + infohash)
+        unwanted = [f for f in entries if Path(f["name"]).name in case.unwanted_files]
+        assert {Path(f["name"]).name for f in unwanted} == set(case.unwanted_files), (
+            "Unwanted files were not included in the real torrent",
+            entries,
+        )
+        assert all(f["priority"] > 0 for f in unwanted), (
+            "Unwanted files were skipped instead of downloaded",
+            unwanted,
+        )
+        active["unwantedFilesIncluded"] = unwanted
     client.release(case)
     wait(
         lambda: (t := torrent()) and t["progress"] == 1,
@@ -355,6 +367,7 @@ def _movie_request(client, case, background, ledger_file, *, resume):
             "sha256": checksum,
             "subtitle": str(subtitles[0]),
             "subtitleSha256": digest(subtitles[0]),
+            "unwantedFiles": list(case.unwanted_files),
         }
     )
     save_json(ledger_file, ledger)

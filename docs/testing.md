@@ -183,3 +183,14 @@ This focused command deliberately omits the independently diagnosed `vpn-downloa
 Failure evidence includes native torrent properties/trackers, application logs, and controlled-peer state. The assertion remains in default acceptance. It is not marked expected-failure, retried, bypassed by a manual resume/reannounce, or treated as passing because health recovered. Broader unattended release acceptance therefore remains blocked.
 
 A second focused reproduction with peer snapshots failed at the same byte boundary. The fixture recorded the final-piece release and handed all 16,808,281 payload bytes to its TCP socket; qBittorrent remained at 16,777,216 bytes. A successful socket write is not evidence of client receipt. The saved peer state rules out an accidentally unreleased fixture gate, while leaving connection/timeout behavior for diagnosis. No test workaround or production fix is included in this expansion.
+
+
+## Unwanted release-file cleanup
+
+The baseline `movie-pg` torrent includes three additional namespaced files: release notes (`.nfo`), a README (`.txt`) and an internet shortcut (`.url`). The test reads qBittorrent's real file list before completion and requires all three to be included with nonzero download priority. Full native torrent completion and the existing peer-byte checks then cover the complete payload, rather than a fixture containing only wanted files or a client configured to skip extras.
+
+The shared cleanup checkpoint requires those names to disappear everywhere below the household media root, including download storage, recycle storage and the Plex library. It uses the existing per-title cleanup deadline and final barrier. Exact movie/subtitle checksums and ownership links must still survive; later journeys and the configured clone keep checking the same ledger, so reappearing leftovers fail too. No deletion is performed by the test. This covers extras from a successfully imported, owned download under **Stop sharing**; active seeding, unknown files and ambiguous/manual downloads retain their separate safety boundaries.
+
+Focused validation: `bash tests/run.sh --layout ci --only movie-pg` runs the real fresh-install download and configured-clone preservation check, together with the required logic and packet checks. No extra installation or standalone journey is added to the default suite.
+
+This focused CI-layout run passed locally in **93.70 seconds** (73.94 seconds integration), including 11 product logic, 13 harness and 8 required packet checks. Both the fresh-install and configured-clone journeys passed with empty pending-cleanup, unexpected-request and unexpected-invariant lists. The baseline reported `unwantedFilesPurged: true`; its retained movie/subtitle and absence of extras were verified again after the clone imported a second movie. This does not resolve or revalidate the separate VPN download-resumption failure described above.

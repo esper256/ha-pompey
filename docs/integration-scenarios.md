@@ -15,7 +15,7 @@ This is the numbered list used to select the first expansion. An outcome can be 
 | 9 | Max accepts fallback and upgrades to target | Stretch |
 | 10 | Anime prefers season packs and dual audio | `anime-dual-audio`, native scores and actual selected download |
 | 11 | Original-language protection | Foreign-only, original and suitable dual-audio alternatives in TV searches |
-| 12 | Stop-sharing imports and cleans up torrents | Shared cleanup invariants on every downloaded case |
+| 12 | Stop-sharing imports and cleans up torrents | Shared cleanup invariants on every downloaded case; baseline also downloads NFO/text/URL extras and requires their absence throughout media storage while movie/subtitle checksums survive |
 | 13 | Ratio sharing retains library access and seeds to goal | Stretch |
 | 14 | Time sharing stops after goal | Stretch |
 | 15 | Hardlink sharing and copy fallback | Stretch |
