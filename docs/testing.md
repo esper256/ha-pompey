@@ -16,7 +16,7 @@ The four movie scenarios cover PG → kid library, R → general library, unknow
 
 The synthetic film lasts one minute. Its metadata, container runtime, catalogue size, torrent lengths and hashes agree. The real 1080p profile applies; a valid padded Matroska payload is approximately 16 MiB. The fixture implements the necessary external contracts and fails on unknown requests. Update/telemetry endpoints deliberately return an explicit unavailable response.
 
-Artifacts under `.test-results/` include per-scenario prefixes/IDs, stage timings, bytes, paths, identities, preserved-background-title counts and timestamped external HTTP/DNS requests. Setup and each case require fresh successful configuration and controller jobs, all services healthy, Ready status, no unexpected attention and sources in both Arr apps. Stop-sharing removes the case torrent and queue entry and leaves no owned staging payload; failed case-owned native commands are rejected. Diagnostics run through nginx. Each scenario has its own torrent and media checksum; its run/case identifier occupies a reserved Matroska Void without changing duration or size. Native Arr probing and hash-verified transfers still apply. The runner bounds each batch and stops on any failure.
+Artifacts under `.test-results/` include per-scenario prefixes/IDs, stage timings, bytes, paths, identities, preserved-background-title counts and timestamped external HTTP/DNS requests. Setup, controller restart, VPN recovery and batch completion require fresh successful configuration/controller jobs. Each ordinary journey instead checks current healthy services/jobs, Ready status, no unexpected attention and sources in both Arr apps at one shared invariant checkpoint. Stop-sharing removes the case torrent and queue entry and leaves no owned staging payload; failed case-owned native commands are rejected. Diagnostics run through nginx. Each scenario has its own torrent and media checksum; its run/case identifier occupies a reserved Matroska Void without changing duration or size. Native Arr probing and hash-verified transfers still apply. The runner bounds each batch and stops on any failure.
 
 ### State reuse and timing
 
@@ -70,6 +70,22 @@ These are development-machine timings using host Podman from Fedora Distrobox, n
 
 This covers more work than the earlier three-film benchmark. Fresh controller health adds observations after each outcome; the late-certification case exercises an actual file move, and CI now pays for one independent configured boot. The timing summary and per-container reports retain exact boundaries; values can overlap or include small unlisted bookkeeping costs and are not additive guarantees.
 
+### Shared invariant checkpoint measurement
+
+The same five-journey CI layout passed in **123.71 seconds**, versus **132.61 seconds** above: **8.91 seconds (6.7%) saved** overall. Its integration containers took **104.50 seconds**, versus **113.72 seconds**: **9.22 seconds (8.1%) saved**. Both runs used cached layers on the same development machine; these are individual observations, not a statistical CI guarantee.
+
+| Section | Previous seconds | Shared-checkpoint seconds |
+| --- | ---: | ---: |
+| Complete suite | 132.61 | 123.71 |
+| Integration containers, including seed/lifecycle work | 113.72 | 104.50 |
+| PG / R / unknown journeys | 9.09 / 8.96 / 8.91 | 5.01 / 5.90 / 6.08 |
+| Late-certification journey, with controller restart | 9.92 | 10.98 |
+| Shared container / configured-clone container | 82.77 / 30.94 | 73.75 / 30.75 |
+
+Ordinary invariant checkpoints took 0.07–0.13 seconds. The restart checkpoint retained its fresh-job wait (1.54 seconds). The clone’s final cleanup barrier took 4.12 seconds; all five cases ended with `stopSharingVerified: true`, and neither container recorded an unexpected invariant event. Full checksum sweeps and the real VPN fault/recovery still ran.
+
+Consolidation alone did not measurably accelerate the suite: the first experimental integration batch took 115.30 seconds because native cleanup overlapped the old health waits. Explicitly triggering another native completion scan was inconsistent and was removed. The retained improvement overlaps pending cleanup with later journeys and enforces one final barrier. The full run passed 11 product logic checks, 12 harness checks and 8 packet checks; a subsequent deadline regression brings the harness count to 13 and verifies that later cases cannot reset an earlier owner’s cleanup budget. The final built-runtime worker passed all 11 product and 13 harness checks; a focused fresh-install/barrier/VPN run passed in 52.10 seconds after placing final file and command checks after the cleanup barrier.
+
 ## Adding scenarios
 
 Keep outcome assertions in scenario modules such as [`movie_requests.py`](../tests/journey/movie_requests.py). The small [`journey.py`](../tests/journey/journey.py) driver owns startup, per-scenario budgets and final verification. New scenarios should accept the household, a namespaced catalogue case and background state rather than create new global clients or bootstrap another stack.
@@ -79,6 +95,7 @@ Shared operations live in:
 | Utility | Responsibility |
 | --- | --- |
 | [`household.py`](../tests/journey/household.py) | Real Arr/Sonarr/Prowlarr/Seerr/qBittorrent clients, first-run setup, native command completion, engine identities and background preservation |
+| [`invariants.py`](../tests/journey/invariants.py) | Shared health/background/cleanup checkpoint, cumulative source evidence and owner-attributed native command failures |
 | [`support.py`](../tests/journey/support.py) | Cookie-aware JSON/form requests, bounded polling, independent deadlines, atomic evidence checkpoints and streaming checksums |
 | [`torrent_files.py`](../tests/journey/torrent_files.py) | Exact block reads spanning fixture files without storing every film in memory |
 | [`container_runtime.py`](../tests/container_runtime.py) | Host CLI execution, named worker cleanup, immutable image IDs and cold seed transfers |
@@ -87,13 +104,23 @@ Use `household.wait` for eventual observations and `wait_command` for real nativ
 
 Checkpoints update `result.json` and each case report throughout execution, with explicit running/passed/failed states. Failed runs retain the original exception, last completed checkpoint, partial timing summary and read-only native movie/queue/command/history/blocklist/source/torrent/request snapshots and real log tails. Categories distinguish fixture contracts, timeout stages, native command failure, HTTP failure, assertion and background ownership/field regressions. Diagnostic collection has a separate ten-second HTTP budget and cannot replace the original failure. Complete logs remain artifacts; successful console output stays compact. Check workers and household containers both have named, bounded cleanup, including after timeout.
 
-Background verification batches native API reads and caches file checksums only while device/inode/size/mtime/ctime remain unchanged. Every batch still ends with a full checksum pass. Global setting changes must be explicit and restored by the owning scenario; changes intentionally made to an earlier owned object must also update that object's expected evidence. The current numeric `--scenarios` option repeats movie rating parameters for timing; it does not claim coverage of distinct unimplemented features.
+The shared invariant checkpoint verifies all owned titles, including the just-completed journey, once per journey. It also checks all owned torrent/queue/staging cleanup and the native command history for earlier titles, so late failures remain attributable. Configured clones get an initial baseline check; batch completion and VPN recovery retain full checksum sweeps. Background verification batches native API reads and caches file checksums only while device/inode/size/mtime/ctime remain unchanged. Every batch still ends with a full checksum pass. Global setting changes must be explicit and restored by the owning scenario; changes intentionally made to an earlier owned object must also update that object's expected evidence. The current numeric `--scenarios` option repeats movie rating parameters for timing; it does not claim coverage of distinct unimplemented features.
 
 The fixture serves UDP/TCP DNS with explicit A/AAAA/negative replay and records queries; application hostnames are not inserted into `/etc/hosts`. Final evidence requires real Radarr/TMDB lookups over WireGuard. Known unavailable telemetry domains return NXDOMAIN; other unknown DNS/HTTP requests fail the contract.
 
 The external world rejects fixture paths on the wrong hostname and has no generic successful metadata fallback. Small status polls omit the growing request transcript; the full timestamped transcript is written durably as events occur and collected at exit, including after a broken tunnel. Unknown requests are asserted after final verification too. Synthetic source files store the zero-filled Matroska Void as sparse holes, and the peer reads blocks from files. Logical lengths, piece hashes and all bytes transferred through real qBittorrent remain unchanged. New fixture responses should model an observed external contract rather than broaden a catch-all response.
 
-Nine focused harness regressions cover permanent/transient failures, nested deadlines, durable partial reports, mandatory final checksums, cross-file/empty-file block boundaries, truncated fixtures incorrect hosts and DNS replay. A scheduler regression also verifies that recurring jobs cannot starve other due work. Before these review fixes, the reviewed default suite passed in 61.11 seconds with cached layers, including eight product logic tests, eight harness tests, eight packet tests and three real journeys. A configured-clone run also passed. An intentional real-Radarr 404 failed about 65 ms after the request checkpoint and retained the partial case and native failure snapshots.
+Focused harness regressions cover permanent/transient failures, nested deadlines, durable partial reports, mandatory final checksums, cross-file/empty-file block boundaries, truncated fixtures, incorrect hosts, DNS replay, cumulative invariant rejection and late native-command ownership. A scheduler regression also verifies that recurring jobs cannot starve other due work. Before these review fixes, the reviewed default suite passed in 61.11 seconds with cached layers, including eight product logic tests, eight harness tests, eight packet tests and three real journeys. A configured-clone run also passed. An intentional real-Radarr 404 failed about 65 ms after the request checkpoint and retained the partial case and native failure snapshots.
+
+## Cumulative invariant evidence
+
+Acceptance sets `POMPEY_EVENT_LOG` to an append-only journal in the container’s temporary directory. The shipped code records controller failures before resetting retry counters, controller starts, and policy attention immediately after relevant durable state writes. Normal installations leave this opt-in trace disabled. File locking prevents concurrent producer/read races; controller restarts retain earlier events in the same container. The harness requires the controller-start event, so a disconnected producer cannot silently pass.
+
+`invariant-events.json` preserves setup and household phases. Assertions arm when initialized setup becomes healthy: pre-setup configuration failures remain visible but expected; subsequent controller failures and notices fail even after successful retry or notice removal. Time-dependent notices are also recorded when the normal health sampler observes them. This is not a claim to observe every sub-second service outage or a notice condition that was never persisted or sampled.
+
+At each checkpoint, retained native Arr command history is checked against every owned title and its ownership start time. Earlier cases’ late failures are attributed to their owner. Observed failures are retained even if later native history omits them. Commands purged before any observation remain outside this history-based check; application binaries are not instrumented. Scheduled telemetry/update failures without owned title targets are excluded. Future scenarios intentionally generating policy notices need explicit expectations rather than a blanket exemption.
+
+The harness retains fresh-job waits where lifecycle changes justify them. Ordinary variants use immediate health checks; the actual controller job bodies, production retry policy and health cadence are unchanged. Cleanup is eventual: checkpoints record completed transfers still awaiting native cleanup with a per-title 60-second deadline, reject transfer regressions, and enforce torrent/queue/staging cleanup at the batch barrier. Later journeys overlap legitimate cleanup from earlier ones. No cleanup outcome is skipped; final success requires the same cleanup guarantees for every owned title. Per-checkpoint durations, pending owners and the final barrier duration make those costs visible.
 
 ## Scope and expansion
 

@@ -11,6 +11,7 @@ import time
 import urllib.request
 from pompey_runtime import HEALTH, atomic_json, stack_lock, run_process
 from media_policy import attention
+from pompey_events import record
 
 
 @dataclass
@@ -29,6 +30,8 @@ class Job:
     error: str = ""
 
     def complete(self, now, success):
+        if not success:
+            record("job-failed", job=self.name, error=self.error, started=self.started)
         self.phase = "idle"
         if success:
             self.last_success = time.time()
@@ -184,6 +187,7 @@ def main():
             job.interval = value
         if job.due == 0:
             job.due = time.monotonic()
+    record("controller-started")
     with ThreadPoolExecutor(max_workers=2) as pool:
         next_health = 0
         observed = {}
@@ -212,6 +216,8 @@ def main():
                     notices = attention()
                 except (OSError, ValueError, TypeError) as exc:
                     notices = ["Policy state could not be read: " + str(exc)]
+                if notices:
+                    record("attention", notices=notices)
                 atomic_json(
                     ready / "health.json",
                     {

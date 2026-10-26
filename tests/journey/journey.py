@@ -12,6 +12,7 @@ sys.path[:0] = ["/tests/journey", "/usr/local/bin"]
 from catalogue import cases
 from household import Household, Background, configure, identities
 from movie_requests import movie_request
+from invariants import Invariants
 from stack_checks import outage
 from support import FixtureContractError
 from support import (
@@ -129,6 +130,7 @@ def main():
     ):
         raise ValueError("Invalid scenario selection")
     client = None
+    invariants = None
     try:
         deadline = Deadline(STARTUP_TIMEOUT)
         session = Session(deadline)
@@ -155,14 +157,24 @@ def main():
                 os.environ.get("POMPEY_JOB_INTERVALS", "{}")
             ),
         )
+        invariants = Invariants(client, background)
+        if restored:
+            invariants.checkpoint("configured-baseline", full=True)
+        batch_since = time.time()
         for index in selected:
             # Each scenario gets its own budget; it cannot consume a later one's time.
             session.deadline = Deadline(SCENARIO_TIMEOUT)
             movie_request(client, catalogue[index], background, ledger_file)
-        background.verify(client, full=True)
+            invariants.checkpoint(
+                catalogue[index].prefix,
+                fresh_since=evidence.active.get("freshHealthSince"),
+            )
+            evidence.stamp("invariants-verified")
+            evidence.finish()
+        invariants.checkpoint("batch-complete", full=True, fresh_since=batch_since)
         if 0 in selected:
             outage(client)
-            background.verify(client, full=True)
+            invariants.checkpoint("vpn-recovered", full=True)
         external = assert_contract()
         dns = {
             r["name"]
@@ -186,6 +198,11 @@ def main():
             flush=True,
         )
     except BaseException as exc:
+        if invariants:
+            try:
+                invariants.capture()
+            except Exception as diagnostic:
+                print("Invariant evidence collection failed:", diagnostic, flush=True)
         unknown = transcript()["unknown"]
         if unknown:
             evidence.data["fixtureUnknown"] = unknown

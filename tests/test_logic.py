@@ -1,6 +1,7 @@
 """Focused edge cases for safety logic; application contracts belong in the journey."""
 
 import os
+import json
 from pathlib import Path
 import sys
 import tempfile
@@ -21,6 +22,45 @@ from media_policy import seed_goal_reached, contained
 from vpn_config import render, parse
 from pompey_controller import Job, dispatch
 from concurrent.futures import Future
+
+
+class CumulativeFailureEvidence(unittest.TestCase):
+    def test_recovery_and_controller_restart_do_not_erase_failure(self):
+        from pompey_events import record
+
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            patch.dict(os.environ, POMPEY_EVENT_LOG=tmp + "/events"),
+        ):
+            job = Job("downloads", [], 2, 30)
+            job.error = "temporary failure"
+            job.complete(1, False)
+            job.complete(2, True)
+            record("controller-started")
+            self.assertEqual(job.failures, 0)
+            events = [
+                json.loads(line)
+                for line in Path(tmp + "/events").read_text().splitlines()
+            ]
+            self.assertEqual(events[0]["kind"], "job-failed")
+            self.assertEqual(events[0]["error"], "temporary failure")
+            self.assertEqual(events[1]["kind"], "controller-started")
+
+    def test_attention_created_and_cleared_between_health_samples_is_retained(self):
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            patch.dict(os.environ, POMPEY_DATA=tmp, POMPEY_EVENT_LOG=tmp + "/events"),
+        ):
+            state.save("requests", {"reviewRequired": "History changed"})
+            state.save("requests", {})
+            self.assertEqual(media.attention(), [])
+            events = [
+                json.loads(line)
+                for line in Path(tmp + "/events").read_text().splitlines()
+            ]
+            self.assertTrue(
+                any("History changed" in e.get("notices", []) for e in events)
+            )
 
 
 class ControllerScheduling(unittest.TestCase):

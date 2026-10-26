@@ -236,6 +236,8 @@ def journey(
         "-e",
         "POMPEY_TEST_RUN_ID=" + run_id,
         "-e",
+        "POMPEY_EVENT_LOG=/tmp/pompey/invariant-events.jsonl",
+        "-e",
         "POMPEY_TEST_CASES=" + str(count),
         "-e",
         "POMPEY_TEST_SELECTED_CASES=" + json.dumps(selected),

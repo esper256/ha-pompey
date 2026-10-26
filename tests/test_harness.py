@@ -1,6 +1,7 @@
 """Regressions for evidence loss, retry masking and binary payload boundaries."""
 
 import json
+import os
 import socket
 import struct
 from pathlib import Path
@@ -11,10 +12,115 @@ from unittest.mock import patch
 import sys
 
 sys.path.insert(0, str(Path(__file__).parent / "journey"))
-from support import Deadline, Evidence, FileChecks, HttpFailure, digest
+from support import (
+    Deadline,
+    Evidence,
+    FileChecks,
+    HttpFailure,
+    BackgroundRegression,
+    digest,
+)
 from torrent_files import TorrentFiles
 from external import World
 from fixture_network import DnsServer, PEER_IP
+from invariants import CommandHistory, Invariants, InvariantFailure
+
+
+class CumulativeInvariantEvents(unittest.TestCase):
+    def test_recovered_failures_and_cleared_notices_still_reject_checkpoint(self):
+        for event in [
+            {"kind": "job-failed", "job": "routing", "error": "temporary"},
+            {"kind": "attention", "notices": ["temporary review"]},
+        ]:
+            with self.subTest(event=event), tempfile.TemporaryDirectory() as tmp:
+                journal = Path(tmp) / "events"
+                rows = [{"time": 0, "kind": "controller-started"}, {"time": 2, **event}]
+                journal.write_text("".join(json.dumps(r) + "\n" for r in rows))
+                client = SimpleNamespace(
+                    ready_at=1, evidence=Evidence(Path(tmp) / "reports", 0)
+                )
+                with patch.dict(os.environ, POMPEY_EVENT_LOG=str(journal)):
+                    invariants = Invariants(client, SimpleNamespace(ledger=[]))
+                    with self.assertRaises(InvariantFailure):
+                        invariants.assert_events()
+                    # Recovery changes current state, not the cumulative journal.
+                    with self.assertRaises(InvariantFailure):
+                        invariants.assert_events()
+                    self.assertEqual(
+                        len(client.evidence.data["invariants"]["unexpected"]), 1
+                    )
+
+
+class CleanupDeadlines(unittest.TestCase):
+    def test_shared_work_cannot_reset_an_earlier_owners_cleanup_budget(self):
+        monitor = Invariants.__new__(Invariants)
+        torrent = {"hash": "abc", "progress": 1}
+        monitor.client = SimpleNamespace(
+            qbit=lambda path: [torrent], arr=lambda *args: {"records": []}
+        )
+        monitor.background = SimpleNamespace(
+            ledger=[
+                {
+                    "prefix": "earlier",
+                    "infoHash": "abc",
+                    "arrId": 7,
+                    "cleanupDeadline": 5,
+                }
+            ]
+        )
+        with patch("invariants.time.time", return_value=4):
+            self.assertEqual(monitor.pending_cleanup()[0]["owner"], "earlier")
+        with patch("invariants.time.time", return_value=6):
+            with self.assertRaises(BackgroundRegression) as caught:
+                monitor.pending_cleanup()
+            self.assertEqual(caught.exception.owner, "earlier")
+        torrent["progress"] = 0.5
+        with patch("invariants.time.time", return_value=4):
+            with self.assertRaises(BackgroundRegression) as caught:
+                monitor.pending_cleanup()
+            self.assertEqual(caught.exception.field, "completed download regressed")
+
+
+class LateNativeFailures(unittest.TestCase):
+    def test_old_owner_is_attributed_and_evidence_survives_native_history_pruning(self):
+        history = CommandHistory()
+        ledger = [{"prefix": "earlier-case", "arrId": 7, "since": 1}]
+        failure = {
+            "id": 4,
+            "name": "BulkMoveMovie",
+            "status": "failed",
+            "queued": "2026-10-26T00:00:00Z",
+            "body": {"movies": [{"movieId": 7}]},
+        }
+        events = history.observe("radarr", [failure], ledger)
+        self.assertEqual(events[0]["owner"], "earlier-case")
+        self.assertEqual(history.observe("radarr", [], ledger), events)
+        self.assertEqual(len(history.observe("radarr", [failure], ledger)), 1)
+
+    def test_unrelated_and_preownership_failures_are_not_blamed_on_a_case(self):
+        history = CommandHistory()
+        rows = [
+            {
+                "id": 1,
+                "name": "MoviesSearch",
+                "status": "failed",
+                "queued": "1970-01-01T00:00:01Z",
+                "body": {"movieIds": [7]},
+            },
+            {
+                "id": 2,
+                "name": "MoviesSearch",
+                "status": "failed",
+                "queued": "2026-10-26T00:00:00Z",
+                "body": {"movieIds": [8]},
+            },
+        ]
+        self.assertEqual(
+            history.observe(
+                "radarr", rows, [{"prefix": "case", "arrId": 7, "since": 2}]
+            ),
+            [],
+        )
 
 
 class FixtureDns(unittest.TestCase):

@@ -4,7 +4,6 @@ import json
 from pathlib import Path
 import subprocess
 import time
-from datetime import datetime
 from support import FileChecks, NativeCommandFailed, BackgroundRegression
 from external import PEER_IP
 
@@ -91,36 +90,6 @@ class Household:
         command = self.arr("POST", "/command", {"name": "RefreshMonitoredDownloads"})
         return self.wait_command(command["id"])
 
-    def verify_commands(self, ident, since):
-        owned = []
-        for command in self.arr("GET", "/command"):
-            body = command.get("body") or {}
-            targets = [
-                body.get("movieId"),
-                *(body.get("movieIds") or []),
-                *[m.get("movieId") for m in (body.get("movies") or [])],
-            ]
-            queued = command.get("queued")
-            if (
-                ident not in targets
-                or not queued
-                or datetime.fromisoformat(queued.replace("Z", "+00:00")).timestamp()
-                < since
-            ):
-                continue
-            owned.append(
-                {
-                    "id": command["id"],
-                    "name": command["name"],
-                    "status": command["status"],
-                }
-            )
-            if command["status"] in {"failed", "aborted", "cancelled"}:
-                raise NativeCommandFailed(
-                    "Owned Arr command failed: " + json.dumps(command)
-                )
-        self.evidence.active["nativeCommands"] = owned
-
     def service(self, name, up):
         if name not in {"wire"}:
             raise ValueError("Unknown controlled service")
@@ -131,41 +100,57 @@ class Household:
                 ["s6-svwait", "-d", "-t", "10000", path], check=True, timeout=12
             )
 
-    def healthy(self, since, allowed_attention=()):
-        def settled():
-            configuration = json.loads(
-                Path("/tmp/pompey/configuration.json").read_text()
+    def health_snapshot(self, since=None):
+        configuration = json.loads(Path("/tmp/pompey/configuration.json").read_text())
+        health = self.session.call("GET", "http://127.0.0.1:8099/health.json")
+        status = self.session.call("GET", "http://127.0.0.1:8099/status.json")
+        self.evidence.data["lastHealth"] = {
+            "configuration": configuration,
+            "health": health,
+            "status": status,
+        }
+        return (
+            configuration.get("ok") is True
+            and (since is None or configuration["updated"] >= since)
+            and status["step"] == "ready"
+            and status["label"] == "Ready"
+            and status["need_vpn"] is False
+            and all(health["services"].values())
+            and all(
+                j["failures"] == 0
+                and j["lastSuccess"] is not None
+                and (since is None or j["lastSuccess"] >= since)
+                for j in health["jobs"].values()
             )
-            health = self.session.call("GET", "http://127.0.0.1:8099/health.json")
-            status = self.session.call("GET", "http://127.0.0.1:8099/status.json")
-            self.evidence.data["lastHealth"] = {
-                "configuration": configuration,
-                "health": health,
-                "status": status,
-            }
-            return (
-                configuration.get("ok") is True
-                and configuration["updated"] >= since
-                and status["step"] == "ready"
-                and status["label"] == "Ready"
-                and status["need_vpn"] is False
-                and all(health["services"].values())
-                and all(
-                    j["failures"] == 0
-                    and j["lastSuccess"] is not None
-                    and j["lastSuccess"] >= since
-                    for j in health["jobs"].values()
-                )
-            )
+        )
 
+    def healthy(self, since):
         self.wait(
-            settled, "Controller/configuration/sidebar did not become healthy", 45
+            lambda: self.health_snapshot(since),
+            "Controller/configuration/sidebar did not become healthy",
+            45,
         )
-        notices = self.evidence.data["lastHealth"]["health"]["attention"]
-        assert all(n in allowed_attention for n in notices), (
-            "Unexpected attention",
-            notices,
-        )
+        self.assert_health()
+
+    def assert_health(self):
+        assert self.health_snapshot(), self.evidence.data.get("lastHealth")
+        health = self.evidence.data["lastHealth"]["health"]
+        assert time.time() - health["updated"] < 15, ("Stale health", health)
+        assert set(health["jobs"]) == {
+            "configuration",
+            "requests",
+            "downloads",
+            "routing",
+        }, health
+        assert set(health["services"]) == {
+            "radarr",
+            "sonarr",
+            "prowlarr",
+            "seerr",
+            "qbittorrent",
+            "vpn",
+        }, health
+        assert not health["attention"], ("Unexpected attention", health["attention"])
         assert self.arr("GET", "/indexer") and self.sonarr("GET", "/indexer"), (
             "Both Arr sources are required"
         )
@@ -317,6 +302,7 @@ def configure(client, restored):
         "Prowlarr did not synchronize into Radarr",
     )
     client.healthy(client.created_at)
+    client.ready_at = time.time()
     stamp("household-setup-complete")
 
 

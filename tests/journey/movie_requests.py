@@ -2,6 +2,7 @@
 
 from pathlib import Path
 import json
+import time
 import urllib.parse
 from household import tunnel_bytes
 from support import digest, save_json
@@ -35,7 +36,6 @@ def _movie_request(client, case, background, ledger_file):
         len(ledger),
         flush=True,
     )
-    background.verify(client)
     before = tunnel_bytes()
     status = client.peer(case)
     assert status["blocks"] == 0, (
@@ -103,6 +103,7 @@ def _movie_request(client, case, background, ledger_file):
         )
         client.wait_command(command["id"])
         assert client.arr("GET", "/movie/" + str(item["id"]))["certification"] == "PG"
+        active["freshHealthSince"] = time.time()
         client.service("wire", True)
 
         def move_intent():
@@ -184,7 +185,6 @@ def _movie_request(client, case, background, ledger_file):
         for r in explanation["releases"]
     ), explanation
     assert not client.peer(case)["unknown"], client.peer(case)["unknown"]
-    background.verify(client)
     ledger.append(
         {
             "prefix": case.prefix,
@@ -192,6 +192,10 @@ def _movie_request(client, case, background, ledger_file):
             "arrId": item["id"],
             "requestId": request["id"],
             "monitored": item["monitored"],
+            "since": active["wallStarted"],
+            "infoHash": infohash,
+            "kind": "radarr",
+            "cleanupDeadline": time.time() + 60,
             "path": str(imported),
             "sha256": checksum,
             "subtitle": str(subtitles[0]),
@@ -208,26 +212,4 @@ def _movie_request(client, case, background, ledger_file):
         priorTitlesVerified=len(ledger) - 1,
     )
 
-    def removed():
-        return not client.qbit("torrents/info?hashes=" + infohash)
-
-    wait(removed, "Stop-sharing torrent was not removed after import")
-    queue = client.arr("GET", "/queue?page=1&pageSize=100")["records"]
-    assert not [
-        r
-        for r in queue
-        if r.get("movieId") == item["id"]
-        or (r.get("downloadId") or "").lower() == infohash
-    ], queue
-    for root in [
-        "/media/dlna/downloads/By Rating",
-        "/media/dlna/downloads/complete",
-        "/media/dlna/downloads/manual",
-    ]:
-        assert not [
-            p for p in Path(root).rglob("*") if p.is_file() and case.prefix in str(p)
-        ], ("Leftover owned payload", root)
-    client.healthy(active["wallStarted"])
-    client.verify_commands(item["id"], active["wallStarted"])
-    active["stopSharingVerified"] = True
-    evidence.finish()
+    active["cleanupDeadline"] = ledger[-1]["cleanupDeadline"]
