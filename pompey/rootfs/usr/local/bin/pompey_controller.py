@@ -75,7 +75,7 @@ def dispatch(jobs, pool, now, ready):
     ]
     busy = any(j.exclusive and j.future is not None for j in candidates)
     priority = {"downloads": 0, "requests": 1, "routing": 2, "configuration": 3}
-    for job in sorted(candidates, key=lambda j: priority[j.name]):
+    for job in sorted(candidates, key=lambda j: (j.due, priority[j.name])):
         if job.future is not None or now < job.due:
             continue
         job.phase = "waiting"
@@ -117,9 +117,9 @@ def current_status(ready, services):
         configuration = json.loads((ready / "configuration.json").read_text())
     except (OSError, ValueError):
         configuration = {}
-    need_vpn = not Path(
-        os.environ.get("POMPEY_WG_FILE", "/config/wireguard/wg0.conf")
-    ).is_file()
+    # The unprivileged controller cannot inspect the root-private key directory.
+    # Root networking publishes this non-secret marker after accepting a config.
+    need_vpn = not (ready / "vpn-applied").exists()
     initialized = (ready / "seerr-arr").exists()
     complete = all(services.values()) and configuration.get("ok") and initialized
     data.update(

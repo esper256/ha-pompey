@@ -1,15 +1,26 @@
 """Movie household outcomes; transport/setup/reporting live in shared helpers."""
 
 from pathlib import Path
+import json
 import urllib.parse
 from household import tunnel_bytes
 from support import digest, save_json
 
 
 def movie_request(client, case, background, ledger_file):
+    client.evidence.begin(case)
+    if case.late_certification:
+        client.service("wire", False)
+    try:
+        return _movie_request(client, case, background, ledger_file)
+    finally:
+        if case.late_certification:
+            client.service("wire", True)
+
+
+def _movie_request(client, case, background, ledger_file):
     ledger = background.ledger
     evidence = client.evidence
-    evidence.begin(case)
     active = evidence.active
     wait = client.wait
     stamp = evidence.stamp
@@ -33,6 +44,7 @@ def movie_request(client, case, background, ledger_file):
         status,
     )
     infohash = status["infoHash"]
+    active["infoHash"] = infohash
 
     def torrent():
         rows = client.qbit("torrents/info?hashes=" + infohash)
@@ -52,6 +64,7 @@ def movie_request(client, case, background, ledger_file):
         "POST", "/request", {"mediaType": "movie", "mediaId": case.movie_id}
     )
     assert request.get("id"), request
+    active["requestId"] = request["id"]
     stamp("requested")
     wait(
         lambda: client.peer(case)["blocks"] > 0,
@@ -75,7 +88,41 @@ def movie_request(client, case, background, ledger_file):
     item = wait(
         lambda: (m := movie()) and m["hasFile"] and m, "Arr did not import the movie"
     )
+    assert item["monitored"] is True, item
     stamp("imported")
+    if case.late_certification:
+        staging = Path(item["path"])
+        assert str(staging).startswith("/media/dlna/downloads/By Rating/Movies/"), item
+        staged = next(staging.glob("*.mkv"))
+        before_move = digest(staged)
+        client.session.call(
+            "POST", f"http://10.77.0.2:18080/control/certify/{case.movie_id}", {}
+        )
+        command = client.arr(
+            "POST", "/command", {"name": "RefreshMovie", "movieId": item["id"]}
+        )
+        client.wait_command(command["id"])
+        assert client.arr("GET", "/movie/" + str(item["id"]))["certification"] == "PG"
+        client.service("wire", True)
+
+        def move_intent():
+            state = Path("/data/pompey/state/routing-movie.json")
+            if not state.exists():
+                return False
+            return (
+                json.loads(state.read_text())
+                .get(str(item["id"]), {})
+                .get("pending", {})
+                .get("hadFiles")
+            )
+
+        wait(move_intent, "Routing did not record a move with existing files")
+        active["moveWithFiles"] = {
+            "stagingPath": str(staging),
+            "sha256": before_move,
+            "hadFiles": True,
+        }
+
     base = Path("/media/dlna/Movies")
 
     def library_file():
@@ -93,6 +140,12 @@ def movie_request(client, case, background, ledger_file):
         90,
     )
     stamp("library-routed")
+    if case.late_certification:
+        assert digest(imported) == active["moveWithFiles"]["sha256"]
+        assert not list(Path(active["moveWithFiles"]["stagingPath"]).rglob("*.*")), (
+            "Staging payload remains"
+        )
+
     source = Path("/tmp/world") / case.release / (case.release + ".mkv")
     checksum = digest(imported)
     assert checksum == digest(source), "Imported bytes belong to another case"
@@ -113,7 +166,7 @@ def movie_request(client, case, background, ledger_file):
     assert tunnel_bytes() - before >= transfer["payloadBytes"], (
         "Payload bypassed tunnel"
     )
-    diagnosis = client.session.call("GET", "http://127.0.0.1:8097/diagnostics")
+    diagnosis = client.session.call("GET", "http://127.0.0.1:8099/diagnostics")
     assert any(
         r["id"] == request["id"] and r["arrLinked"] for r in diagnosis["requests"]
     ), diagnosis
@@ -123,7 +176,7 @@ def movie_request(client, case, background, ledger_file):
     ), diagnosis
     explanation = client.session.call(
         "POST",
-        "http://127.0.0.1:8097/diagnostics/search",
+        "http://127.0.0.1:8099/diagnostics/search",
         {"kind": "radarr", "id": item["id"]},
     )
     assert explanation["status"] == "Search complete" and any(
@@ -138,6 +191,7 @@ def movie_request(client, case, background, ledger_file):
             "tmdbId": case.movie_id,
             "arrId": item["id"],
             "requestId": request["id"],
+            "monitored": item["monitored"],
             "path": str(imported),
             "sha256": checksum,
             "subtitle": str(subtitles[0]),
@@ -153,4 +207,27 @@ def movie_request(client, case, background, ledger_file):
         sha256=checksum,
         priorTitlesVerified=len(ledger) - 1,
     )
+
+    def removed():
+        return not client.qbit("torrents/info?hashes=" + infohash)
+
+    wait(removed, "Stop-sharing torrent was not removed after import")
+    queue = client.arr("GET", "/queue?page=1&pageSize=100")["records"]
+    assert not [
+        r
+        for r in queue
+        if r.get("movieId") == item["id"]
+        or (r.get("downloadId") or "").lower() == infohash
+    ], queue
+    for root in [
+        "/media/dlna/downloads/By Rating",
+        "/media/dlna/downloads/complete",
+        "/media/dlna/downloads/manual",
+    ]:
+        assert not [
+            p for p in Path(root).rglob("*") if p.is_file() and case.prefix in str(p)
+        ], ("Leftover owned payload", root)
+    client.healthy(active["wallStarted"])
+    client.verify_commands(item["id"], active["wallStarted"])
+    active["stopSharingVerified"] = True
     evidence.finish()

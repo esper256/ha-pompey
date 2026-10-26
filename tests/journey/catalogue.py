@@ -16,6 +16,10 @@ class Case:
     certification: str
 
     @property
+    def late_certification(self):
+        return self.index == 3
+
+    @property
     def movie_id(self):
         return 1184918 + self.index
 
@@ -40,11 +44,12 @@ def cases():
     run = os.environ["POMPEY_TEST_RUN_ID"]
     if not re.fullmatch("[a-f0-9]{10}", run):
         raise ValueError("Invalid test run identity")
-    count = int(os.environ.get("POMPEY_TEST_CASES", "3"))
+    count = int(os.environ.get("POMPEY_TEST_CASES", "4"))
     if not 1 <= count <= 100:
         raise ValueError("Choose between 1 and 100 scenarios")
     return [
-        Case(i, f"Pompey{run}Case{i:03d}", ["PG", "R", ""][i % 3]) for i in range(count)
+        Case(i, f"Pompey{run}Case{i:03d}", "PG" if i == 3 else ["PG", "R", ""][i % 3])
+        for i in range(count)
     ]
 
 

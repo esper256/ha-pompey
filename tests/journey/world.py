@@ -13,6 +13,10 @@ def run(*args):
 
 def main():
     os.unshare(os.CLONE_NEWNET)
+    # Pin the namespace before dropping UID: /proc/PID/ns becomes ptrace-gated
+    # after setuid. A private nsfs handle avoids adding SYS_PTRACE to the runner.
+    Path("/tmp/world/netns").touch()
+    run("mount", "--bind", "/proc/self/ns/net", "/tmp/world/netns")
     Path("/tmp/world/namespace-ready").touch()
     until = time.monotonic() + 10
     while time.monotonic() < until:

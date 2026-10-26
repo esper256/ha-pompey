@@ -6,6 +6,6 @@ source "$(command -v pompey-env)"
 
 
 pompey-log start "Radarr"
-exec > >(pompey-log prefix "Radarr")
+exec > >(s6-setuidgid pompey pompey-log prefix "Radarr")
 exec 2>&1
 exec s6-setuidgid pompey "${POMPEY_ENGINES}/Radarr/Radarr" -nobrowser -data="${POMPEY_CONFIG}/radarr"

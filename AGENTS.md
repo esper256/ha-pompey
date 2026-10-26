@@ -4,7 +4,7 @@ Read [README.md](README.md), [pompey/DOCS.md](pompey/DOCS.md) and [docs/testing.
 
 Supervisor builds `pompey/Dockerfile` locally and starts **one** HAOS add-on container. The household never starts Docker, and we never publish images to Docker Hub/GHCR. A local Docker/Podman build checks the Dockerfile; the journey checks the actual built musl runtime. Neither reproduces Supervisor. The automated acceptance suite is the release gate; see docs/foundation.md for this campaign. Do not spend the session faking Supervisor.
 
-Run `bash tests/run.sh` for routine work. Real pinned artifact, Arr import/Recyclarr, and Seerr API tests are described in the testing guide. Runtime Python sources use `.py` suffixes; only lint shell entrypoints with shellcheck. CI must require the isolated packet tests rather than silently skip them.
+Run `bash tests/run.sh` for routine work. The real-application household batch, focused logic checks and required isolated packet tests are described in the testing guide. Runtime Python sources use `.py` suffixes; only lint shell entrypoints with shellcheck. CI must require the isolated packet tests rather than silently skip them.
 
 ## PR completion: do not wait for CI
 

@@ -43,18 +43,18 @@ def main():
         help="Independent batches for timing; any failure stops the run",
     )
     parser.add_argument(
-        "--scenarios", type=int, default=3, help="Distinct household journeys per batch"
+        "--scenarios", type=int, default=4, help="Distinct household journeys per batch"
     )
     parser.add_argument(
         "--layout",
-        choices=["shared", "cloned", "fresh"],
+        choices=["shared", "cloned", "fresh", "ci"],
         default="shared",
         help="Reuse a running household, clone cold configured state, or start fresh per scenario",
     )
     args = parser.parse_args()
-    if args.runs < 1 or not 1 <= args.scenarios <= 100:
+    if args.runs < 1 or not 1 <= args.scenarios <= (99 if args.layout == "ci" else 100):
         parser.error(
-            "--runs must be positive and --scenarios must be between 1 and 100"
+            "--runs must be positive and --scenarios must be within catalogue capacity (99 for ci, 100 otherwise)"
         )
     command = runtime()
     results = ROOT / ".test-results"
@@ -136,15 +136,36 @@ def check_suite(engine, test_image):
     # No s6/downloader in logic checks; packet workers modify only their own namespaces.
     engine.worker(test_image, "/tests/checks.py", label="logic-syntax-and-lint")
     engine.worker(
-        test_image, "/tests/test_firewall.py", privileged=True, label="isolated-packets"
+        test_image,
+        "/tests/test_firewall.py",
+        network_checks=True,
+        label="isolated-packets",
     )
 
 
 def batch(engine, test_image, results, sample, count):
     started = time.monotonic()
     try:
-        if sample["layout"] == "shared":
-            journey(engine, test_image, results, sample, count, list(range(count)))
+        if sample["layout"] in {"shared", "ci"}:
+            first = journey(
+                engine,
+                test_image,
+                results,
+                sample,
+                count + (sample["layout"] == "ci"),
+                list(range(count)),
+                export_seed=sample["layout"] == "ci",
+            )
+            if sample["layout"] == "ci":
+                journey(
+                    engine,
+                    test_image,
+                    results,
+                    sample,
+                    count + 1,
+                    [count],
+                    seed=first["configuredSeed"],
+                )
         else:
             first = journey(
                 engine,
@@ -172,7 +193,7 @@ def batch(engine, test_image, results, sample, count):
     print(
         "BATCH",
         sample["layout"],
-        count,
+        count + (sample["layout"] == "ci"),
         "scenarios:",
         sample["wallSeconds"],
         "seconds",
@@ -215,36 +236,42 @@ def journey(
         "-e",
         "POMPEY_TEST_RUN_ID=" + run_id,
         "-e",
-        "S6_SERVICES_GRACETIME=30000",
-        "-e",
         "POMPEY_TEST_CASES=" + str(count),
         "-e",
         "POMPEY_TEST_SELECTED_CASES=" + json.dumps(selected),
         "-e",
-        "POMPEY_JOB_INTERVALS=" + json.dumps({"configuration": 2, "routing": 1}),
+        "POMPEY_JOB_INTERVALS="
+        + json.dumps({"configuration": 2, "routing": 2, "requests": 2, "downloads": 2}),
     ]
+    flags += engine.namespace_security
     try:
         if seed:
             run(["create", *flags, "-e", "POMPEY_TEST_CONFIGURED=1", test_image], 60)
             restore_seconds = engine.restore(name, seed)
             run(
                 ["start", "--attach", name],
-                STARTUP_TIMEOUT + SCENARIO_TIMEOUT * len(selected) + 90,
+                STARTUP_TIMEOUT + SCENARIO_TIMEOUT * len(selected) + 180,
                 log=destination / "container.log",
             )
         else:
             run(
                 ["run", *flags, test_image],
-                STARTUP_TIMEOUT + SCENARIO_TIMEOUT * len(selected) + 90,
+                STARTUP_TIMEOUT + SCENARIO_TIMEOUT * len(selected) + 180,
                 log=destination / "container.log",
             )
         report = json.loads((destination / "result.json").read_text())
         assert report["success"], report
+        engine.assert_clean_stop(destination)
         if export_seed:
             seed, snapshot_seconds = engine.snapshot(name, destination)
             sample["configuredSeed"] = seed
         sample["success"] = True
     except BaseException as exc:
+        if (destination / "container.log").exists():
+            try:
+                engine.assert_clean_stop(destination)
+            except Exception as stop:
+                sample["shutdownError"] = str(stop)
         sample["error"] = {"type": type(exc).__name__, "message": str(exc)}
         raise
     finally:

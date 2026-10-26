@@ -34,6 +34,31 @@ def digest(path):
         return hashlib.file_digest(source, "sha256").hexdigest()
 
 
+class FixtureContractError(AssertionError):
+    category = "fixture-contract"
+
+
+class NativeCommandFailed(AssertionError):
+    category = "native-command-failed"
+
+
+class BackgroundRegression(AssertionError):
+    category = "background-regression"
+
+    def __init__(self, owner, field, detail):
+        self.owner = owner
+        self.field = field
+        super().__init__(f"{owner}: {field}: {detail}")
+
+
+class WaitTimeout(AssertionError):
+    category = "timeout"
+
+    def __init__(self, stage, attempts, last):
+        self.stage = stage
+        super().__init__(f"{stage} after {attempts} observations: {last}")
+
+
 class HttpFailure(RuntimeError):
     def __init__(self, method, url, status, detail):
         self.status = status
@@ -73,7 +98,7 @@ class Deadline:
                 except (OSError, urllib.error.URLError) as exc:
                     last = str(exc)
                 time.sleep(min(0.2, max(0, until - time.monotonic())))
-            raise AssertionError(f"{message} after {attempts} observations: {last}")
+            raise WaitTimeout(message, attempts, last)
         finally:
             self.until = original
 
@@ -152,6 +177,8 @@ class Evidence:
             "certification": case.certification,
             "library": case.library,
             "started": time.monotonic(),
+            "wallStarted": time.time(),
+            "budgetSeconds": SCENARIO_TIMEOUT,
             "timings": {},
             "status": "running",
         }
@@ -165,6 +192,20 @@ class Evidence:
 
     def fail(self, exc):
         self.data["error"] = {
+            "category": getattr(
+                exc,
+                "category",
+                "timeout"
+                if isinstance(exc, TimeoutError)
+                else "application-http"
+                if isinstance(exc, HttpFailure)
+                else "assertion"
+                if isinstance(exc, AssertionError)
+                else "harness",
+            ),
+            "owner": getattr(exc, "owner", None),
+            "field": getattr(exc, "field", None),
+            "stage": getattr(exc, "stage", None),
             "type": type(exc).__name__,
             "message": str(exc),
             "traceback": traceback.format_exc(),
@@ -174,6 +215,13 @@ class Evidence:
             if self.active
             else next(reversed(self.data["timings"]), None),
         }
+        print(
+            "FAIL",
+            self.data["error"]["category"],
+            self.data["error"]["owner"] or self.data["error"]["case"] or "startup",
+            str(exc),
+            flush=True,
+        )
         if self.active:
             self.active["status"] = "failed"
         self.checkpoint()

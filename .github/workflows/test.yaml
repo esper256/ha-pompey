@@ -54,7 +54,7 @@ jobs:
           rm -rf /tmp/pompey-build-cache
           mv /tmp/pompey-build-cache-new /tmp/pompey-build-cache
       - name: Focused logic, required packets and the real request-to-library journey
-        run: bash tests/run.sh --skip-build
+        run: bash tests/run.sh --skip-build --layout ci
         env:
           POMPEY_CONTAINER_COMMAND: docker
       - uses: actions/upload-artifact@v7
@@ -94,7 +94,7 @@ jobs:
       - name: Resolve stable releases and pinned resources
         run: python3 tools/build_engine_manifest.py pompey/rootfs/usr/share/pompey/engines.json
       - name: Build and exercise the candidate's actual applications
-        run: bash tests/run.sh
+        run: bash tests/run.sh --layout ci
         env:
           POMPEY_CONTAINER_COMMAND: docker
       - uses: actions/upload-artifact@v7

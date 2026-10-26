@@ -3,7 +3,9 @@
 import json
 from pathlib import Path
 import subprocess
-from support import FileChecks
+import time
+from datetime import datetime
+from support import FileChecks, NativeCommandFailed, BackgroundRegression
 from external import PEER_IP
 
 
@@ -20,6 +22,7 @@ class Household:
         self.evidence = evidence
         self.secrets = secrets
         self.skey = ""
+        self.created_at = time.time()
 
     def arr(self, method, path, body=None):
         return self.session.call(
@@ -77,7 +80,9 @@ class Household:
         def complete():
             result = api("GET", "/command/" + str(ident))
             if result["status"] in {"failed", "aborted", "cancelled"}:
-                raise AssertionError("Native command failed: " + json.dumps(result))
+                raise NativeCommandFailed(
+                    "Native command failed: " + json.dumps(result)
+                )
             return result["status"] == "completed" and result
 
         return self.wait(complete, service + " command did not complete")
@@ -86,39 +91,136 @@ class Household:
         command = self.arr("POST", "/command", {"name": "RefreshMonitoredDownloads"})
         return self.wait_command(command["id"])
 
+    def verify_commands(self, ident, since):
+        owned = []
+        for command in self.arr("GET", "/command"):
+            body = command.get("body") or {}
+            targets = [
+                body.get("movieId"),
+                *(body.get("movieIds") or []),
+                *[m.get("movieId") for m in (body.get("movies") or [])],
+            ]
+            queued = command.get("queued")
+            if (
+                ident not in targets
+                or not queued
+                or datetime.fromisoformat(queued.replace("Z", "+00:00")).timestamp()
+                < since
+            ):
+                continue
+            owned.append(
+                {
+                    "id": command["id"],
+                    "name": command["name"],
+                    "status": command["status"],
+                }
+            )
+            if command["status"] in {"failed", "aborted", "cancelled"}:
+                raise NativeCommandFailed(
+                    "Owned Arr command failed: " + json.dumps(command)
+                )
+        self.evidence.active["nativeCommands"] = owned
+
+    def service(self, name, up):
+        if name not in {"wire"}:
+            raise ValueError("Unknown controlled service")
+        path = "/run/service/" + name
+        subprocess.run(["s6-svc", "-u" if up else "-d", path], check=True, timeout=3)
+        if not up:
+            subprocess.run(
+                ["s6-svwait", "-d", "-t", "10000", path], check=True, timeout=12
+            )
+
+    def healthy(self, since, allowed_attention=()):
+        def settled():
+            configuration = json.loads(
+                Path("/tmp/pompey/configuration.json").read_text()
+            )
+            health = self.session.call("GET", "http://127.0.0.1:8099/health.json")
+            status = self.session.call("GET", "http://127.0.0.1:8099/status.json")
+            self.evidence.data["lastHealth"] = {
+                "configuration": configuration,
+                "health": health,
+                "status": status,
+            }
+            return (
+                configuration.get("ok") is True
+                and configuration["updated"] >= since
+                and status["step"] == "ready"
+                and status["label"] == "Ready"
+                and status["need_vpn"] is False
+                and all(health["services"].values())
+                and all(
+                    j["failures"] == 0
+                    and j["lastSuccess"] is not None
+                    and j["lastSuccess"] >= since
+                    for j in health["jobs"].values()
+                )
+            )
+
+        self.wait(
+            settled, "Controller/configuration/sidebar did not become healthy", 45
+        )
+        notices = self.evidence.data["lastHealth"]["health"]["attention"]
+        assert all(n in allowed_attention for n in notices), (
+            "Unexpected attention",
+            notices,
+        )
+        assert self.arr("GET", "/indexer") and self.sonarr("GET", "/indexer"), (
+            "Both Arr sources are required"
+        )
+        self.evidence.checkpoint()
+
 
 def identities():
-    found = {}
+    tokens = {
+        "Radarr": "radarr",
+        "Sonarr": "sonarr",
+        "Prowlarr": "prowlarr",
+        "qbittorrent-nox": "qbittorrent",
+        "node": "seerr",
+    }
+    processes = {}
     for path in Path("/proc").glob("[0-9]*/status"):
         try:
-            body = path.read_text()
+            values = dict(
+                line.split(":", 1)
+                for line in path.read_text().splitlines()
+                if ":" in line
+            )
             cmd = (path.parent / "cmdline").read_bytes().replace(b"\0", b" ").decode()
+            processes[int(path.parent.name)] = {
+                "cmd": cmd,
+                "parent": int(values["PPid"]),
+                "uids": values["Uid"].split(),
+                "caps": {k: int(values[k], 16) for k in ["CapEff", "CapPrm", "CapAmb"]},
+            }
         except (OSError, UnicodeError):
             continue
-        if not any(
-            token in cmd
-            for token in [
-                "/Radarr/Radarr",
-                "/Sonarr/Sonarr",
-                "/Prowlarr/Prowlarr",
-                "--confirm-legal-notice",
-                "node dist/index.js",
-            ]
-        ):
+    roots = {}
+    for pid, p in processes.items():
+        args = p["cmd"].split()
+        if not args:
             continue
-        uid = next(
-            line for line in body.splitlines() if line.startswith("Uid:")
-        ).split()[1:]
-        assert set(uid) == {"1000"}, (cmd, uid)
-        caps = {
-            line.split(":")[0]: int(line.split()[1], 16)
-            for line in body.splitlines()
-            if line.startswith(("CapEff:", "CapPrm:", "CapAmb:"))
-        }
-        assert not any(caps.values()), (cmd, caps)
-        found[cmd] = uid
-    assert len(found) == 5, found
-    return found
+        name = Path(args[0]).name
+        if name not in tokens or (name == "node" and "dist/index.js" not in args):
+            continue
+        roots[pid] = tokens[name]
+    result = {kind: [] for kind in tokens.values()}
+    for pid, p in processes.items():
+        ancestor = pid
+        seen = set()
+        while ancestor not in roots and ancestor in processes and ancestor not in seen:
+            seen.add(ancestor)
+            ancestor = processes[ancestor]["parent"]
+        if ancestor not in roots:
+            continue
+        assert set(p["uids"]) == {"1000"} and not any(p["caps"].values()), p
+        result[roots[ancestor]].append(
+            {"pid": pid, "role": "main" if pid in roots else "worker", **p}
+        )
+    assert all(result.values()), ("Missing engines", result)
+    return result
 
 
 def configure(client, restored):
@@ -149,7 +251,18 @@ def configure(client, restored):
             )
         },
     )
-    assert client.qbit("app/preferences")["bittorrent_protocol"] == 1
+    preferences = client.qbit("app/preferences")
+    expected = {
+        "bittorrent_protocol": 1,
+        "dht": False,
+        "pex": False,
+        "lsd": False,
+        "upnp": False,
+    }
+    assert all(preferences[k] == v for k, v in expected.items()), expected
+    client.evidence.data["fixtureDownloaderPreferences"] = {
+        k: preferences[k] for k in expected
+    }
     wait(
         lambda: any(
             int(line.split()[1]) > 0
@@ -203,6 +316,7 @@ def configure(client, restored):
         lambda: client.arr("GET", "/indexer"),
         "Prowlarr did not synchronize into Radarr",
     )
+    client.healthy(client.created_at)
     stamp("household-setup-complete")
 
 
@@ -231,21 +345,36 @@ class Background:
             if skip > 10000:
                 raise AssertionError("Request pagination did not terminate")
         for row in self.ledger:
+
+            def require(ok, field, actual):
+                if not ok:
+                    raise BackgroundRegression(row["prefix"], field, actual)
+
             request = requests.get(row["requestId"])
-            assert request and request["media"]["tmdbId"] == row["tmdbId"], (
-                "Earlier request changed",
-                row,
+            require(
+                request and request["media"]["tmdbId"] == row["tmdbId"],
+                "request",
                 request,
             )
             movie = movies.get(row["arrId"])
-            assert (
+            require(
                 movie
                 and movie["tmdbId"] == row["tmdbId"]
                 and movie["title"] == row["prefix"]
-                and movie["hasFile"]
-            ), ("Earlier title changed", row, movie)
+                and movie["hasFile"],
+                "title",
+                movie,
+            )
+            require(
+                movie.get("monitored") == row["monitored"],
+                "monitored",
+                movie.get("monitored"),
+            )
             for path, key in [
                 (row["path"], "sha256"),
                 (row["subtitle"], "subtitleSha256"),
             ]:
-                self.files.verify(path, row[key], full=full)
+                try:
+                    self.files.verify(path, row[key], full=full)
+                except (OSError, AssertionError) as exc:
+                    raise BackgroundRegression(row["prefix"], key, str(exc)) from exc

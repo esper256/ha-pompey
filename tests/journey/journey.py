@@ -12,6 +12,8 @@ sys.path[:0] = ["/tests/journey", "/usr/local/bin"]
 from catalogue import cases
 from household import Household, Background, configure, identities
 from movie_requests import movie_request
+from stack_checks import outage
+from support import FixtureContractError
 from support import (
     Deadline,
     Evidence,
@@ -26,6 +28,7 @@ from support import (
 def collect_failure(client, root):
     """Use a separate bounded budget; diagnostics must never replace the failure."""
     snapshots = {}
+    active = client.evidence.active if client else None
     if client:
         session = Session(Deadline(10), client.session.opener)
         probe = Household(client.secrets, session, client.evidence)
@@ -34,6 +37,16 @@ def collect_failure(client, root):
             ("radarrMovies", lambda: probe.arr("GET", "/movie")),
             ("radarrQueue", lambda: probe.arr("GET", "/queue?page=1&pageSize=100")),
             ("radarrCommands", lambda: probe.arr("GET", "/command")),
+            ("radarrHistory", lambda: probe.arr("GET", "/history?page=1&pageSize=50")),
+            (
+                "radarrBlocklist",
+                lambda: probe.arr("GET", "/blocklist?page=1&pageSize=50"),
+            ),
+            ("prowlarrStatus", lambda: probe.prow("GET", "/indexerstatus")),
+            (
+                "prowlarrHistory",
+                lambda: probe.prow("GET", "/history?page=1&pageSize=50"),
+            ),
             ("sonarrQueue", lambda: probe.sonarr("GET", "/queue?page=1&pageSize=100")),
             ("torrents", lambda: probe.qbit("torrents/info")),
             ("requests", lambda: probe.search("GET", "/request?take=100&skip=0")),
@@ -42,9 +55,28 @@ def collect_failure(client, root):
                 snapshots[name] = action()
             except Exception as exc:
                 snapshots[name] = {"error": str(exc)}
+        if active:
+            try:
+                if active.get("requestId"):
+                    snapshots["requestDetail"] = probe.search(
+                        "GET", "/request/" + str(active["requestId"])
+                    )
+                if active.get("infoHash"):
+                    for endpoint in ["trackers", "properties"]:
+                        try:
+                            snapshots["torrent" + endpoint] = probe.qbit(
+                                "torrents/" + endpoint + "?hash=" + active["infoHash"]
+                            )
+                        except Exception as exc:
+                            snapshots["torrent" + endpoint] = {"error": str(exc)}
+            except Exception as exc:
+                snapshots["caseDetailError"] = str(exc)
     for file in [
-        Path("/tmp/pompey/health.json"),
-        *Path("/config").rglob("*.debug.txt"),
+        *[
+            Path("/tmp/pompey") / name
+            for name in ["configuration.json", "health.json", "status.json"]
+        ],
+        *Path("/config").glob("*/logs/*.txt"),
     ]:
         try:
             snapshots[str(file)] = tail(file)
@@ -58,6 +90,26 @@ def collect_failure(client, root):
             pass
 
 
+def transcript():
+    # The fixture writes evidence outside its namespace too, so a broken tunnel
+    # cannot erase the unknown endpoint responsible for an application failure.
+    events = Path("/tmp/world/events/transcript.jsonl")
+    unknown = Path("/tmp/world/events/unknown.json")
+    return {
+        "requests": [json.loads(row) for row in events.read_text().splitlines()]
+        if events.exists()
+        else [],
+        "unknown": json.loads(unknown.read_text()) if unknown.exists() else [],
+    }
+
+
+def assert_contract():
+    external = transcript()
+    if external["unknown"]:
+        raise FixtureContractError(str(external["unknown"]))
+    return external
+
+
 def main():
     if not __debug__:
         raise RuntimeError(
@@ -68,7 +120,7 @@ def main():
     evidence = Evidence(
         root, started, json.loads(Path("/tmp/world/bootstrap-timings.json").read_text())
     )
-    selected = json.loads(os.environ.get("POMPEY_TEST_SELECTED_CASES", "[0,1,2]"))
+    selected = json.loads(os.environ.get("POMPEY_TEST_SELECTED_CASES", "[0,1,2,3]"))
     catalogue = cases()
     if (
         not selected
@@ -108,6 +160,19 @@ def main():
             session.deadline = Deadline(SCENARIO_TIMEOUT)
             movie_request(client, catalogue[index], background, ledger_file)
         background.verify(client, full=True)
+        if 0 in selected:
+            outage(client)
+            background.verify(client, full=True)
+        external = assert_contract()
+        dns = {
+            r["name"]
+            for r in external["requests"]
+            if r.get("kind") == "dns" and r.get("source") == "10.77.0.1"
+        }
+        assert {"api.radarr.video", "api.themoviedb.org"} <= dns, (
+            "Real engine DNS missing",
+            dns,
+        )
         evidence.data["timings"]["batch-complete"] = round(
             time.monotonic() - started, 3
         )
@@ -121,7 +186,17 @@ def main():
             flush=True,
         )
     except BaseException as exc:
-        evidence.fail(exc)
+        unknown = transcript()["unknown"]
+        if unknown:
+            evidence.data["fixtureUnknown"] = unknown
+            evidence.fail(FixtureContractError(str(unknown)))
+            evidence.data["originalError"] = {
+                "type": type(exc).__name__,
+                "message": str(exc),
+            }
+            evidence.checkpoint()
+        else:
+            evidence.fail(exc)
         traceback.print_exc()
         try:
             collect_failure(client, root)
@@ -129,15 +204,7 @@ def main():
             print("Failure evidence collection also failed:", diagnostic, flush=True)
         raise
     finally:
-        try:
-            session = Session(Deadline(3))
-            url = "http://10.77.0.2:18080/control/transcript"
-            external = session.call("GET", url)
-        except Exception as exc:
-            external = {
-                "requests": [],
-                "unknown": ["Fixture evidence unavailable: " + str(exc)],
-            }
+        external = transcript()
         save_json(root / "external-requests.json", external["requests"])
         save_json(root / "unexpected-requests.json", external["unknown"])
 

@@ -14,8 +14,9 @@ import time
 from urllib.parse import parse_qs, urlsplit
 from catalogue import cases
 from torrent_files import TorrentFiles
+from fixture_network import PEER_IP, DnsServer
+from support import save_json
 
-PEER_IP = "10.77.0.2"
 PIECE_SIZE = 256 * 1024
 
 
@@ -147,10 +148,32 @@ class World:
         self.cases = cases()
         self.torrents = {c.movie_id: Torrent(c, folder / c.release) for c in self.cases}
         self.by_hash = {t.digest: t for t in self.torrents.values()}
-        self.requests = []
         self.unknown = []
         self.servers = []
         self.started = float(Path("/tmp/world/started").read_text())
+        self.record_lock = threading.Lock()
+        self.control_file = Path("/data/pompey-fixture/state.json")
+        self.controls = (
+            json.loads(self.control_file.read_text())
+            if self.control_file.exists()
+            else {}
+        )
+
+    def record(self, row):
+        row = {"elapsedSeconds": round(time.monotonic() - self.started, 3), **row}
+        with self.record_lock:
+            with Path("/tmp/world/events/transcript.jsonl").open("a") as output:
+                output.write(json.dumps(row) + "\n")
+
+    def unexpected(self, message):
+        with self.record_lock:
+            self.unknown.append(message)
+            save_json("/tmp/world/events/unknown.json", self.unknown)
+
+    def certification(self, case):
+        return self.controls.get(
+            str(case.movie_id), "" if case.late_certification else case.certification
+        )
 
     def start(self, cert, key):
         world = self
@@ -170,8 +193,10 @@ class World:
                 host = self.headers.get("Host", "").split(":")[0]
                 query = parse_qs(urlsplit(self.path).query, encoding="latin-1")
                 if not path.startswith("/control/"):
-                    world.requests.append(
+                    world.record(
                         {
+                            "kind": "http",
+                            "source": self.client_address[0],
                             "elapsedSeconds": round(
                                 time.monotonic() - world.started, 3
                             ),
@@ -193,7 +218,7 @@ class World:
                 try:
                     content_type, body, code = world.respond(host, path, query)
                 except Exception as exc:
-                    world.unknown.append(f"{host}{path}: {exc}")
+                    world.unexpected(f"{host}{path}: {exc}")
                     content_type, body, code = (
                         "application/json",
                         json.dumps({"error": str(exc)}).encode(),
@@ -217,6 +242,7 @@ class World:
                 server.socket = context.wrap_socket(server.socket, server_side=True)
             self.servers.append(server)
             threading.Thread(target=server.serve_forever, daemon=True).start()
+        DnsServer(self.record, self.unexpected).start()
         listener = socket.socket()
         listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         listener.bind(("0.0.0.0", 18181))
@@ -239,10 +265,14 @@ class World:
             path.startswith(("/control/", "/download/"))
             or path in {"/announce", "/api", "/api/", "/library/sections"}
         ):
-            self.unknown.append(f"{host}{path}")
+            self.unexpected(f"{host}{path}")
             return js({"error": "Wrong fixture host"}, 404)
-        if path == "/control/transcript":
-            return js({"requests": self.requests, "unknown": self.unknown})
+        if path.startswith("/control/certify/"):
+            ident = path.rsplit("/", 1)[1]
+            case = next(c for c in self.cases if str(c.movie_id) == ident)
+            self.controls[ident] = case.certification
+            save_json(self.control_file, self.controls)
+            return js({"ok": True})
         if path.startswith("/control/status/"):
             torrent = self.torrents[int(path.rsplit("/", 1)[1])]
             return js(
@@ -329,7 +359,7 @@ class World:
                     OriginalTitle=case.title,
                     TitleSlug=case.title.lower() + "-" + str(case.movie_id),
                     Certifications=[
-                        {"Country": "US", "Certification": case.certification}
+                        {"Country": "US", "Certification": self.certification(case)}
                     ],
                 )
                 return js(movie)
@@ -395,7 +425,7 @@ class World:
                 },
                 503,
             )
-        self.unknown.append(f"{host}{path}")
+        self.unexpected(f"{host}{path}")
         return js({"error": "No replay for this request"}, 404)
 
     def movie(self, case):
@@ -433,7 +463,7 @@ class World:
                         "iso_3166_1": "US",
                         "release_dates": [
                             {
-                                "certification": case.certification,
+                                "certification": self.certification(case),
                                 "release_date": "2024-01-01T00:00:00Z",
                                 "type": 4,
                             }
@@ -454,5 +484,5 @@ class World:
         except (EOFError, OSError):
             sock.close()
         except ValueError as exc:
-            self.unknown.append(str(exc))
+            self.unexpected(str(exc))
             sock.close()

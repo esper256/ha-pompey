@@ -1,6 +1,7 @@
 """Prepare only the isolated external world, then exec the image's actual /init."""
 
 import json
+import configparser
 import os
 from pathlib import Path
 import subprocess
@@ -8,7 +9,7 @@ import sys
 import time
 
 sys.path.insert(0, "/tests/journey")
-from external import PEER_IP
+from fixture_network import PEER_IP, HOSTS
 from catalogue import prepare_media
 
 
@@ -59,20 +60,7 @@ def prepare():
         INGRESS_PORT="8099",
         NODE_EXTRA_CA_CERTS="/usr/local/share/ca-certificates/pompey-test.crt",
     )
-    hosts = [
-        "api.themoviedb.org",
-        "api.radarr.video",
-        "skyhook.sonarr.tv",
-        "plex.tv",
-        "image.tmdb.org",
-        "api.github.com",
-        "indexers.prowlarr.com",
-        "radarr.servarr.com",
-        "services.sonarr.tv",
-        "prowlarr.servarr.com",
-    ]
-    with open("/etc/hosts", "a") as out:
-        out.write("\n" + PEER_IP + " " + " ".join(hosts) + "\n")
+    hosts = HOSTS
     run(
         "/tests/journey/tool",
         "openssl",
@@ -134,6 +122,26 @@ PersistentKeepalive = 1
 """
     Path("/config/wireguard/wg0.conf").write_text(config)
     Path("/config/wireguard/wg0.conf").chmod(0o600)
+    # Disable public discovery before the real downloader starts; production
+    # config generation preserves these unrelated native preferences.
+    path = Path("/config/qBittorrent/config/qBittorrent.conf")
+    config = configparser.RawConfigParser(delimiters=("=",), strict=False)
+    config.optionxform = str
+    if path.exists():
+        config.read(path)
+    if not config.has_section("BitTorrent"):
+        config.add_section("BitTorrent")
+    for key in ["Session\\DHTEnabled", "Session\\PeXEnabled", "Session\\LSDEnabled"]:
+        config.set("BitTorrent", key, "false")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w") as out:
+        config.write(out, space_around_delimiters=False)
+    controls = Path("/data/pompey-fixture")
+    controls.mkdir(exist_ok=True)
+    os.chown(controls, 1000, 1000)
+    events = Path("/tmp/world/events")
+    events.mkdir()
+    os.chown(events, 1000, 1000)
     prepare_media(Path("/tmp/world"))
     worker = subprocess.Popen(["python3", "-u", "/tests/journey/world.py"])
     deadline = time.monotonic() + 10

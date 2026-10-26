@@ -15,6 +15,13 @@ class Runtime:
         self.root = root
         self.progress = progress
         self.measurements = {}
+        # Docker's default AppArmor denies the namespace bind mounts used by
+        # ip-netns and the fixture. Scope the exception to network test workers.
+        self.namespace_security = (
+            ["--security-opt", "apparmor=unconfined"]
+            if any(Path(part).name == "docker" for part in command)
+            else []
+        )
 
     def run(
         self,
@@ -56,7 +63,7 @@ class Runtime:
                 )
             self.progress()
 
-    def worker(self, image, script, timeout=120, privileged=False, label=None):
+    def worker(self, image, script, timeout=120, network_checks=False, label=None):
         name = "pompey-check-" + uuid.uuid4().hex[:10]
         flags = [
             "--name",
@@ -67,8 +74,18 @@ class Runtime:
             "--security-opt",
             "label=disable",
         ]
-        if privileged:
-            flags += ["--privileged", "-e", "POMPEY_REQUIRE_NETWORK_TESTS=1"]
+        if network_checks:
+            flags += self.namespace_security
+            flags += [
+                "--cap-add",
+                "NET_ADMIN",
+                "--cap-add",
+                "SYS_ADMIN",
+                "--cap-add",
+                "NET_RAW",
+                "-e",
+                "POMPEY_REQUIRE_NETWORK_TESTS=1",
+            ]
         failed = False
         try:
             return self.run(
@@ -110,7 +127,7 @@ class Runtime:
             )
         return round(time.monotonic() - before, 3)
 
-    def snapshot(self, name, destination):
+    def assert_clean_stop(self, destination):
         # Called only after PID 1 exits. Reject nonzero exits, fatal signals and
         # service shutdown timeouts; none is a trustworthy configured seed.
         log = (destination / "container.log").read_text()
@@ -119,9 +136,10 @@ class Runtime:
             for app in ["Radarr", "Sonarr", "Prowlarr", "Seerr", "qBittorrent"]
             for suffix in [" exited (", " killed ("]
         ):
-            raise RuntimeError(
-                "Refusing configured state after an unclean engine shutdown"
-            )
+            raise RuntimeError("Unclean engine shutdown")
+
+    def snapshot(self, name, destination):
+        self.assert_clean_stop(destination)
         seed = destination / "configured-state"
         seed.mkdir()
         before = time.monotonic()

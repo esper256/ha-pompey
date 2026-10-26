@@ -7,6 +7,6 @@ export NODE_ENV=production LOG_LEVEL=info HOST=0.0.0.0 BIND_IP=0.0.0.0
 export PORT="${SEERR_PORT:-5055}" CONFIG_DIRECTORY="${POMPEY_CONFIG}/seerr"
 cd "${POMPEY_ENGINES}/seerr/app"
 pompey-log start "Seerr"
-exec > >(pompey-log prefix "Seerr")
+exec > >(s6-setuidgid pompey pompey-log prefix "Seerr")
 exec 2>&1
 exec s6-setuidgid pompey "${POMPEY_ENGINES}/seerr/usr/local/bin/node" dist/index.js

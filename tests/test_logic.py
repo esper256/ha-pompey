@@ -19,6 +19,36 @@ import pompey_config as config
 from request_policy import closeout_guard, requested_seasons
 from media_policy import seed_goal_reached, contained
 from vpn_config import render, parse
+from pompey_controller import Job, dispatch
+from concurrent.futures import Future
+
+
+class ControllerScheduling(unittest.TestCase):
+    def test_due_jobs_cannot_starve_behind_faster_recurring_jobs(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            ready = Path(tmp)
+            for marker in ["downloads-wired", "seerr-arr", "roots-wired"]:
+                (ready / marker).touch()
+            jobs = [
+                Job(name, [], 2, 30)
+                for name in ["configuration", "requests", "downloads", "routing"]
+            ]
+            calls = []
+
+            class Pool:
+                def submit(self, func, job):
+                    calls.append(job.name)
+                    result = Future()
+                    result.set_result(True)
+                    return result
+
+            for now in range(24):
+                for job in jobs:
+                    if job.future:
+                        job.complete(now, job.future.result())
+                dispatch(jobs, Pool(), now, ready)
+                self.assertLessEqual(sum(j.future is not None for j in jobs), 1)
+            self.assertTrue(all(calls.count(j.name) >= 4 for j in jobs), calls)
 
 
 class PathSafety(unittest.TestCase):

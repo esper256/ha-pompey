@@ -1,6 +1,8 @@
 """Regressions for evidence loss, retry masking and binary payload boundaries."""
 
 import json
+import socket
+import struct
 from pathlib import Path
 from types import SimpleNamespace
 import tempfile
@@ -12,6 +14,34 @@ sys.path.insert(0, str(Path(__file__).parent / "journey"))
 from support import Deadline, Evidence, FileChecks, HttpFailure, digest
 from torrent_files import TorrentFiles
 from external import World
+from fixture_network import DnsServer, PEER_IP
+
+
+class FixtureDns(unittest.TestCase):
+    def test_known_names_resolve_without_forwarding_unknown_names(self):
+        records = []
+        unknown = []
+        server = DnsServer(records.append, unknown.append)
+
+        def query(name, kind):
+            labels = (
+                b"".join(bytes([len(p)]) + p.encode() for p in name.split(".")) + b"\0"
+            )
+            return (
+                struct.pack("!HHHHHH", 11, 256, 1, 0, 0, 0)
+                + labels
+                + struct.pack("!HH", kind, 1)
+            )
+
+        answer = server.answer(query("api.radarr.video", 1), "10.77.0.1", "udp")
+        self.assertEqual(answer[-4:], socket.inet_aton(PEER_IP))
+        self.assertEqual(struct.unpack("!H", answer[6:8])[0], 1)
+        ipv6 = server.answer(query("api.radarr.video", 28), "10.77.0.1", "tcp")
+        self.assertEqual(struct.unpack("!H", ipv6[6:8])[0], 0)
+        missing = server.answer(query("unrecorded.invalid", 1), "10.77.0.1", "udp")
+        self.assertEqual(missing[3] & 15, 3)
+        self.assertEqual(unknown, ["DNS unrecorded.invalid"])
+        self.assertEqual(records[1]["transport"], "tcp")
 
 
 class Polling(unittest.TestCase):
@@ -125,6 +155,7 @@ class PayloadBoundary(unittest.TestCase):
     def test_wrong_host_cannot_receive_a_successful_fixture_response(self):
         world = World.__new__(World)
         world.unknown = []
+        world.unexpected = world.unknown.append
         _, _, status = world.respond("plex.tv", "/download/1", {})
         self.assertEqual(status, 404)
         self.assertEqual(world.unknown, ["plex.tv/download/1"])
