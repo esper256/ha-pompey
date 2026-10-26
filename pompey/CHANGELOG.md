@@ -4,6 +4,8 @@
 
 ## 0.4.0
 
+- Reject TV releases that lack the original language while allowing dual audio that includes it, prefer season packs, and explicitly set Sonarr’s minimum custom-format score to 0.
+
 - Target fresh amd64 installations; migration from earlier layouts is not supported.
 - Bundle pinned current stable applications and quality resources during the Supervisor build. Remove runtime application downloads and replacement/rollback machinery.
 - Run applications and household maintenance as one unprivileged user; keep VPN setup privileged and engine DNS blocked outside the tunnel. Local applications start without a fresh VPN handshake.
