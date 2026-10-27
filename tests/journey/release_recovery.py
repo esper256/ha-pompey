@@ -114,10 +114,11 @@ def reject_imported_pack(client, case, series, imported_files, selected):
     return replacement
 
 
-def assert_pack_sequence(client, ident, final_release):
+def assert_pack_sequence(client, ident, final_release, final_hash):
     sequence = collected_sequence(client,"sonarr",ident)
     assert len(sequence["attempts"]) == 1, sequence
     assert len(sequence["attempts"][0]["removedFileIds"]) == 2, sequence
     assert sequence["attempts"][0]["search"]["request"]["name"] == "SeasonSearch", sequence
-    imported = [r for r in sequence["nativeHistory"] if r["eventType"] == "downloadFolderImported" and r["sourceTitle"] == final_release]
+    assert any(r["eventType"] == "grabbed" and r["sourceTitle"] == final_release and str(r.get("downloadId", "")).lower() == final_hash for r in sequence["nativeHistory"]), sequence
+    imported = [r for r in sequence["nativeHistory"] if r["eventType"] == "downloadFolderImported" and str(r.get("downloadId", "")).lower() == final_hash]
     assert len({r["episodeId"] for r in imported}) == 2, sequence

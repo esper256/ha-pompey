@@ -217,7 +217,7 @@ def tv_request(client, case, background, ledger_file):
     )
     if active.get("recoveryVerified"):
         from release_recovery import assert_pack_sequence
-        assert_pack_sequence(client,series["id"],selected.release)
+        assert_pack_sequence(client,series["id"],selected.release,infohash)
     save_json(ledger_file, background.ledger)
     active.update(
         payloadBytes=transfer["payloadBytes"],

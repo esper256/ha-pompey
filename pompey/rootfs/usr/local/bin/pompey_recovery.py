@@ -146,7 +146,10 @@ def releases(payload):
         token = str(row.get("downloadId", "")).lower()
         if file_id not in current or not re.fullmatch(r"[a-f0-9]{40}", token):
             continue
-        group = groups.setdefault(token, {"downloadId": token, "release": row.get("sourceTitle"), "files": []})
+        grab = next((r for r in rows if r.get("eventType") == "grabbed" and str(r.get("downloadId", "")).lower() == token), None)
+        if grab is None:
+            continue
+        group = groups.setdefault(token, {"downloadId": token, "release": grab.get("sourceTitle"), "files": []})
         file = current.pop(file_id)
         path = file.get("path") or str(Path(title["path"]) / file["relativePath"])
         group["files"].append({"id": file["id"], "path": inside(path, api.media_root())})
