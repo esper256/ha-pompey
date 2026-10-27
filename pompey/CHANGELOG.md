@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.5.1
+
+- Update Prowlarr: v2.6.5.5623 → v2.7.0.5723.
 
 - Preserve monitoring and defer cancellation when Seerr requests change during inspection, without reporting normal concurrent activity as a failed controller job.
 
