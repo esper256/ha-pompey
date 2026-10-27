@@ -8,7 +8,7 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
-from promote_candidate import validate, validate_contents, validate_acceptance, validate_plan, MANIFEST
+from promote_candidate import validate, validate_contents, validate_acceptance, validate_plan, validate_check_target, MANIFEST
 from release_baseline import choose, FALLBACK
 from release_metadata import next_patch
 
@@ -109,6 +109,29 @@ class PromotionPolicy(unittest.TestCase):
 
 
 class ReleasePlanning(unittest.TestCase):
+    def test_stable_head_check_requires_identical_accepted_content(self):
+        plan = {"head": "head", "tree": "accepted-tree"}
+        validate_check_target(plan, {"sha": "head", "tree": {"sha": "accepted-tree"}})
+        for head in [{"sha": "changed", "tree": {"sha": "accepted-tree"}},
+                     {"sha": "head", "tree": {"sha": "untested-tree"}}]:
+            with self.assertRaises(ValueError):
+                validate_check_target(plan, head)
+
+    def test_merge_wait_is_bounded_and_rejects_a_changed_release(self):
+        from unittest.mock import patch
+        from promote_candidate import await_merge_gate
+        plan = {"head": "head", "base": "base"}
+        pr = {"head": {"sha": "head"}, "base": {"sha": "base"}, "mergeable_state": "blocked"}
+        with patch("promote_candidate.api", side_effect=[pr, {**pr, "mergeable_state": "clean"}]), patch("promote_candidate.time.sleep") as pause:
+            await_merge_gate("repos/test", "1", plan)
+            pause.assert_called_once_with(2)
+        with patch("promote_candidate.api", return_value=pr), patch("promote_candidate.time.sleep") as pause, self.assertRaises(ValueError):
+            await_merge_gate("repos/test", "1", plan)
+        self.assertEqual(pause.call_count, 7)
+        with patch("promote_candidate.api", return_value={**pr, "head": {"sha": "changed"}}), patch("promote_candidate.time.sleep") as pause, self.assertRaises(ValueError):
+            await_merge_gate("repos/test", "1", plan)
+        pause.assert_not_called()
+
     def test_effective_rules_require_the_actions_check_in_the_same_strict_policy(self):
         from release_protection import protection_from_rules
         rule = {"type": "required_status_checks", "parameters": {
