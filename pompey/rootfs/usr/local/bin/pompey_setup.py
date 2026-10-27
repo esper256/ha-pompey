@@ -83,7 +83,7 @@ class Handler(BaseHTTPRequestHandler):
             text=True,
             timeout=150,
         )
-        self._send(200 if proc.returncode == 0 else 400, json.loads(proc.stdout))
+        self._send(200 if proc.returncode == 0 else 409 if proc.returncode == 2 else 400, json.loads(proc.stdout))
 
     def do_GET(self):
         if self.path.split("?")[0] == "/diagnostics/sequences":
@@ -110,7 +110,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         path = self.path.split("?", 1)[0]
-        if path in {"/diagnostics/search", "/diagnostics/rebaseline", "/diagnostics/preferences", "/diagnostics/report", "/diagnostics/access-host", "/diagnostics/recovery/preview", "/diagnostics/recovery/reject", "/diagnostics/recovery/releases"}:
+        if path in {"/diagnostics/search", "/diagnostics/rebaseline", "/diagnostics/preferences", "/diagnostics/report", "/diagnostics/access-host", "/diagnostics/recovery/preview", "/diagnostics/recovery/reject", "/diagnostics/recovery/releases", "/diagnostics/check-downloads", "/diagnostics/check-library"}:
             try:
                 length = int(self.headers.get("Content-Length", "0"))
                 if not 0 < length < 4096:
@@ -126,6 +126,9 @@ class Handler(BaseHTTPRequestHandler):
                 if path.endswith("access-host"):
                     from pompey_hosts import remember
                     self._send(200, remember(payload.get("hostname")))
+                    return
+                if path.endswith(("check-downloads", "check-library")):
+                    self._diagnostic(path.rsplit("/", 1)[-1], payload)
                     return
                 if path.endswith("report"):
                     from pompey_report import collect_report

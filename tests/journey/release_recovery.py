@@ -34,6 +34,8 @@ def reject_three_releases(client, case, movie):
                 row = client.arr("GET", "/movie/" + str(movie["id"]))
                 return row if row["hasFile"] and row["path"].startswith("/media/dlna/Movies/") else None
             current = client.wait(imported, "Third release did not import and route")
+            client.wait(lambda:not client.arr("GET","/movie/"+str(movie["id"]))["monitored"],
+                        "Imported release did not stop monitoring before explicit retry")
             file = client.arr("GET", "/moviefile/" + str(current["movieFile"]["id"]))
             old_path = Path(file["path"])
             assert old_path.is_file(), file
@@ -56,6 +58,7 @@ def reject_three_releases(client, case, movie):
             "token":plan["token"],"confirmationId":plan["confirmationId"],"confirm":True,
             "reason":"wrong_content" if old_path else "other", "note":"Synthetic user rejection " + str(number+1)})
         assert result["ok"], result
+        assert client.arr("GET","/movie/"+str(movie["id"]))["monitored"], "Explicit retry did not reopen monitoring"
         client.wait(lambda: not client.qbit("torrents/info?hashes=" + token), "Rejected torrent survived")
         if old_path:
             assert not old_path.exists(), "Rejected imported library file remains"

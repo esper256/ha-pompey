@@ -124,6 +124,10 @@ def inspect_target(payload):
               "libraryFiles": sorted(library_files, key=lambda r: r["id"]),
               "downloadFiles": download_files,
               "episodeIds": sorted({r["episodeId"] for r in grabs if r.get("episodeId")}),
+              "episodes": [{"id": ident, "season": season, "episode": number} for ident, season, number in sorted({
+                  (r["episodeId"], r["episode"]["seasonNumber"], r["episode"]["episodeNumber"])
+                  for r in grabs if r.get("episodeId") and isinstance(r.get("episode"), dict)
+                  and type(r["episode"].get("seasonNumber")) is int and type(r["episode"].get("episodeNumber")) is int})],
               "title": title["title"], "release": grabs[0].get("sourceTitle"),
               "identity": {key: title.get(key) for key in ("tmdbId", "tvdbId", "imdbId")}}
     target["token"] = hashlib.sha256(json.dumps(target, sort_keys=True).encode()).hexdigest()
@@ -138,18 +142,23 @@ def releases(payload):
     title = call("GET", ("/movie/" if kind == "radarr" else "/series/") + str(ident))
     rows = history(call, kind, ident)
     current = {str(r["id"]): r for r in files(call, kind, ident)}
+    from pompey_delivery import for_title
+    delivered_files = {str(r.get("fileId")) for r in for_title(kind, title).values() if r.get("status") == "delivered"}
     groups = {}
     for row in rows:
         if row.get("eventType") != "downloadFolderImported":
             continue
         file_id = str(native_data(row).get("fileid"))
         token = str(row.get("downloadId", "")).lower()
-        if file_id not in current or not re.fullmatch(r"[a-f0-9]{40}", token):
+        if (file_id not in current and file_id not in delivered_files) or not re.fullmatch(r"[a-f0-9]{40}", token):
             continue
         grab = next((r for r in rows if r.get("eventType") == "grabbed" and str(r.get("downloadId", "")).lower() == token), None)
         if grab is None:
             continue
         group = groups.setdefault(token, {"downloadId": token, "release": grab.get("sourceTitle"), "files": []})
+        if file_id not in current:
+            group["movedFilesRetained"] = True
+            continue
         file = current.pop(file_id)
         path = file.get("path") or str(Path(title["path"]) / file["relativePath"])
         group["files"].append({"id": file["id"], "path": inside(path, api.media_root())})
@@ -176,7 +185,13 @@ def save_sequence(sequence):
 
 
 def summarize(sequence):
+    episodes = sorted({(e["season"], e["episode"]) for a in sequence["attempts"]
+                       for e in a.get("target", {}).get("episodes", [])})
+    scope = ", ".join(f"S{s:02d}E{e:02d}" for s, e in episodes[:12])
+    if len(episodes) > 12:
+        scope += f" and {len(episodes) - 12} more"
     return {key: sequence.get(key) for key in ("sequenceId", "kind", "id", "title", "started", "updated", "status", "collectionError", "episodeIds")} | {
+        "scope": scope,
         "attempts": [{key: a.get(key) for key in ("release", "downloadId", "reason", "note", "at", "stage", "error")} for a in sequence["attempts"]],
         "outcomes": [{key: r.get(key) for key in ("id", "date", "eventType", "sourceTitle", "downloadId", "episodeId")} for r in sequence.get("nativeHistory", [])]}
 
@@ -265,6 +280,8 @@ def reject(payload):
         sequence["attempts"].append(attempt); sequence["status"] = "Retrying"
         merge_history(sequence, rows)
         save_sequence(sequence)  # Persist user intent before any destructive call.
+        from pompey_delivery import reopen
+        reopen(target)
         try:
             policy = call("GET", "/config/downloadclient")
             if policy.get("autoRedownloadFailed") is not False:
@@ -301,10 +318,14 @@ def reject(payload):
             # Native failure auto-retry is deliberately disabled in Pompey. This
             # explicit user action submits one native search, with Arr choosing.
             if target["kind"] == "radarr":
+                current_title = call("GET", "/movie/" + str(target["id"]))
+                if not current_title.get("monitored"):
+                    call("PUT", "/movie/" + str(target["id"]), dict(current_title, monitored=True))
                 command = {"name": "MoviesSearch", "movieIds": [target["id"]]}
             else:
                 if not target["episodeIds"]:
                     raise ValueError("The original grab has no episode identities")
+                call("PUT", "/episode/monitor", {"episodeIds": target["episodeIds"], "monitored": True})
                 command = {"name": "EpisodeSearch", "episodeIds": target["episodeIds"]}
                 episodes = call("GET", "/episode?seriesId=" + str(target["id"]))
                 selected = [e for e in episodes if e["id"] in target["episodeIds"]]

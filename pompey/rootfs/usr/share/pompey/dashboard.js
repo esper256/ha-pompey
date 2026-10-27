@@ -123,7 +123,7 @@
         for (const file of files) list.append(text("li",file[field]));
         container.append(list);
       }
-      if (!plan.downloadFiles.length && !plan.libraryFiles.length) container.append(text("p","No files remain. This will blocklist the recorded release and search again."));
+      if (!plan.downloadFiles.length && !plan.libraryFiles.length) container.append(text("p","No files are currently linked to this release in Arr. Files you moved elsewhere will be kept. This will blocklist the recorded release and search again."));
       element("recovery-status").textContent = "Review the affected files before continuing.";
       element("confirm-recovery").disabled = false;
     } catch (error) {
@@ -196,7 +196,9 @@
     for (const sequence of sequences) {
       const detail = document.createElement("details"); detail.dataset.sequence = sequence.sequenceId;
       detail.open = open.has(sequence.sequenceId);
-      detail.append(text("summary",sequence.title + " · " + sequence.attempts.length + (sequence.attempts.length === 1 ? " attempt · " : " attempts · ") + sequence.status));
+      const summary = text("summary",sequence.title + (sequence.scope ? " · " + sequence.scope : "") + " · " + sequence.attempts.length + (sequence.attempts.length === 1 ? " attempt · " : " attempts · ") + sequence.status);
+      if (sequence.kind === "sonarr" && !sequence.scope) summary.append(text("small",sequence.attempts.at(-1)?.release || "Episode details unavailable", "scope"));
+      detail.append(summary);
       const list = document.createElement("ol");
       const events = sequence.attempts.map(attempt => ({at:attempt.at, label:(attempt.stage === "retry-requested" ? "Rejected: " : "Rejection requested: ") + attempt.release + " — " + attempt.reason.replaceAll("_"," ") + (attempt.note ? ": " + attempt.note : "") + (attempt.error ? " · " + attempt.error : "")}));
       const labels = {grabbed:"Selected",downloadFolderImported:"Imported"};
@@ -481,6 +483,8 @@
       if (value !== undefined && value !== null && value !== "") fields.append(text("dt", name), text("dd", value));
     };
     const download = item.download;
+    if (item.library && item.delivered) evidence.append(text("p", "Successfully delivered to the library. Later moves or deletion do not restart automatic downloads. Use Try another to request a replacement."));
+    if (item.library && item.delivered && !item.hasFile) evidence.append(text("p", "Arr no longer reports a file at its old location. Files moved outside Arr are retained when requesting a replacement.", "field-help"));
     const importing = ["Import needs attention", "Waiting for import", "Imported to library", "Imported"].includes(item.phase);
     if (download && item.available && Number.isFinite(download.progress) && !importing) {
       const progress = document.createElement("div"); progress.className = "transfer-progress";
@@ -501,10 +505,12 @@
       if (download.eta > 0 && download.eta < 8640000) parts.push("About " + Math.max(1, Math.round(download.eta / 60)) + " min remaining");
       if (parts.length) evidence.append(text("p", parts.join(" · ")));
     } else if (item.nextAction && !item.library) evidence.append(text("p", item.nextAction));
+    if (item.canCheckLibrary && item.path) evidence.append(text("p", "Expected library folder: " + item.path, "library-path"));
     if (debugConsoles.hidden && ["stoppedDL", "pausedDL", "error", "missingFiles"].includes(download?.state)) evidence.append(text("p", "Enable advanced interfaces in Home Assistant’s app settings to inspect this download."));
     addField("Application", labels[item.kind] || item.kind);
     addField(item.available ? "Observed" : "Last observed", item.updated ? new Date(item.updated * 1000).toLocaleString() : "Unavailable");
     addField("Release", item.release);
+    addField("Delivered to", item.deliveryPath);
     addField("Download ID", item.downloadId);
     if (download) {
       addField("Downloader state", download.state);
@@ -513,15 +519,33 @@
       addField("Reported seeds", download.reportedSeeds);
       addField("Availability", download.availability);
       if (Number.isFinite(download.remainingBytes)) addField("Remaining", fmtBytes(download.remainingBytes));
+      addField("Category", download.category || "Uncategorized");
+      addField("Download location", download.path);
+      if (Number.isFinite(download.size)) addField("Torrent size", fmtBytes(download.size));
+      if (Number.isFinite(download.ratio)) addField("Upload ratio", download.ratio.toFixed(2));
+      if (Number.isFinite(download.seedingSeconds)) addField("Time seeding", Math.floor(download.seedingSeconds / 3600) + "h " + Math.floor(download.seedingSeconds % 3600 / 60) + "m");
+      if (download.completed > 0) addField("Download completed", new Date(download.completed * 1000).toLocaleString());
     }
     const canSearch = item.available && ["radarr", "sonarr"].includes(item.kind) && item.id && !importing;
-    const signature = JSON.stringify([item.available, canSearch, item.kind, item.id, item.library, item.downloadId, item.fileId, !!download, debugConsoles.hidden]);
+    const signature = JSON.stringify([item.available, canSearch, item.kind, item.id, item.library, item.downloadId, item.fileId, !!download, item.canCheckLibrary, debugConsoles.hidden]);
     if (signature !== component.actionSignature) {
       component.actionSignature = signature; component.actions.replaceChildren(); component.primaryActions.replaceChildren(); component.searchButton = null;
       if(item.available && ["radarr","sonarr"].includes(item.kind) && item.id && (item.downloadId || item.library)) {
         const retry = text("button","Try another","danger-button");
         retry.addEventListener("click",()=>openRecovery(component.item,retry));
         component.primaryActions.append(retry);
+      }
+      if (item.available && item.canCheckLibrary) {
+        const scan = text("button", "Check library");
+        scan.addEventListener("click", async () => {
+          scan.disabled = true;
+          try {
+            const result = await diagnosticRequest("/check-library", {kind:item.kind,id:item.id});
+            component.notice = result.message;
+          } catch (error) { component.notice = error.message; }
+          finally { scan.disabled = false; detailEvidence(component, component.item); }
+        });
+        component.primaryActions.append(scan);
       }
       if (canSearch) {
         const inspect = text("button", "Inspect releases");
@@ -545,6 +569,7 @@
       if (download) nativeLink("qbittorrent", component.actions);
       if (item.kind !== "qbittorrent") nativeLink(item.kind, component.actions);
     }
+    if (component.notice) evidence.append(text("p", component.notice, "field-help"));
   }
   function renderRequests() {
     if (!requestData) return;
@@ -576,7 +601,7 @@
     }
     table.hidden = !visible; empty.hidden = !!visible;
     empty.textContent = query || attentionOnly ? "No releases match this filter." : importedOnly
-      ? "No imported titles are reported." : "No active downloads or missing monitored media.";
+      ? "No delivered titles are reported." : "No active downloads or missing monitored media.";
     if(!element("request-status").classList.contains("check-warning") && visible>100) element("request-status").textContent = "Showing 100 of " + visible + " matches. Search to narrow the list.";
   }
   function setFilters() {
@@ -604,9 +629,9 @@
     element("inspect").disabled = true;
     try {
       const data = await diagnosticRequest("");
-      const library = (data.titles || []).filter(item=>item.hasFile).map(item=>({...item,library:true,
-        key:"library:"+item.kind+":"+item.id, phase:"Imported", attention:false,
-        scope:item.kind === "sonarr" ? item.hasFile + " episode file(s)" : ""}));
+      const library = (data.titles || []).filter(item=>item.hasFile || item.delivered).map(item=>({...item,library:true,
+        key:"library:"+item.kind+":"+item.id, phase:item.delivered ? "Delivered" : "Imported", attention:false,
+        scope:item.kind === "sonarr" ? (item.delivered ? item.delivered + " episode(s) delivered" : item.hasFile + " episode file(s)") : ""}));
       const items = new Map([...(data.workflow || []),...library].map(item=>[requestKey(item),item]));
       requestItems = items;
       // Keep existing rows in place. New observations must not shuffle a list
@@ -624,6 +649,10 @@
         if(!releaseBusy.has(releaseKey(item))) renderReleases(component.results,releaseResults.get(releaseKey(item)));
       }
       requestData = data;
+      const maintenance = data.maintenance || {};
+      const policy = {stop_sharing:"Stop seeding when complete",share_to_ratio:"Seed to a 1:1 ratio",share_one_day:"Seed for one day"}[maintenance.policy] || "Policy unavailable";
+      const recent = maintenance.updated && Date.now()/1000 - maintenance.updated < 30;
+      element("download-maintenance").textContent = policy + " · Checks every 30s · " + (!recent ? "Maintenance status unavailable" : maintenance.error ? "Download check failed: " + maintenance.error : maintenance.running ? "Checking downloads…" : "Last policy check " + age(maintenance.lastSuccess));
       renderSequences();
       const notices = element("request-notices"); notices.replaceChildren();
       for (const message of data.attention || []) notices.append(text("p", message, "notice"));
@@ -674,6 +703,18 @@
     if (activePanel === "diagnostic-panel") refreshRequests();
   }
   element("inspect").addEventListener("click", refreshRequests);
+  element("check-downloads").addEventListener("click", async event => {
+    const button = event.currentTarget;
+    const result = element("download-check-result");
+    button.disabled = true; result.hidden = false; result.classList.remove("check-warning");
+    result.textContent = "Checking download policies and asking Arr to check imports and cleanup…";
+    try {
+      const response = await diagnosticRequest("/check-downloads", {});
+      result.textContent = response.message;
+      await refreshRequests();
+    } catch (error) { result.textContent = error.message; result.classList.add("check-warning"); }
+    finally { button.disabled = false; }
+  });
   element("request-filter").addEventListener("input", renderRequests);
   element("filter-all").addEventListener("click", () => { attentionOnly = false; importedOnly = false; setFilters(); });
   element("filter-imported").addEventListener("click",()=>{importedOnly=true;attentionOnly=false;setFilters();});

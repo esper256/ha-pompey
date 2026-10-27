@@ -239,6 +239,11 @@ button.danger-button:hover { background: #c85548; }
 #sequence-list ol { padding-left: 1.2rem; font-size: .8rem; color: var(--muted); }
 #sequence-list li { margin-top: .5rem; overflow-wrap: anywhere; }
 .workflow-detail .actions:empty { display: none; }
+.download-maintenance { display: flex; align-items: center; gap: 1rem; margin-bottom: .75rem; }
+.download-maintenance p { flex: 1; margin: 0; }
+.download-maintenance button { flex-shrink: 0; }
+.library-path, #sequence-list .scope { overflow-wrap: anywhere; }
+@media(max-width:480px) { .download-maintenance { align-items: start; flex-direction: column; gap: .5rem; } }
 @media(max-width:640px) { .request-filters { flex-wrap: wrap; } #collect-report { margin-left: auto; } #inspect { margin-left: 0; } }
 
 @media(max-width:480px) { .recovery-feedback { grid-template-columns: 1fr; gap: .4rem; } .recovery-feedback label:not(:first-child) { margin-top: .4rem; } }
