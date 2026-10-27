@@ -1,5 +1,6 @@
 name: Validation
-run-name: ${{ github.event_name == 'workflow_dispatch' && (inputs.candidate_pr || inputs.release_pr) && format('Release PR #{0}', inputs.candidate_pr || inputs.release_pr) || github.event.pull_request.title || github.workflow }}
+run-name: >-
+  ${{ github.event_name == 'workflow_dispatch' && (inputs.candidate_pr || inputs.release_pr) && format('Release PR #{0}', inputs.candidate_pr || inputs.release_pr) || github.event.pull_request.title || github.workflow }}
 on:
   pull_request:
     branches: [main]
