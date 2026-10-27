@@ -30,7 +30,7 @@ the proposed work. Priorities describe implementation order, not completed work.
 Maintainer review on issues #89–#97 supersedes the original mockups:
 
 - #92 is deferred to 0.6.0; 0.5.0 uses read-only explanations and existing native interfaces.
-- Keep the Pompey logo. Routine healthy-service details stay collapsed. Do not repeat indexer warnings beside the indexer summary.
+- Keep the Pompey logo. Routine healthy-service details belong in the Status tab. Do not repeat indexer warnings beside the indexer summary.
 - Media servers are optional. Plex, Jellyfin/Emby and local playback are valid choices; none is a prerequisite for managing downloads.
 - Remove conversation-specific advice, prototype labels and development commentary from product UI. Mockup labels in this documentation are not product strings.
 - Storage attention stays an explicit contextual panel/banner on the dashboard, preserving the overview rather than silently replacing it.
@@ -39,7 +39,7 @@ Maintainer review on issues #89–#97 supersedes the original mockups:
 
 ## Development implementation status
 
-The development branch now includes the compact overview and shared observations (#97), request-focused read-only explanations (#91), optional media-server/setup checks (#93), bundled versions and bounded log repetition (#96), native executable exclusions (#99), VPN interface-replacement recovery (#90), and storage service holds/restoration (#94). These are implemented increments; the broader issue checklists remain open until their remaining cases are verified.
+The development branch uses Overview, Requests, Setup and Status tabs, with Overview selected by default and storage attention visible across all views. It includes the compact overview and shared observations (#97), request-focused read-only explanations (#91), optional media-server/setup checks (#93), bundled versions and bounded log repetition (#96), native executable exclusions (#99), VPN interface-replacement recovery (#90), and storage service holds/restoration (#94). These are implemented increments; the broader issue checklists remain open until their remaining cases are verified.
 
 Dependency discovery/promotion code and real previous-release upgrade coverage are prepared for #89. Repository settings now permit Actions-created PRs while keeping workflow tokens read-only by default. Main requires an up-to-date GitHub Actions `CI required` check, including for administrators, with no manual review requirement. Release approval uses required automated acceptance only: the current candidate’s release integration and aggregate jobs must pass in the exact workflow attempt, with no manual HAOS gate. An actual GitHub discovery → PR → acceptance → publication cycle remains outstanding; discovery stays inactive on the development prerelease.
 

@@ -5,6 +5,8 @@
   let busy = false;
   let latestHealth = null;
   let overviewFailed = false;
+  const tabs = [...element("dashboard-tabs").querySelectorAll('[role="tab"]')];
+  let activePanel = "overview-panel";
   const labels = {radarr: "Radarr", sonarr: "Sonarr", prowlarr: "Prowlarr", qbittorrent: "qBittorrent", seerr: "Seerr", configuration: "Configuration", requests: "Requests", downloads: "Downloads", routing: "Library routing"};
   const text = (tag, value, className = "") => {
     const node = document.createElement(tag);
@@ -22,12 +24,23 @@
     tr.append(text("td", name), text("td", value, warning ? "check-warning" : ""));
     table.append(tr);
   }
-  async function openPanel(id) {
-    const panel = element(id);
-    panel.open = true;
-    panel.scrollIntoView({behavior: "smooth", block: "nearest"});
-    panel.querySelector("summary").focus();
+  function selectPanel(id) {
+    const changed = activePanel !== id;
+    activePanel = id;
+    for (const tab of tabs) {
+      const selected = tab.getAttribute("aria-controls") === id;
+      tab.setAttribute("aria-selected", String(selected));
+      tab.tabIndex = selected ? 0 : -1;
+      element(tab.getAttribute("aria-controls")).hidden = !selected;
+    }
+    if (changed && id === "diagnostic-panel") refreshRequests();
     if (id === "setup-panel") renderSetup();
+  }
+  function openPanel(id) {
+    selectPanel(id);
+    const tab = tabs.find(item => item.getAttribute("aria-controls") === id);
+    tab.focus({preventScroll: true});
+    tab.scrollIntoView({block: "nearest"});
   }
   function metric(title, value, detail, source, target, warning = false) {
     const button = document.createElement("button");
@@ -132,6 +145,7 @@
   }
   async function refreshRequests() {
     const button = element("inspect");
+    if (button.disabled) return;
     button.disabled = true;
     diagnosis.replaceChildren(text("p", "Loading requests…"));
     try {
@@ -200,8 +214,15 @@
     } finally { busy = false; }
   }
   element("inspect").addEventListener("click", refreshRequests);
-  element("diagnostic-panel").addEventListener("toggle", () => {
-    if (element("diagnostic-panel").open) refreshRequests();
+  tabs.forEach((tab, index) => {
+    tab.addEventListener("click", () => selectPanel(tab.getAttribute("aria-controls")));
+    tab.addEventListener("keydown", event => {
+      const next = {ArrowLeft: (index + tabs.length - 1) % tabs.length,
+                    ArrowRight: (index + 1) % tabs.length, Home: 0, End: tabs.length - 1}[event.key];
+      if (next === undefined) return;
+      event.preventDefault();
+      openPanel(tabs[next].getAttribute("aria-controls"));
+    });
   });
   element("setup-recheck").addEventListener("click", refreshOverview);
   refreshOverview();
