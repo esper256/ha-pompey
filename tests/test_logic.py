@@ -216,6 +216,22 @@ class IngressPreferences(unittest.TestCase):
 
 
 class WorkflowEvidence(unittest.TestCase):
+    def test_same_series_and_pack_entries_keep_distinct_native_identities(self):
+        from pompey_diagnostics import workflow
+        source = {"available": True, "updated": 100, "data": {"titles": []}}
+        sources = {"radarr": source, "sonarr": source, "qbittorrent": source}
+        titles = [{"kind": "sonarr", "id": 4, "title": "Example", "monitored": True}]
+        queue = [{"id": ident, "seriesId": 4, "downloadId": token, "sizeleft": 10,
+                  "episode": {"seasonNumber": 2, "episodeNumber": episode}}
+                 for ident, token, episode in [(1, "ABC", 4), (2, "ABC", 5), (3, "DEF", 6)]]
+        torrents = {token: {"state": "downloading"} for token in ["abc", "def"]}
+        rows = workflow(sources, titles, {"sonarr": queue}, torrents)
+        self.assertEqual(len({row["key"] for row in rows}), 3)
+        self.assertEqual([row["scope"] for row in rows], ["S02E04", "S02E05", "S02E06"])
+        queue[0]["title"] = "Changed release display name"
+        changed = workflow(sources, titles, {"sonarr": list(reversed(queue))}, torrents)
+        self.assertEqual({row["key"] for row in rows}, {row["key"] for row in changed})
+
     def test_queue_evidence_includes_manual_work_and_marks_stale_peer_data(self):
         from pompey_diagnostics import workflow
         source = {"available": True, "updated": 100, "data": {"titles": []}}

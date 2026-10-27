@@ -4,480 +4,81 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Pompey</title>
-  <style>
-    :root {
-      color-scheme: dark;
-      --bg: #07090d;
-      --fg: #ece8e1;
-      --muted: #9a948a;
-      --line: #2a2d36;
-      --focus: #d4af37;
-      --err: #e08a7a;
-      --up: #8aa0b4;
-    }
-
-    * { box-sizing: border-box; }
-
-    html, body {
-      min-height: 100%;
-      margin: 0;
-    }
-    html { scrollbar-gutter: stable; }
-
-    body {
-      font-family: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
-      background: var(--bg);
-      color: var(--fg);
-      min-height: 100vh;
-      padding: 2rem 1.25rem;
-    }
-
-    main {
-      width: min(36rem, 100%);
-      margin: 0 auto;
-    }
-
-    h1 {
-      margin: 0 0 1.35rem;
-    }
-
-    h1 img {
-      display: block;
-      width: min(36rem, 100%);
-      height: auto;
-    }
-
-    p, li {
-      margin: 0;
-      font-family: ui-sans-serif, system-ui, sans-serif;
-      font-size: 0.95rem;
-      line-height: 1.55;
-      color: var(--muted);
-    }
-
-    /* Installer chrome is first-boot only. Once search is up, this page is
-       a dashboard (Open search / VPN graph), not a fake progress playhead. */
-    body.is-ready .bar,
-    body.is-ready #steps {
-      display: none;
-    }
-
-    .bar {
-      height: 0.35rem;
-      background: var(--line);
-      border-radius: 99px;
-      overflow: hidden;
-      margin: 0 0 1.25rem;
-    }
-
-    .bar > span {
-      display: block;
-      height: 100%;
-      width: 0%;
-      background: var(--focus);
-      transition: width 0.4s ease;
-    }
-
-    ol {
-      list-style: none;
-      padding: 0;
-      margin: 0 0 1.25rem;
-    }
-
-    li {
-      display: grid;
-      grid-template-columns: 1.25rem 1fr;
-      gap: 0.6rem;
-      margin-top: 0.45rem;
-    }
-
-    li .mark {
-      color: var(--line);
-    }
-
-    li.active { color: var(--fg); }
-    li.active .mark { color: var(--focus); }
-    li.done { color: var(--fg); }
-    li.done .mark { color: var(--focus); }
-    li.error { color: var(--err); }
-    li.error .mark { color: var(--err); }
-
-    .now {
-      color: var(--fg);
-    }
-
-    .error {
-      color: var(--err);
-      margin-top: 0.75rem;
-    }
-
-    #vpn {
-      margin-top: 1.25rem;
-    }
-
-    #vpn label {
-      display: block;
-      font-family: ui-sans-serif, system-ui, sans-serif;
-      font-size: 0.95rem;
-      color: var(--fg);
-      margin-bottom: 0.5rem;
-    }
-
-    #vpn textarea {
-      width: 100%;
-      min-height: 11rem;
-      margin: 0 0 0.75rem;
-      padding: 0.75rem;
-      border: 1px solid var(--line);
-      border-radius: 0.4rem;
-      background: #10141c;
-      color: var(--fg);
-      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-      font-size: 0.8rem;
-      line-height: 1.4;
-      resize: vertical;
-    }
-
-    #vpn button {
-      font-family: ui-sans-serif, system-ui, sans-serif;
-      font-size: 0.95rem;
-      background: var(--focus);
-      color: #07090d;
-      border: 0;
-      border-radius: 0.35rem;
-      padding: 0.55rem 1rem;
-      cursor: pointer;
-    }
-
-    #vpn button:disabled {
-      opacity: 0.6;
-      cursor: wait;
-    }
-
-    #open-search {
-      margin-top: 1.25rem;
-    }
-    #open-search:not([hidden]) { display: flex; flex-wrap: wrap; gap: 0.5rem; }
-
-    #open-search a {
-      display: inline-block;
-      font-family: ui-sans-serif, system-ui, sans-serif;
-      font-size: 0.95rem;
-      background: var(--focus);
-      color: #07090d;
-      border-radius: 0.35rem;
-      padding: 0.55rem 1rem;
-      text-decoration: none;
-    }
-
-    #open-search .hint {
-      flex-basis: 100%;
-      margin-top: 0.1rem;
-    }
-
-    #debug-consoles {
-      margin-top: 1.25rem;
-      padding: 0.85rem 0.95rem 0.9rem;
-      border: 1px solid var(--line);
-      border-radius: 0.45rem;
-      background: #0c1018;
-    }
-
-    #debug-consoles .debug-head {
-      font-family: ui-sans-serif, system-ui, sans-serif;
-      font-size: 0.75rem;
-      letter-spacing: 0.04em;
-      text-transform: uppercase;
-      color: var(--muted);
-      margin-bottom: 0.45rem;
-    }
-
-    #debug-consoles .debug-links a {
-      display: inline-block;
-      font-family: ui-sans-serif, system-ui, sans-serif;
-      font-size: 0.9rem;
-      background: #1a2230;
-      color: var(--fg);
-      border: 1px solid var(--line);
-      border-radius: 0.35rem;
-      padding: 0.45rem 0.8rem;
-      text-decoration: none;
-      margin: 0 0.4rem 0.4rem 0;
-    }
-
-    #debug-consoles .hint {
-      margin-top: 0.35rem;
-    }
-
-    #vpn-bw {
-      margin-top: 1.35rem;
-      padding: 0.85rem 0.95rem 0.75rem;
-      border: 1px solid var(--line);
-      border-radius: 0.45rem;
-      background: #0c1018;
-    }
-
-    #vpn-bw .vpn-head {
-      display: flex;
-      gap: .6rem;
-      align-items: baseline;
-      margin-bottom: 0.65rem;
-      font-family: ui-sans-serif, system-ui, sans-serif;
-      font-size: 0.75rem;
-      letter-spacing: 0.04em;
-      text-transform: uppercase;
-      color: var(--muted);
-    }
-
-    #vpn-bw .vpn-iface {
-      text-transform: none;
-      letter-spacing: 0;
-      font-variant-numeric: tabular-nums;
-    }
-
-    #vpn-bw .vpn-rates {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 0.75rem;
-      margin-bottom: 0.55rem;
-    }
-
-    #vpn-bw .vpn-col {
-      font-family: ui-sans-serif, system-ui, sans-serif;
-    }
-
-    #vpn-bw .vpn-col .dir {
-      font-size: 0.72rem;
-      letter-spacing: 0.03em;
-      text-transform: uppercase;
-      color: var(--muted);
-      margin-bottom: 0.15rem;
-    }
-
-    #vpn-bw .vpn-col .rate {
-      font-size: 1.15rem;
-      font-variant-numeric: tabular-nums;
-      color: var(--fg);
-      line-height: 1.2;
-    }
-
-    #vpn-bw .vpn-col.down .rate { color: var(--focus); }
-    #vpn-bw .vpn-col.up .rate { color: var(--up); }
-
-    #vpn-bw .vpn-col .total {
-      margin-top: 0.15rem;
-      font-size: 0.8rem;
-      font-variant-numeric: tabular-nums;
-      color: var(--muted);
-    }
-
-    #vpn-bw svg {
-      display: block;
-      width: 100%;
-      height: 4.25rem;
-    }
-
-    #vpn-bw .vpn-axis {
-      margin-top: 0.35rem;
-      font-family: ui-sans-serif, system-ui, sans-serif;
-      font-size: 0.72rem;
-      color: var(--muted);
-    }
-
-    .dashboard-tabs { display: flex; gap: .35rem; margin-top: 1.3rem; border-bottom: 1px solid var(--line); }
-    .dashboard-tabs button { flex: 1; min-width: 0; padding: .75rem .35rem; border: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--muted); font: .9rem ui-sans-serif, system-ui, sans-serif; cursor: pointer; }
-    .dashboard-tabs button:hover { color: var(--fg); background: #0c1018; }
-    .dashboard-tabs button[aria-selected="true"] { color: var(--focus); border-bottom-color: var(--focus); }
-    .dashboard-tabs button:focus-visible { outline: 2px solid var(--focus); outline-offset: -3px; }
-    .dashboard-view { margin-top: 1.1rem; }
-    .dashboard-view:focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; }
-    #overview-panel > #ecosystem { margin-top: 0; }
-    .diagnostic-body { padding: .95rem; }
-    .diagnostic-body p { margin-bottom: 0.65rem; }
-
-    #diagnostic-panel button {
-      max-width: 100%;
-      padding: 0.45rem 0.8rem;
-      margin: 0.25rem 0 0.65rem;
-      border: 1px solid var(--line);
-      border-radius: 0.35rem;
-      background: #1a2230;
-      color: var(--fg);
-      font: inherit;
-      font-size: 0.9rem;
-      text-align: left;
-      overflow-wrap: anywhere;
-      cursor: pointer;
-    }
-    #diagnostic-panel button:disabled { opacity: 0.6; cursor: wait; }
-    #diagnostic-panel :focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; }
-    .dashboard-panel { margin-top: 1.1rem; border: 1px solid var(--line); border-radius: .45rem; background: #0c1018; font-family: ui-sans-serif, system-ui, sans-serif; overflow-wrap: anywhere; }
-    .panel-body { padding: .95rem; }
-    #ecosystem { padding: .9rem; }
-    .ecosystem-grid { display: grid; grid-template-columns: 1fr 1fr; gap: .75rem; }
-    .metric { text-align: left; color: var(--fg); background: transparent; border: 0; border-left: 2px solid var(--line); padding: .2rem .65rem; cursor: pointer; }
-    .metric strong { display: block; font-size: 1.1rem; font-weight: 500; line-height: 1.5; }
-    .metric span, .metric small { display: block; color: var(--muted); font-size: .75rem; line-height: 1.5; }
-    .metric.warning { border-color: var(--err); }
-    .metric.warning strong { color: var(--err); }
-    .metric.stale strong { color: var(--muted); }
-    #overview-note { margin-top: .65rem; font-size: .8rem; }
-    .native-link, .dashboard-panel button { display: inline-block; padding: .4rem .65rem; margin: .4rem .4rem 0 0; border: 1px solid var(--line); border-radius: .35rem; background: #1a2230; color: var(--fg); font: inherit; font-size: .8rem; text-decoration: none; cursor: pointer; }
-    .dashboard-panel table { width: 100%; border-collapse: collapse; font-size: .8rem; overflow-wrap: anywhere; }
-    .dashboard-panel td { padding: .5rem 0; border-bottom: 1px solid var(--line); }
-    .dashboard-panel td:last-child { text-align: right; padding-left: .7rem; }
-    .dashboard-panel h2 { font-size: .9rem; margin: 1rem 0 .4rem; font-weight: 500; }
-    .dashboard-panel .panel-title { margin: 0 0 .65rem; font-size: 1rem; }
-    .dashboard-panel :focus-visible, .metric:focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; }
-    .check-warning { color: var(--err); }
-    #setup-note, #support-note { margin-top: .8rem; font-size: .8rem; }
-    .section-heading { display: flex; align-items: center; justify-content: space-between; gap: .75rem; margin-bottom: .7rem; }
-    .section-actions { display: flex; flex-wrap: wrap; gap: .4rem; }
-    #diagnostic-panel > .diagnostic-body > .section-heading { flex-wrap: wrap; }
-    #report-panel { border-block: 1px solid var(--line); padding: .8rem 0; margin-bottom: 1rem; }
-    #report-text { box-sizing: border-box; width: 100%; min-height: 14rem; max-height: 50vh; resize: vertical; background: #080c12; color: var(--fg); border: 1px solid var(--line); border-radius: .3rem; padding: .65rem; font: .7rem ui-monospace, monospace; }
-    .dashboard-panel .section-heading .panel-title { margin: 0; }
-    .section-heading a { color: var(--muted); font-size: .75rem; text-decoration: none; }
-    #diagnostic-panel .section-heading button { margin: 0; font-size: .75rem; padding: .3rem .55rem; }
-    .dashboard-panel .intro { font-size: .8rem; margin-bottom: 1rem; }
-    .dashboard-panel .fine-print { font-size: .75rem; margin-top: .75rem; }
-    .version-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: .8rem; }
-    .version-grid strong, .version-grid small { display: block; font-size: .8rem; font-weight: 400; }
-    .version-grid small { color: var(--muted); margin-top: .2rem; font-size: .75rem; }
-    .version-grid .service-down { color: var(--err); }
-    .dashboard-panel .workflow-table { table-layout: fixed; }
-    .workflow-table th { font-weight: 400; text-align: left; padding: 0 0 .6rem; color: var(--muted); font-size: .7rem; text-transform: uppercase; letter-spacing: .06em; }
-    .workflow-table th:first-child { width: 43%; }
-    .dashboard-panel .workflow-table td { padding: .85rem .6rem .85rem 0; vertical-align: top; text-align: left; }
-    .dashboard-panel .workflow-table td:last-child { padding-left: .7rem; }
-    #diagnostic-panel .title-button { background: none; border: 0; padding: 0; margin: 0; color: var(--fg); font-size: .85rem; }
-    #diagnostic-panel .title-button:hover { color: var(--focus); }
-    .workflow-table small { display: block; font-size: .7rem; color: var(--muted); line-height: 1.5; margin-top: .25rem; }
-    .workflow-table tr.selected td { background: #151923; }
-    .workflow-table tr.selected .title-button { color: var(--focus); }
-    .phase { font-size: .8rem; }
-    .phase.warning { color: var(--err); }
-    .workflow-detail { margin-top: 1.1rem; border-left: 2px solid var(--focus); padding: .05rem 0 .05rem .85rem; }
-    .workflow-detail h3 { font-size: .9rem; font-weight: 500; margin: .2rem 0 .6rem; }
-    .workflow-detail p { font-size: .8rem; }
-    .workflow-detail .evidence { color: var(--muted); font-size: .7rem; }
-    .workflow-detail ul { margin: .6rem 0; padding-left: 1rem; }
-    .workflow-detail li { font-size: .8rem; color: var(--err); }
-    .workflow-detail progress { display: block; width: 100%; height: .3rem; accent-color: var(--focus); margin: .6rem 0; }
-    .release-results { margin-top: .75rem; }
-    .release-results p { font-size: .75rem; }
-    #preferences label { display: block; margin: 1.15rem 0 .4rem; color: var(--fg); font-size: .85rem; }
-    #preferences select, #download-slots { width: 100%; border: 1px solid var(--line); border-radius: .3rem; background: #111722; color: var(--fg); padding: .65rem; font: inherit; font-size: .85rem; }
-    #download-slots { width: 5rem; }
-    #preferences .checkbox-label { display: flex; align-items: center; gap: .5rem; }
-    #preferences input[type=checkbox] { width: 1rem; height: 1rem; accent-color: var(--focus); }
-    .dashboard-panel .field-help { font-size: .75rem; margin: .45rem 0 .75rem; }
-    #save-preferences { margin-top: .35rem; }
-    #save-preferences:disabled { opacity: .5; cursor: default; }
-    @media (max-width: 390px) { body { padding: 1rem; } .ecosystem-grid { gap: .65rem .25rem; } }
-  </style>
+  <link rel="stylesheet" href="dashboard.css">
 </head>
 <body>
   <main>
-    <h1><img src="logo.png" width="1983" height="793" alt="Pompey"></h1>
-    <div class="bar" aria-hidden="true"><span id="fill"></span></div>
-    <ol id="steps"></ol>
-    <p class="now" id="now">Starting Pompey…</p>
-    <form id="vpn" hidden>
-      <label for="wg">WireGuard VPN configuration (.conf)</label>
-      <textarea id="wg" name="config" spellcheck="false" autocomplete="off" autocapitalize="off"></textarea>
-      <button type="submit" id="wg-go">Connect VPN</button>
-    </form>
-    <div id="open-search" hidden>
-      <a id="open-search-btn" href="#" target="_blank" rel="noopener">Search and requests</a>
-      <a id="open-sources-btn" href="#" target="_blank" rel="noopener">Manage indexers</a>
+    <header class="app-header">
+      <h1><span class="brand-mark" aria-hidden="true">P</span>Pompey</h1>
+      <div id="open-search" class="app-links" hidden>
+        <a id="open-search-btn" class="button primary" href="#" target="_blank" rel="noopener">Open Seerr <span aria-hidden="true">↗</span></a>
+        <a id="open-sources-btn" class="button" href="#" target="_blank" rel="noopener">Manage indexers <span aria-hidden="true">↗</span></a>
+      </div>
+    </header>
+    <div class="startup">
+      <div class="bar" aria-hidden="true"><span id="fill"></span></div>
+      <ol id="steps"></ol>
+      <p class="now" id="now" role="status">Starting Pompey…</p>
+      <form id="vpn" hidden>
+        <label for="wg">WireGuard VPN configuration (.conf)</label>
+        <textarea id="wg" name="config" spellcheck="false" autocomplete="off" autocapitalize="off"></textarea>
+        <button type="submit" id="wg-go" class="primary">Connect VPN</button>
+      </form>
+      <p id="file-hint" hidden>Open Pompey from the Home Assistant sidebar.</p>
     </div>
-    <p id="file-hint" hidden>Open Pompey from the Home Assistant sidebar.</p>
-    <p class="error" id="err" hidden></p>
+    <p class="error global-alert" id="err" role="status" hidden></p>
     <div id="dashboard" hidden>
       <nav id="dashboard-tabs" class="dashboard-tabs" role="tablist" aria-label="Pompey sections">
         <button id="overview-tab" type="button" role="tab" aria-selected="true" aria-controls="overview-panel">Overview</button>
         <button id="requests-tab" type="button" role="tab" aria-selected="false" aria-controls="diagnostic-panel" tabindex="-1">Requests</button>
         <button id="config-tab" type="button" role="tab" aria-selected="false" aria-controls="config-panel" tabindex="-1">Config</button>
       </nav>
-      <aside id="storage-alert" class="dashboard-panel" hidden aria-label="Storage needs attention" role="status"><div class="panel-body"><h2 class="panel-title">Storage needs attention</h2><p id="storage-reason"></p><p id="storage-action"></p></div></aside>
-      <aside id="setup-panel" class="dashboard-panel" hidden aria-label="Setup needs attention"><div class="panel-body"><h2 class="panel-title" id="setup-title">Finish setup</h2><table id="setup-checks" aria-label="Connection checks"></table><p id="setup-note"></p><button id="setup-recheck">Check again</button></div></aside>
+      <aside id="storage-alert" class="notice danger" hidden role="status"><h2>Storage needs attention</h2><p id="storage-reason"></p><p id="storage-action"></p></aside>
       <section id="overview-panel" class="dashboard-view" role="tabpanel" aria-labelledby="overview-tab" tabindex="0">
-        <section id="ecosystem" class="dashboard-panel" hidden aria-label="Application overview">
+        <section id="ecosystem" hidden aria-label="Application overview">
           <div id="ecosystem-counts" class="ecosystem-grid"></div>
-          <p id="overview-note" hidden></p>
+          <p id="overview-note" class="notice" hidden></p>
         </section>
-        <section id="debug-consoles" hidden aria-label="Troubleshooting">
-          <div class="debug-head">Troubleshooting</div>
-          <div class="debug-links">
-            <a id="debug-radarr-btn" href="#" target="_blank" rel="noopener">Radarr</a>
-            <a id="debug-sonarr-btn" href="#" target="_blank" rel="noopener">Sonarr</a>
-            <a id="debug-qbit-btn" href="#" target="_blank" rel="noopener">qBittorrent</a>
-          </div>
+        <aside id="setup-panel" class="notice" hidden aria-labelledby="setup-title"><div class="section-heading"><h2 id="setup-title">Connections need attention</h2><button id="setup-recheck" type="button">Check again</button></div><table id="setup-checks" aria-label="Connection checks"></table><p id="setup-note"></p></aside>
+        <section id="vpn-bw" class="panel" hidden aria-label="VPN connection and traffic">
+          <div class="section-heading vpn-heading"><h2>VPN <span id="vpn-iface" class="connection-state">Connected</span></h2><span id="vpn-axis" class="muted">Measuring speed…</span></div>
+          <svg id="vpn-graph" viewBox="0 0 320 68" preserveAspectRatio="none" aria-hidden="true"><path id="vpn-down-fill" fill="rgba(212,175,55,0.10)"></path><path id="vpn-down-line" fill="none" stroke="#d4af37" stroke-width="1.6" vector-effect="non-scaling-stroke"></path><path id="vpn-up-line" fill="none" stroke="#8aa0b4" stroke-width="1.4" vector-effect="non-scaling-stroke"></path></svg>
+          <div class="vpn-footer"><div class="vpn-rates"><span class="down"><span aria-hidden="true">↓</span> <strong id="vpn-down-rate" aria-label="Download speed">—</strong></span><span class="up"><span aria-hidden="true">↑</span> <strong id="vpn-up-rate" aria-label="Upload speed">—</strong></span></div><div class="vpn-totals"><span id="vpn-down-total">0 B received</span> · <span id="vpn-up-total">0 B sent</span><small>Since tunnel started</small></div></div>
+          <p id="vpn-unavailable" class="notice" hidden></p>
         </section>
-        <section id="vpn-bw" hidden aria-label="VPN tunnel bandwidth">
-          <div class="vpn-head">
-            <span>VPN</span>
-            <span class="vpn-iface" id="vpn-iface">Connected</span>
-          </div>
-          <div class="vpn-rates">
-            <div class="vpn-col down">
-              <div class="dir">Download</div>
-              <div class="rate" id="vpn-down-rate">—</div>
-              <div class="total" id="vpn-down-total">0 B received</div>
-            </div>
-            <div class="vpn-col up">
-              <div class="dir">Upload</div>
-              <div class="rate" id="vpn-up-rate">—</div>
-              <div class="total" id="vpn-up-total">0 B sent</div>
-            </div>
-          </div>
-          <svg id="vpn-graph" viewBox="0 0 320 68" preserveAspectRatio="none" aria-hidden="true">
-            <path id="vpn-down-fill" fill="rgba(212,175,55,0.16)"></path>
-            <path id="vpn-down-line" fill="none" stroke="#d4af37" stroke-width="1.6"></path>
-            <path id="vpn-up-line" fill="none" stroke="#8aa0b4" stroke-width="1.4"></path>
-          </svg>
-          <p class="vpn-axis" id="vpn-axis">Last two minutes</p>
-        </section>
-        <section class="dashboard-panel" aria-label="Bundled applications"><div class="panel-body"><div class="section-heading"><h2 class="panel-title" id="bundle-version">Pompey</h2><a href="https://github.com/esper256/ha-pompey/releases" target="_blank" rel="noopener">Release notes ↗</a></div><div id="application-versions" class="version-grid"></div><p class="fine-print">Application updates arrive together through tested Pompey releases.</p></div></section>
+        <section class="panel" aria-labelledby="applications-title"><div class="section-heading"><h2 id="applications-title">Applications</h2><div class="version-meta"><span id="bundle-version">Pompey</span><a href="https://github.com/esper256/ha-pompey/releases" target="_blank" rel="noopener">Release notes ↗</a></div></div><div id="application-versions" class="version-list"></div></section>
       </section>
-      <section id="diagnostic-panel" class="dashboard-panel dashboard-view" role="tabpanel" aria-labelledby="requests-tab" tabindex="0" hidden>
-        <div class="diagnostic-body">
-          <div class="section-heading"><h2 class="panel-title">Request workflow</h2><div class="section-actions"><button id="inspect">Refresh</button><button id="collect-report" type="button">Collect diagnostics</button></div></div>
-          <p class="intro">Follow missing media through search, download and import. Manage requests in Seerr.</p>
-          <p id="report-status" role="status" class="fine-print" hidden></p>
-          <section id="report-panel" aria-label="Development diagnostics" hidden>
-            <p class="fine-print" id="report-description">Copy or save this snapshot for your development agent. It contains real request details, paths, server addresses and raw logs without anonymization. Nothing is uploaded automatically.</p>
-            <label for="report-text">Diagnostic report</label>
-            <textarea id="report-text" readonly spellcheck="false" aria-describedby="report-description" wrap="off"></textarea>
-            <button id="copy-report" type="button">Copy report</button><button id="save-report" type="button">Save text file</button>
-          </section>
-          <div id="diagnostics" aria-live="polite"></div>
+      <section id="diagnostic-panel" class="dashboard-view" role="tabpanel" aria-labelledby="requests-tab" tabindex="0" hidden>
+        <div class="requests-toolbar">
+          <label class="search-field"><span class="visually-hidden">Find a title</span><input id="request-filter" type="search" placeholder="Find a title…" autocomplete="off"></label>
+          <div class="request-filters" role="group" aria-label="Show requests"><button id="filter-all" type="button" aria-pressed="true">All <span id="count-all" class="count">0</span></button><button id="filter-attention" type="button" aria-pressed="false">Needs attention <span id="count-attention" class="count">0</span></button></div>
+          <button id="inspect" type="button">Refresh</button>
         </div>
+        <p id="request-status" class="muted request-status" role="status"></p>
+        <div id="request-notices"></div>
+        <div id="diagnostics"></div>
       </section>
-      <section id="config-panel" class="dashboard-panel dashboard-view" role="tabpanel" aria-labelledby="config-tab" tabindex="0" hidden>
-        <div class="panel-body">
-          <h2 class="panel-title">Download preferences</h2>
-          <form id="preferences">
-            <label for="seeding-policy">After downloading</label>
-            <select id="seeding-policy" name="after_download"><option value="stop_sharing">Stop seeding when complete</option><option value="share_to_ratio">Seed to a 1:1 ratio</option><option value="share_one_day">Seed for one day</option></select>
-            <p class="field-help">Arr imports the media before completed download files are removed. Seeding can retain an additional copy.</p>
-            <label for="download-slots">Simultaneous downloads</label>
-            <input id="download-slots" name="simultaneous_downloads" type="number" min="1" max="20" required value="8">
-            <p class="field-help">Between 1 and 20. Slow or stalled torrents do not occupy a slot.</p>
-            <label class="checkbox-label"><input id="dual-audio" name="prefer_dual_audio" type="checkbox">Prefer dual audio for anime</label>
-            <p class="field-help">Adds a preference in Anime profiles for releases with original and dubbed audio. It does not guarantee a particular language or subtitles.</p>
-            <button type="submit" id="save-preferences" disabled>Save changes</button>
-            <p id="preferences-result" role="status" class="field-help"></p>
-          </form>
-          <h2>Quality and storage</h2><p class="fine-print">Choose Default, Max, Anime or Anything per request in Seerr. Arr handles imports and upgrades; Pompey retains files it cannot safely identify or import.</p>
-          <p class="fine-print">Media folders, network access and advanced interfaces remain in Home Assistant’s app configuration.</p>
-          <h2>Maintenance</h2><table id="maintenance-status" aria-label="Maintenance status"></table>
-          <p id="support-note">Home Assistant Logs include Pompey and application output. Review logs for private information before sharing them.</p>
-        </div>
+      <section id="config-panel" class="dashboard-view" role="tabpanel" aria-labelledby="config-tab" tabindex="0" hidden>
+        <form id="preferences" class="panel settings-panel" aria-label="Download preferences">
+          <div class="setting"><label for="seeding-policy">After downloading</label><div><select id="seeding-policy" name="after_download" aria-describedby="seeding-help"><option value="stop_sharing">Stop seeding when complete</option><option value="share_to_ratio">Seed to a 1:1 ratio</option><option value="share_one_day">Seed for one day</option></select><p id="seeding-help" class="field-help"></p></div></div>
+          <div class="setting"><label for="download-slots">Simultaneous downloads</label><div><input id="download-slots" name="simultaneous_downloads" type="number" min="1" max="20" required value="8" aria-describedby="slots-help"><p id="slots-help" class="field-help">Slow or stalled torrents do not occupy a slot.</p></div></div>
+          <div class="setting"><label for="dual-audio">Prefer dual audio for anime</label><div><input id="dual-audio" name="prefer_dual_audio" type="checkbox" aria-describedby="audio-help"><p id="audio-help" class="field-help">Prefer releases with original and dubbed audio.</p></div></div>
+          <div class="form-actions"><button type="submit" id="save-preferences" class="primary" disabled>Save changes</button><p id="preferences-result" role="status"></p></div>
+        </form>
+        <section class="panel" aria-labelledby="report-heading"><h2 id="report-heading">Diagnostics</h2><p class="section-description">Collect application state and logs for your development agent.</p><div class="actions"><button id="collect-report" type="button">Collect diagnostics</button><button id="view-report" type="button" hidden>View report</button></div><details class="report-help"><summary>What is included?</summary><p>Request progress, release history, profiles, download details and recent logs. Original data may contain credentials. Nothing is uploaded automatically.</p></details></section>
+        <section id="debug-consoles" class="panel" hidden aria-labelledby="advanced-heading"><h2 id="advanced-heading">Advanced interfaces</h2><div class="actions"><a id="debug-radarr-btn" class="button" href="#" target="_blank" rel="noopener">Radarr ↗</a><a id="debug-sonarr-btn" class="button" href="#" target="_blank" rel="noopener">Sonarr ↗</a><a id="debug-qbit-btn" class="button" href="#" target="_blank" rel="noopener">qBittorrent ↗</a></div></section>
+        <p class="environment-note">Media paths and network settings are configured in Home Assistant’s app settings.</p>
       </section>
     </div>
   </main>
+  <dialog id="report-dialog" aria-labelledby="report-title" aria-describedby="report-description">
+    <div class="section-heading"><h2 id="report-title" tabindex="-1">Diagnostics</h2><button id="close-report" class="icon-button" type="button" aria-label="Close diagnostics">×</button></div>
+    <p id="report-description">Original application data and logs for your development agent.</p>
+    <p id="report-status" role="status">Collecting…</p>
+    <label for="report-text" class="visually-hidden">Diagnostic report</label><textarea id="report-text" readonly spellcheck="false" wrap="off" hidden></textarea>
+    <p class="report-privacy">Contains original titles, paths and logs. May contain credentials.</p>
+    <div class="dialog-actions"><button id="copy-report" class="primary" type="button" disabled>Copy report</button><button id="save-report" type="button" disabled>Save file</button><button id="recollect-report" type="button" hidden>Collect again</button><button id="dismiss-report" class="close-action" type="button">Close</button></div>
+  </dialog>
   <script>
     const fileHint = document.getElementById("file-hint");
     const fill = document.getElementById("fill");
@@ -574,13 +175,30 @@
       );
     }
 
+    function unavailableVpn(label) {
+      vpnBw.hidden = false;
+      vpnIface.textContent = label;
+      vpnIface.classList.add("disconnected");
+      vpnDownRate.textContent = vpnUpRate.textContent = "—";
+      document.getElementById("vpn-graph").hidden = true;
+      const notice = document.getElementById("vpn-unavailable");
+      notice.textContent = label === "Disconnected" ? "Internet access is blocked until the VPN reconnects." : "Live VPN information is unavailable. Check the Home Assistant log.";
+      notice.hidden = false;
+      vpnLast = null;
+      vpnHist.length = 0;
+    }
+
     function renderVpn(data) {
       const showForm = isVpnFormVisible(data);
       const vpn = data.vpn;
-      if (showForm || !vpn || vpn.up !== true) {
-        vpnBw.hidden = true;
+      if (showForm) { vpnBw.hidden = true; return; }
+      if (!vpn || vpn.up !== true) {
+        unavailableVpn(vpn?.up === false ? "Disconnected" : "Status unavailable");
         return;
       }
+      vpnIface.classList.remove("disconnected");
+      document.getElementById("vpn-graph").hidden = false;
+      document.getElementById("vpn-unavailable").hidden = true;
       const nowMs = Number(vpn.sample_ms) || Date.now();
       const rx = Number(vpn.rx_bytes) || 0;
       const tx = Number(vpn.tx_bytes) || 0;
@@ -739,7 +357,7 @@
       tickBusy = true;
       try {
         const res = await timedFetch("status.json", { cache: "no-store" });
-        if (!res.ok) return;
+        if (!res.ok) throw new Error("Service status unavailable");
         const data = await res.json();
         render(data);
         renderVpn(data);
@@ -767,6 +385,7 @@
           }
         }
       } catch (_exc) {
+        if (document.body.classList.contains("is-ready")) unavailableVpn("Status unavailable");
         // Polling is read-only. A torn status.json must not look like boot
         // started over just because someone opened the sidebar.
         if (!document.body.classList.contains("is-ready")) {

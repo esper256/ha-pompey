@@ -1,8 +1,12 @@
 # Changelog
 
-## 0.5.3
+## 0.6.0
 
-- Add Collect diagnostics in Requests, with a copyable report and text-file download for development agents. Correlate requests with native Arr history/queues, profiles, indexer settings, torrent files/trackers and recent logs. Preserve original names, paths and application data without anonymization; report incomplete evidence explicitly.
+- Rebuild Ingress with a compact header, responsive Overview / Requests / Config tabs, clearer VPN traffic and bundled-version displays, and contextual connection warnings.
+- Expand one request directly beneath its table row, with stable download identity, title search, an attention filter, native import errors, transfer evidence and release comparisons. Retain expanded items and search results across refreshes.
+- Move diagnostic collection to Config and show copyable/downloadable reports in a dismissible dialog. Simplify preference help and show saved versus applying state beside Save changes.
+
+- Add Collect diagnostics in Config, with a copyable report and text-file download for development agents. Correlate requests with native Arr history/queues, profiles, indexer settings, torrent files/trackers and recent logs. Preserve original names, paths and application data without anonymization; report incomplete evidence explicitly.
 - Retain bounded native Arr debug logs and raw application/controller log windows while keeping Home Assistant console output filtered. Include recorded release acceptance/rejection evidence without performing fresh searches or changing downloads.
 - Configure Prowlarr Allowed Hosts from access names observed through authenticated Ingress and local interface addresses. Preserve explicit user entries and avoid a wildcard or hardcoded Supervisor addresses.
 

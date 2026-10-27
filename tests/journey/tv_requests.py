@@ -1,6 +1,7 @@
 """TV integration scenarios through real Seerr, Sonarr, source and downloader."""
 
 from pathlib import Path
+import os
 import time
 import urllib.parse
 from catalogue import offers
@@ -121,6 +122,18 @@ def tv_request(client, case, background, ledger_file):
         "Incomplete episodes imported"
     )
     evidence.stamp("incomplete-preserved")
+    if case.scenario == "single-episode" and os.environ.get("POMPEY_TEST_BASELINE") != "1":
+        def workflow_episode():
+            diagnostic = client.session.call("GET", "http://127.0.0.1:8099/diagnostics")
+            return [row for row in diagnostic["workflow"]
+                    if row.get("downloadId") == infohash.lower() and row.get("scope")]
+
+        workflow_rows = client.wait(workflow_episode, "Ingress did not identify the native TV episode", 10)
+        assert {row["scope"] for row in workflow_rows} == {
+            f"S{selected.season:02d}E{episode:02d}" for episode in selected.episodes
+        }, workflow_rows
+        assert len({row["key"] for row in workflow_rows}) == len(workflow_rows), workflow_rows
+        active["workflowEpisodeVerified"] = True
     client.release(selected)
     client.wait(
         lambda: (t := torrent()) and t["progress"] == 1, "TV payload was not verified"
