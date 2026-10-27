@@ -116,7 +116,6 @@ jobs:
             pompey-build-${{ runner.os }}-
       - name: Build the amd64 application image
         run: |
-          docker buildx use default
           docker buildx build --platform linux/amd64 \
             --build-arg BUILD_ARCH=amd64 --build-arg BUILD_VERSION="$(python3 tools/release_metadata.py current)" --build-arg BUILD_REF="${{ needs.changes.outputs.revision }}" \
             --cache-from type=local,src=/tmp/pompey-build-cache \
