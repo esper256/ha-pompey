@@ -125,6 +125,9 @@ class ReleasePlanning(unittest.TestCase):
         with patch("promote_candidate.api", side_effect=[pr, {**pr, "mergeable_state": "clean"}]), patch("promote_candidate.time.sleep") as pause:
             await_merge_gate("repos/test", "1", plan)
             pause.assert_called_once_with(2)
+        with patch("promote_candidate.api", return_value={**pr, "mergeable_state": "unstable"}), patch("promote_candidate.time.sleep") as pause:
+            await_merge_gate("repos/test", "1", plan)
+            pause.assert_not_called()
         with patch("promote_candidate.api", return_value=pr), patch("promote_candidate.time.sleep") as pause, self.assertRaises(ValueError):
             await_merge_gate("repos/test", "1", plan)
         self.assertEqual(pause.call_count, 7)

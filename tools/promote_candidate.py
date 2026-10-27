@@ -115,7 +115,9 @@ def await_merge_gate(base, number, plan):
         pr = api(base + "/pulls/" + number)
         if pr["head"]["sha"] != plan["head"] or pr["base"]["sha"] != plan["base"]:
             raise ValueError("Release changed while GitHub was recognizing its required check")
-        if pr.get("mergeable_state") == "clean":
+        # "unstable" is mergeable: optional status/suite results need not pass.
+        # The protected merge endpoint remains authoritative for required rules.
+        if pr.get("mergeable_state") in {"clean", "unstable"}:
             return
         if attempt < 7:
             time.sleep(2)
