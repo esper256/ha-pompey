@@ -43,11 +43,14 @@ jobs:
         with:
           path: /tmp/pompey-build-cache
           key: pompey-build-${{ runner.os }}-${{ hashFiles('pompey/Dockerfile', 'pompey/vendor_bundle.py', 'pompey/rootfs/usr/share/pompey/engines.json', 'tests/journey/Dockerfile') }}
+          # BuildKit checks layer inputs; older caches remain safe across version edits.
+          restore-keys: |
+            pompey-build-${{ runner.os }}-
       - name: Build the amd64 application image
         run: |
           docker buildx create --use --driver docker-container
           docker buildx build --load --platform linux/amd64 \
-            --build-arg BUILD_ARCH=amd64 --build-arg BUILD_VERSION=0.4.0 --build-arg BUILD_REF="$GITHUB_SHA" \
+            --build-arg BUILD_ARCH=amd64 --build-arg BUILD_VERSION=0.4.1 --build-arg BUILD_REF="$GITHUB_SHA" \
             --cache-from type=local,src=/tmp/pompey-build-cache \
             --cache-to type=local,dest=/tmp/pompey-build-cache-new,mode=max \
             -t localhost/pompey:foundation pompey/

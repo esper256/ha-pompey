@@ -48,16 +48,14 @@ ARG BUILD_DESCRIPTION="Search for a movie or show; VPN WireGuard for all interne
 ARG BUILD_NAME="Pompey"
 ARG BUILD_REF=""
 ARG BUILD_REPOSITORY="esper256/ha-pompey"
-ARG BUILD_VERSION="0.4.0"
+ARG BUILD_VERSION="0.4.1"
 
 
 ENV BUILD_VERSION="${BUILD_VERSION}" \
     S6_SERVICES_GRACETIME=30000 \
     S6_KILL_GRACETIME=3000
 
-RUN addgroup -g 1000 pompey \
-    && adduser -D -H -u 1000 -G pompey -h /data/pompey pompey \
-    && rm -f /etc/nginx/http.d/default.conf \
+RUN rm -f /etc/nginx/http.d/default.conf \
     && chmod +x \
       /etc/cont-init.d/*.sh \
       /etc/services.d/*/run \

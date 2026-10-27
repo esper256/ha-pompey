@@ -2,7 +2,7 @@
 
 Pompey runs Seerr, Prowlarr, Radarr, Sonarr and qBittorrent in one Home Assistant OS app. Internet traffic uses a WireGuard VPN. Plex runs separately. The Home Assistant sidebar provides setup, service status and diagnostics. Seerr on port **5055** provides search and media requests; Prowlarr on **9696** manages indexers.
 
-Pompey is experimental software. Version 0.4.0 supports fresh amd64 installations with bundled, pinned applications. Migration from earlier installation layouts is not supported. See [release validation and current coverage](docs/testing.md).
+Pompey is experimental software. Version 0.4.1 supports fresh amd64 installations with bundled, pinned applications. Migration from earlier installation layouts is not supported. See [release validation and current coverage](docs/testing.md).
 
 ## Installation
 
@@ -63,8 +63,14 @@ Configuration, requests, download policies and library routing run as separate j
 
 Application versions, artifact checksums, Seerr's image digest and quality-resource commits are pinned in the [bundle manifest](pompey/rootfs/usr/share/pompey/engines.json). Updates are delivered through tested Pompey releases. Runtime startup does not download or replace applications.
 
-Application executables are owned by root. Applications and maintenance jobs run as the unprivileged `pompey` user, UID/GID 1000. Media storage must permit that identity to create, rename and hardlink files.
+Applications and maintenance jobs run as root inside the Home Assistant app container so they can write to Supervisor-managed SMB/CIFS media mounts. Container isolation and the Home Assistant AppArmor profile provide containment; shipped applications share a trust boundary. Pompey does not request privileged-container mode or additional capabilities for this storage access.
+
+Startup checks directory listing and file creation, rename and removal as that user. A failure logs numeric ownership and permissions for the directory and its parents, the filesystem type and relevant mount permission settings. The share account also needs write access on the server.
+
+Pompey preserves existing directory ownership and does not recursively change media or application configuration ownership. Root-owned SMB directories with mode `0755` are supported. The SMB account still needs server-side write access, and a read-only, unavailable or full share will fail the storage check. Deleting `downloads` is not a permissions repair and can discard active downloads, manual grabs and recycled media.
+
+Home Assistant's **Logs** view combines Pompey and application output, including qBittorrent's file log. Review copied logs for private information before sharing them in an issue; filtering does not guarantee that every sensitive value has been removed. Pompey does not upload diagnostics automatically.
 
 Home Assistant cold backups stop Pompey while persistent state is copied. Use a backup to recover from an unsuccessful application or database update. Pompey does not provide automatic binary or database rollback. See [architecture](docs/arr-auto-update.md) and [testing](docs/testing.md).
 
-**Known issue in 0.4.0:** a download interrupted by VPN loss can remain stalled after the tunnel recovers. Local access and the firewall remain functional in the reproduced scenario. Release CI permits only this documented resume timeout after verifying the other network and service checks. Automatic upstream dependency promotion remains disabled.
+**Known issue:** a download interrupted by VPN loss can remain stalled after the tunnel recovers. Local access and the firewall remain functional in the reproduced scenario. Release CI permits only this documented resume timeout after verifying the other network and service checks. Automatic upstream dependency promotion remains disabled.

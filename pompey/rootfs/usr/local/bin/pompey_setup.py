@@ -68,8 +68,6 @@ class Handler(BaseHTTPRequestHandler):
     def _diagnostic(self, action, payload=None):
         proc = subprocess.run(
             [
-                "s6-setuidgid",
-                "pompey",
                 sys.executable,
                 "/usr/local/bin/pompey_diagnostics.py",
                 action,

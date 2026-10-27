@@ -106,7 +106,7 @@ def execute(args, engine, results, summary, checkpoint):
                 "--build-arg",
                 "BUILD_ARCH=amd64",
                 "--build-arg",
-                "BUILD_VERSION=0.4.0",
+                "BUILD_VERSION=0.4.1",
                 "-t",
                 args.image,
                 "pompey/",
@@ -321,6 +321,9 @@ def journey(
             )
         assert report["success"], report
         engine.assert_clean_stop(destination)
+        assert "[qBittorrent]" in (destination / "container.log").read_text(), (
+            "qBittorrent's file log was not forwarded to Home Assistant output"
+        )
         if export_seed:
             seed, snapshot_seconds = engine.snapshot(name, destination)
             sample["configuredSeed"] = seed

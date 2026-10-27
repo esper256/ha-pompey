@@ -162,7 +162,7 @@ def control(action):
 
 
 def probe(host, port, kind):
-    if os.geteuid() != 1000:
+    if os.geteuid() != 0:
         raise RuntimeError("Egress probe must use the engine identity")
     connected = False
     try:

@@ -164,6 +164,7 @@ def identities():
         "Prowlarr": "prowlarr",
         "qbittorrent-nox": "qbittorrent",
         "node": "seerr",
+        "python3": "controller",
     }
     processes = {}
     for path in Path("/proc").glob("[0-9]*/status"):
@@ -190,6 +191,8 @@ def identities():
         name = Path(args[0]).name
         if name not in tokens or (name == "node" and "dist/index.js" not in args):
             continue
+        if name == "python3" and "/usr/local/bin/pompey_controller.py" not in args:
+            continue
         roots[pid] = tokens[name]
     result = {kind: [] for kind in tokens.values()}
     for pid, p in processes.items():
@@ -200,7 +203,7 @@ def identities():
             ancestor = processes[ancestor]["parent"]
         if ancestor not in roots:
             continue
-        assert set(p["uids"]) == {"1000"} and not any(p["caps"].values()), p
+        assert set(p["uids"]) == {"0"}, p
         result[roots[ancestor]].append(
             {"pid": pid, "role": "main" if pid in roots else "worker", **p}
         )

@@ -258,7 +258,7 @@ class FirewallPackets(unittest.TestCase):
         )
         self.ping("198.18.0.2", False)
 
-    def test_g_bootstrap_dns_is_privileged_even_with_a_lan_exception(self):
+    def test_g_root_application_dns_cannot_use_bootstrap_or_lan_exceptions(self):
         with (
             tempfile.TemporaryDirectory() as folder,
             patch.dict(
@@ -269,12 +269,18 @@ class FirewallPackets(unittest.TestCase):
             Path(folder, "bootstrap-resolv.conf").write_text("nameserver 198.18.0.2\n")
             firewall = rules(self.config, "198.18.0.0/24")
         self.command(self.client, "nft", "-f", "-", input=firewall)
-        code = """import socket,threading
+        code = r"""import socket,threading
 u=socket.socket(type=socket.SOCK_DGRAM);u.bind(('0.0.0.0',53))
 t=socket.socket();t.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1);t.bind(('0.0.0.0',53));t.listen()
 def udp():
  while True:
-  data,peer=u.recvfrom(100);u.sendto(data,peer)
+  data,peer=u.recvfrom(1024)
+  if data==b'DNS':response=data
+  else:
+   pos=12
+   while data[pos]:pos+=data[pos]+1
+   response=data[:2]+b'\x81\x80\x00\x01\x00\x01\x00\x00\x00\x00'+data[12:pos+5]+b'\xc0\x0c\x00\x01\x00\x01\x00\x00\x00\x3c\x00\x04\xc6\x12\x00\x02'
+  u.sendto(response,peer)
 threading.Thread(target=udp,daemon=True).start()
 print('ready',flush=True)
 while True:
@@ -286,10 +292,22 @@ while True:
             self.client,
             sys.executable,
             "-c",
-            "import socket;u=socket.socket(type=socket.SOCK_DGRAM);u.settimeout(1);u.sendto(b'DNS',('198.18.0.2',53));assert u.recv(3)==b'DNS';t=socket.create_connection(('198.18.0.2',53),1);assert t.recv(3)==b'DNS'",
+            "import os,socket;os.setgroups([]);os.setgid(65534);os.setuid(65534);u=socket.socket(type=socket.SOCK_DGRAM);u.settimeout(1);u.sendto(b'DNS',('198.18.0.2',53));assert u.recv(3)==b'DNS';t=socket.create_connection(('198.18.0.2',53),1);assert t.recv(3)==b'DNS'",
         )
-        engine = """import os,socket,subprocess
-os.setgroups([]);os.setgid(1000);os.setuid(1000)
+        with tempfile.TemporaryDirectory() as folder:
+            resolver = Path(folder, "resolv.conf")
+            resolver.write_text("nameserver 198.18.0.2\n")
+            self.command(
+                self.client,
+                sys.executable,
+                "-c",
+                "import os,sys;sys.path.insert(0,'/usr/local/bin');"
+                f"os.environ['POMPEY_BOOTSTRAP_RESOLV']={str(resolver)!r};"
+                "from vpn_config import resolve_endpoint;"
+                "assert resolve_endpoint('vpn.fixture')=='198.18.0.2'",
+            )
+        engine = """import os,socket
+assert os.getuid()==0
 for protocol in [socket.SOCK_DGRAM,socket.SOCK_STREAM]:
  s=socket.socket(type=protocol);s.settimeout(.4)
  try:
@@ -299,16 +317,11 @@ for protocol in [socket.SOCK_DGRAM,socket.SOCK_STREAM]:
  except (TimeoutError,OSError):pass
  else:raise AssertionError('Engine DNS escaped through LAN')
  finally:s.close()
-assert subprocess.run(['nft','delete','table','inet','pompey'],capture_output=True).returncode!=0
-s=socket.socket(type=socket.SOCK_DGRAM)
-try:s.setsockopt(socket.SOL_SOCKET,36,20559)
-except PermissionError:pass
-else:raise AssertionError('Engine could forge the WireGuard mark')
 """
         self.command(self.client, sys.executable, "-c", engine)
         self.command(self.client, "nft", "list", "table", "inet", "pompey")
 
-    def test_h_engines_cannot_use_the_privileged_setup_api(self):
+    def test_h_root_applications_can_reach_local_setup(self):
         self.install()
         code = """import socket
 s=socket.socket();s.bind(('127.0.0.1',8097));s.listen();print('ready',flush=True)
@@ -322,17 +335,6 @@ while True:
             sys.executable,
             "-c",
             "import socket;s=socket.create_connection(('127.0.0.1',8097),1);assert s.recv(5)==b'setup'",
-        )
-        self.command(
-            self.client,
-            sys.executable,
-            "-c",
-            """import os,socket
-os.setgroups([]);os.setgid(1000);os.setuid(1000)
-try:socket.create_connection(('127.0.0.1',8097),.5)
-except OSError:pass
-else:raise AssertionError('Engine reached privileged setup')
-""",
         )
 
 

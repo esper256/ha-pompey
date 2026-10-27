@@ -5,7 +5,7 @@ import ipaddress
 import os
 from pathlib import Path
 import sys
-from vpn_config import render, bootstrap_servers, WIREGUARD_MARK
+from vpn_config import render, bootstrap_servers, WIREGUARD_MARK, BOOTSTRAP_DNS_UID
 
 
 def rules(text, lan):
@@ -16,7 +16,6 @@ def rules(text, lan):
         "table inet pompey {",
         "chain output {",
         "type filter hook output priority 0; policy drop;",
-        'oifname "lo" meta skuid 1000 tcp dport { 8097, 8099 } reject',
         'oifname "lo" accept',
         'oifname "wg0" accept',
         # Replies to incoming UI/Plex connections may use the LAN. Do not
@@ -30,8 +29,8 @@ def rules(text, lan):
         servers = []
     for server in servers:
         family = "ip6" if ipaddress.ip_address(server).version == 6 else "ip"
-        lines.append(f"meta skuid 0 {family} daddr {server} udp dport 53 accept")
-        lines.append(f"meta skuid 0 {family} daddr {server} tcp dport 53 accept")
+        lines.append(f"meta skuid {BOOTSTRAP_DNS_UID} {family} daddr {server} udp dport 53 accept")
+        lines.append(f"meta skuid {BOOTSTRAP_DNS_UID} {family} daddr {server} tcp dport 53 accept")
     for peer in config["endpoints"]:
         ip = ipaddress.ip_address(peer["ip"])
         family = "ip6" if ip.version == 6 else "ip"

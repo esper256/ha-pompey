@@ -14,5 +14,5 @@ python3 "$(command -v vpn_firewall.py)" | nft -f -
 printf 'nameserver 127.0.0.1\n' > "${POMPEY_RESOLV}"
 chmod 755 "${POMPEY_READY}"
 pompey-secrets >/dev/null
-bashio::log.info "Pompey ${BUILD_VERSION:-0.4.0}: starting bundled applications"
+bashio::log.info "Pompey ${BUILD_VERSION:-0.4.1}: starting bundled applications"
 pompey_status.py start "Starting applications" 20 || true

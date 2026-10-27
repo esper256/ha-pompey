@@ -61,6 +61,18 @@ def prepare():
         media_folder="/media/dlna", lan_networks="", after_download="stop_sharing"
     )
     Path("/data/options.json").write_text(json.dumps(options))
+    # Match HAOS's root-owned 0755 media view. Startup must preserve ownership;
+    # application processes must import to these directories without chown.
+    for relative in [
+        "downloads",
+        options["movies_folder"],
+        options["movies_kid_folder"],
+        options["tv_folder"],
+        options["tv_kid_folder"],
+    ]:
+        folder = Path("/media/dlna") / relative
+        folder.mkdir(parents=True, exist_ok=True)
+        folder.chmod(0o755)
     os.environ.update(
         INGRESS_PORT="8099",
         NODE_EXTRA_CA_CERTS="/usr/local/share/ca-certificates/pompey-test.crt",
@@ -159,10 +171,10 @@ PersistentKeepalive = 1
         config.write(out, space_around_delimiters=False)
     controls = Path("/data/pompey-fixture")
     controls.mkdir(exist_ok=True)
-    os.chown(controls, 1000, 1000)
+    os.chown(controls, 65534, 65534)
     events = Path("/tmp/world/events")
     events.mkdir()
-    os.chown(events, 1000, 1000)
+    os.chown(events, 65534, 65534)
     prepare_media(Path("/tmp/world"))
     worker = subprocess.Popen(["python3", "-u", "/tests/journey/world.py"])
     deadline = time.monotonic() + 10

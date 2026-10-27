@@ -1,0 +1,6 @@
+#!/command/with-contenv bashio
+# shellcheck shell=bash
+set -euo pipefail
+# shellcheck source=/dev/null
+source "$(command -v pompey-env)"
+exec pompey-log tail "qBittorrent" "${POMPEY_CONFIG}/qBittorrent/logs/qbittorrent.log"

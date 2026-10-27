@@ -6,6 +6,6 @@ source "$(command -v pompey-env)"
 
 
 pompey-log start "Prowlarr"
-exec > >(s6-setuidgid pompey pompey-log prefix "Prowlarr")
+exec > >(pompey-log prefix "Prowlarr")
 exec 2>&1
-exec s6-setuidgid pompey "${POMPEY_ENGINES}/Prowlarr/Prowlarr" -nobrowser -data="${POMPEY_CONFIG}/prowlarr"
+exec "${POMPEY_ENGINES}/Prowlarr/Prowlarr" -nobrowser -data="${POMPEY_CONFIG}/prowlarr"
