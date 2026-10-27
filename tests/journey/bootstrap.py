@@ -171,6 +171,13 @@ PersistentKeepalive = 1
             raise RuntimeError("Fixture namespace creation failed")
         time.sleep(0.05)
     run("ip", "link", "set", "fixture-peer", "netns", str(worker.pid))
+    # A namespace/handshake can exist while torrent hashes are still being built.
+    # Start real apps only after external HTTP/DNS/peer sockets are listening.
+    until = time.monotonic() + 60
+    while not Path("/tmp/world/services-ready").exists():
+        if worker.poll() is not None or time.monotonic() >= until:
+            raise RuntimeError("External fixture services did not become ready")
+        time.sleep(0.05)
     stamp("fixtures-prepared")
     os.execv(
         "/init",

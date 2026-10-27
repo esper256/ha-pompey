@@ -57,6 +57,7 @@ def main():
     world.start(
         "/usr/local/share/ca-certificates/pompey-test.crt", "/tmp/world/key.pem"
     )
+    Path("/tmp/world/services-ready").touch()
     # Sockets are bound; the synthetic peer itself has no root capabilities.
     os.setgroups([])
     os.setgid(1000)
