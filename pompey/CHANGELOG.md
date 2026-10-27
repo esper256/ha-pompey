@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Keep durable delivery records for movies and individual episodes; stop automatic monitoring after final-library delivery, preserve completion after manual file moves, and reopen content only through an explicit retry.
+- Explain retained completed torrents and provide Check downloads and per-title Check library actions through existing native maintenance.
+- Distinguish TV recovery entries by episode coordinates or the saved release name.
+- Correct Radarr and Sonarr frontend routing under Home Assistant Ingress, including initial pages and deep links.
+
 ## 0.6.0
 
 - Rebuild Ingress with responsive Overview / Releases / Config tabs, compact navigation, clearer VPN traffic and bundled-version displays, and contextual connection warnings.

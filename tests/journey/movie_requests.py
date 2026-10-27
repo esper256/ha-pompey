@@ -269,7 +269,8 @@ def _movie_request(client, case, background, ledger_file, *, resume):
             and native["quality"]["quality"]["resolution"] == 480
         ), native
         active["nativeMediaInfo"] = native["mediaInfo"]
-    assert item["monitored"] is (active.get("requestState") != "deleted"), item
+    if active.get("requestState") == "deleted":
+        assert not item["monitored"], item
     stamp("imported")
     if case.late_certification:
         staging = Path(item["path"])
@@ -407,6 +408,37 @@ def _movie_request(client, case, background, ledger_file, *, resume):
     if active.get("releaseRecoveryVerified"):
         from release_recovery import assert_sequence
         assert_sequence(client, item["id"], download.release)
+    if os.environ.get("POMPEY_TEST_BASELINE") != "1":
+        def delivered():
+            data = client.session.call("GET", "http://127.0.0.1:8099/diagnostics")
+            return any(t["kind"] == "radarr" and t["id"] == item["id"] and t.get("delivered") for t in data["titles"]) and not movie()["monitored"]
+        wait(delivered, "Final library import did not record delivery and stop monitoring")
+        item = movie()
+        if case.scenario == "movie-pg":
+            from release_recovery import post
+            checked = post(client, "/check-downloads", {})
+            for kind, command in checked["commands"].items():
+                client.wait_command(command, kind)
+            wait(lambda: not torrent(), "Native cleanup did not remove the delivered torrent")
+            moved = wrong / imported.parent.name
+            original_folder = imported.parent
+            original_folder.rename(moved)
+            # Leave the original title directory, as a file move does. Radarr
+            # intentionally skips missing-file reconciliation for an empty root.
+            original_folder.mkdir()
+            imported = moved / imported.name
+            subtitles = [moved / p.name for p in subtitles]
+            scan = post(client, "/check-library", {"kind":"radarr","id":item["id"]})
+            client.wait_command(scan["commandId"])
+            wait(lambda: not movie()["hasFile"], "Radarr did not notice the user-moved file")
+            wait(delivered, "Moving the file reopened its delivery")
+            current = client.session.call("GET", "http://127.0.0.1:8099/diagnostics")
+            assert not any(r["kind"] == "radarr" and r["id"] == item["id"] for r in current["workflow"]), current
+            choices = post(client, "/recovery/releases", {"kind":"radarr","id":item["id"]})
+            assert choices["choices"] and choices["choices"][0].get("movedFilesRetained"), choices
+            plan = post(client, "/recovery/preview", {"kind":"radarr","id":item["id"],"downloadId":infohash})
+            assert not plan["libraryFiles"] and digest(imported) == checksum, plan
+            active["manualMovePreservedDelivery"] = True
     assert not client.peer(download)["unknown"], client.peer(download)["unknown"]
     ledger.append(
         {
@@ -415,6 +447,7 @@ def _movie_request(client, case, background, ledger_file, *, resume):
             "arrId": item["id"],
             "requestId": request["id"],
             "monitored": item["monitored"],
+            "manuallyMoved": active.get("manualMovePreservedDelivery", False),
             "since": active["wallStarted"],
             "infoHash": infohash,
             "kind": "radarr",

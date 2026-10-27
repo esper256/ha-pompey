@@ -236,6 +236,14 @@ def main():
         )
         client.invariants = invariants
         if restored:
+            if os.environ.get("POMPEY_TEST_BASELINE") != "1":
+                # The new delivery policy intentionally stops monitoring movies
+                # imported by the previous release without changing their files.
+                for row in background.ledger:
+                    if row.get("kind", "radarr") == "radarr":
+                        client.wait(lambda r=row: not client.arr("GET", "/movie/" + str(r["arrId"]))["monitored"],
+                                    "Restored delivered movie remained monitored")
+                        row["monitored"] = False
             invariants.checkpoint("configured-baseline", full=True)
         batch_since = time.time()
         evidence.data["willRestart"] = 9 in selected

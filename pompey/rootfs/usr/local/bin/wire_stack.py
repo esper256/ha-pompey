@@ -1069,6 +1069,8 @@ def housekeep() -> int:
     from media_policy import maintain_downloads
 
     maintain_downloads()
+    from pompey_delivery import reconcile as reconcile_deliveries
+    reconcile_deliveries()
     from pompey_recovery import reconcile
     reconcile()
     return 0

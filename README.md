@@ -37,13 +37,17 @@ Arr manages imports and upgrades. Replaced media files are retained in `download
 
 **Stop sharing** stops completed torrents so Arr can move media into the library. **Share to ratio** seeds until the upload/download ratio reaches 1.0. **Share one day** seeds for 24 hours. Continued seeding uses hardlinks where supported, otherwise it requires an additional file copy. Arr removes completed torrents after import and the selected seeding target. Stalled transfers do not count toward the active download limit.
 
+Pompey checks download policies about every 30 seconds. **Check downloads** in Releases runs the same policy maintenance and asks Radarr and Sonarr to check imports and cleanup immediately. Submission is not proof of removal: each retained torrent shows its seeding, import or ownership condition. Unknown downloads are not deleted simply because they are complete.
+
+Successful delivery is durable. Once an imported movie or episode reaches a configured final library, Pompey records delivery and stops its automatic monitoring. Moving or deleting it later does not reopen the work or cause another download. Future TV episodes remain monitored. Seerr continues to show current media-server availability; Pompey does not duplicate that catalogue. **Try another** explicitly reopens the selected content for replacement. Existing successful native imports into final libraries can also establish delivery; incomplete history and staging imports cannot. This policy means automatic quality upgrades stop after delivery, including for Max.
+
 Prowlarr's **Grab** action sends downloads to `downloads/manual`. Pompey submits completed, stopped downloads to Arr only when Arr accepts the match. Unmatched files, rejected upgrades and ambiguous import attempts remain available for review through the advanced application interfaces. Downloads can originate independently of Seerr requests.
 
 ## Requests and quality
 
 Recyclarr configures the **Default**, **Max** and **Anime** profiles from the release's pinned quality resources. **Anything** permits lower qualities without automatic upgrades. Required profiles must be available before requests are configured.
 
-For TV, Default and Max prefer complete season packs within the same resolution tier and allow x265 HD releases. Release scores alone do not trigger replacements after the target quality is reached. Max can upgrade a 1080p release to 4K. Anime preferences include season packs and dual audio that includes the original language.
+For TV, Default and Max prefer complete season packs within the same resolution tier and allow x265 HD releases. Max permits 4K selections. Delivered content is replaced only through an explicit retry. Anime preferences include season packs and dual audio that includes the original language.
 
 **By Rating** selects automatic routing through the staging directories `downloads/By Rating/Movies` and `downloads/By Rating/TV`. Pompey then moves imported titles to the appropriate library.
 
@@ -58,6 +62,8 @@ An atomic IPv4/IPv6 firewall update installs the fail-closed policy before appli
 The sidebar uses **Overview**, **Releases** and **Config** tabs. Overview shows torrents, monitored titles, source availability, VPN traffic and bundled application versions. Connection checks appear when setup or a service needs attention. Unavailable observations retain their last known values and age.
 
 Releases explains missing monitored media and native Arr queues, including work added outside Seerr. Filter by title, attention status or imported titles, then expand a table row to inspect transfer evidence and native import messages directly beneath it. One item is expanded at a time; observations refresh without reordering existing rows. **Inspect releases**, under Technical details, searches configured indexers and shows Arr’s rejection reasons without starting a download. The queue view is limited to the first 100 entries per Arr application; diagnostics warn when more exist.
+
+The **Delivered** view keeps recorded deliveries even if Arr no longer recognizes a file you moved. Missing-title details show Arr's expected folder. **Check library** asks the native application to rescan that folder; it does not search indexers or search other folders. Files moved outside Arr are retained during a retry unless Arr still identifies them in the confirmation. Episode coordinates distinguish TV recovery sequences; older records without coordinates show the original release name.
 
 **Try another** rejects an active download or an imported release. Review the affected download and library files before confirming; a season pack can affect several episodes. Arr removes the selected files and associated sidecars according to its recycle policy, blocklists the release and performs a native replacement search. Unrelated library files are retained. Pompey refuses ambiguous ownership, missing native history, unhealthy storage or a changed preview. Interrupted operations retain their completed steps for review and are never automatically replayed. If an imported torrent is still seeding outside Arr’s queue, finish native seeding/cleanup before retrying. Normal background failed-download auto-retry remains disabled.
 

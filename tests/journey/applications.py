@@ -369,7 +369,7 @@ class Background:
                 movie
                 and movie[external_key] == external
                 and movie["title"] == row["prefix"]
-                and (tv or movie["hasFile"]),
+                and (tv or movie["hasFile"] is not row.get("manuallyMoved", False)),
                 "title",
                 movie,
             )

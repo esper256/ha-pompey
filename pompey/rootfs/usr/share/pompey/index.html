@@ -51,10 +51,12 @@
       <section id="diagnostic-panel" class="dashboard-view" role="tabpanel" aria-labelledby="requests-tab" tabindex="0" hidden>
         <div class="requests-toolbar">
           <label class="search-field"><span class="visually-hidden">Find a title</span><input id="request-filter" type="search" placeholder="Find a title…" autocomplete="off"></label>
-          <div class="request-filters" role="group" aria-label="Show releases"><button id="filter-all" type="button" aria-pressed="true">In progress <span id="count-all" class="count">0</span></button><button id="filter-attention" type="button" aria-pressed="false">Needs attention <span id="count-attention" class="count">0</span></button><button id="filter-imported" type="button" aria-pressed="false">Imported <span id="count-imported" class="count">0</span></button></div>
+          <div class="request-filters" role="group" aria-label="Show releases"><button id="filter-all" type="button" aria-pressed="true">In progress <span id="count-all" class="count">0</span></button><button id="filter-attention" type="button" aria-pressed="false">Needs attention <span id="count-attention" class="count">0</span></button><button id="filter-imported" type="button" aria-pressed="false">Delivered <span id="count-imported" class="count">0</span></button></div>
           <button id="collect-report" type="button">Diagnostics</button>
           <button id="inspect" type="button">Refresh</button>
         </div>
+        <div class="download-maintenance"><p id="download-maintenance" class="field-help"></p><button id="check-downloads" type="button">Check downloads</button></div>
+        <p id="download-check-result" class="field-help" role="status" hidden></p>
         <p id="request-status" class="muted request-status" role="status"></p>
         <div id="request-notices"></div>
         <div id="diagnostics"></div>
