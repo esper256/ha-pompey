@@ -265,6 +265,21 @@ def configure(client, restored):
             "Fresh-install journey has existing titles"
         )
     if os.environ.get("POMPEY_TEST_DNS_TRACE") == "1":
+        subprocess.Popen(
+            [
+                "/tests/journey/tool",
+                "tcpdump",
+                "-i",
+                "any",
+                "-n",
+                "-U",
+                "-s",
+                "128",
+                "-w",
+                "/artifacts/seerr-dns.pcap",
+                "udp port 53 or udp port 51820 or udp port 51821",
+            ]
+        )
         for entry in Path("/proc").glob("[0-9]*/cmdline"):
             try:
                 command = entry.read_bytes().split(b"\0")[0]

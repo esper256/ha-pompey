@@ -274,7 +274,14 @@ def journey(
         + json.dumps({"configuration": 2, "routing": 2, "requests": 2, "downloads": 2}),
     ]
     if os.environ.get("POMPEY_TEST_DNS_TRACE") == "1":
-        flags += ["--cap-add", "SYS_PTRACE", "-e", "POMPEY_TEST_DNS_TRACE=1"]
+        flags += [
+            "--cap-add",
+            "SYS_PTRACE",
+            "--cap-add",
+            "NET_RAW",
+            "-e",
+            "POMPEY_TEST_DNS_TRACE=1",
+        ]
     flags += engine.namespace_security
     try:
         if seed:
