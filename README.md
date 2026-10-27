@@ -29,7 +29,7 @@ Restrict ports 5055 and 9696 to your local network. Radarr, Sonarr and qBittorre
 | NAT-PMP gateway | Empty; port forwarding disabled |
 | Advanced application interfaces | Disabled |
 
-Library paths are relative to the media directory. They must not overlap one another or the `downloads` directory. Path traversal and symlinks that escape the configured directory are rejected before directories are created. Restart Pompey after changing Pompey settings.
+Library paths are relative to the media directory. They must not overlap one another or the `downloads` directory. Path traversal and symlinks that escape the configured directory are rejected before directories are created. Restart Pompey after changing Home Assistant environment settings; preferences saved in Ingress apply through normal reconciliation.
 
 The default directory names are retained for compatibility. You can configure different names for your libraries. Automatic routing sends G, PG and PG-13 movies, and TV-Y, TV-Y7, TV-G and TV-PG series, to the libraries for lower age ratings. Other and unavailable ratings use the general libraries. Select a specific library in Seerr to override automatic routing.
 

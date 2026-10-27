@@ -2,7 +2,7 @@
 
 **Current implementation, with illustrative data.** These screenshots were captured on October 27, 2026 from the product HTML, CSS and JavaScript for 0.5.0-beta.2. Titles, counts, failures, timestamps and API responses are synthetic; bundled app versions come from the manifest. They demonstrate the interface, not production connectivity or release acceptance.
 
-Home Assistant reads `main`, so a merged beta can be offered as an update. Beta delivery after required CI is authorized. **Stable 0.5.0 remains on hold for visual and release review.**
+Home Assistant reads `main`, so merging a version change offers that app update independently of a GitHub tag. The maintainer approved this interface and authorized stable **0.5.0** after full integration acceptance, including the previous-release upgrade. The screenshots retain the beta version label from their capture; the stable candidate uses the same interface.
 
 ## Overview
 
@@ -50,4 +50,4 @@ The same table works in a 390-pixel preview frame without turning rows into coll
 - The UI exposes native blockers and peer activity, not a durable history of all pipeline transitions. Diagnostics warn when the first 100 Arr queue entries or most recent Seerr requests are truncated. Request history remains in Seerr.
 - Redownload-loop detection and a read-only inventory of orphaned files remain gaps. Maintenance success, retained-file policies and existing cleanup acceptance are not proof that no junk or repeated work exists on an installation. Avoid a misleading green “all clean” claim.
 - Targeted recovery mutations (#92) remain deferred. Explicit release inspection, native automatic retries and optional advanced interfaces are the available tools; an inspected acceptable release is not automatically grabbed.
-- Before stable approval, run full release acceptance with the actual released-image forward upgrade and resolve or explicitly defer remaining issue criteria. Real Supervisor installation, SMB/NAS behavior and media-player playback remain unautomated boundaries. The first dependency discovery → acceptance → publication cycle also remains outstanding; discovery intentionally stays inactive on beta versions.
+- Stable publication requires full release acceptance with the actual released-image forward upgrade. Remaining roadmap gaps listed above are deferred rather than claimed complete. Real Supervisor installation, SMB/NAS behavior and media-player playback remain unautomated boundaries. The first dependency discovery → acceptance → publication cycle also remains outstanding; discovery runs against stable main and intentionally skips beta versions.

@@ -48,7 +48,7 @@ ARG BUILD_DESCRIPTION="Search for a movie or show; VPN WireGuard for all interne
 ARG BUILD_NAME="Pompey"
 ARG BUILD_REF=""
 ARG BUILD_REPOSITORY="esper256/ha-pompey"
-ARG BUILD_VERSION="0.5.0-beta.2"
+ARG BUILD_VERSION="0.5.0"
 
 
 ENV BUILD_VERSION="${BUILD_VERSION}" \
