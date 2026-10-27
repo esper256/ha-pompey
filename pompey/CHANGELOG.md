@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.5.0-beta.1
+
+- Add a compact application overview, request progress with native rejection explanations, optional media-server checks and bundled-version/maintenance details. Preserve last known values when an application is unavailable.
+- Exclude executable and script filenames in qBittorrent before transfer; verify an executable-only torrent transfers no payload. This is filename filtering, not antivirus scanning.
+- Reopen downloader connections after VPN interface replacement while preserving partial downloads and user-stopped torrents.
+- Detect unavailable or unwritable media storage, pause affected applications and resume after access returns. Preserve known network-mount expectations across restarts.
+- Retain the first actionable source error while summarizing repeated log warnings.
+- Split focused PR tests from broader release acceptance; add storage, first-boot VPN outage and real previous-release upgrade checks.
+- Prepare isolated dependency-update PR discovery and guarded source releases. Activation requires repository settings, required CI and the manual HAOS release gate.
+
 ## 0.4.2
 
 - Discover private directly connected container networks automatically so same-host Plex and other local services work without internal HAOS addresses in the network-access setting. Keep application DNS restricted to the VPN.

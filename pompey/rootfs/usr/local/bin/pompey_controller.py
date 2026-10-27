@@ -122,8 +122,7 @@ def current_status(ready, services):
         configuration = {}
     # Networking publishes this marker only after accepting a configuration.
     need_vpn = not (ready / "vpn-applied").exists()
-    initialized = (ready / "seerr-arr").exists()
-    complete = all(services.values()) and configuration.get("ok") and initialized
+    complete = all(services.values()) and configuration.get("ok")
     data.update(
         updated=time.time(),
         need_vpn=need_vpn,
@@ -139,8 +138,6 @@ def current_status(ready, services):
         data["label"] = "Add a WireGuard configuration"
     if configuration.get("error"):
         data["error"] = configuration["error"]
-    elif not initialized:
-        data["error"] = "Complete search setup to connect requests to your libraries."
     from pompey_vpn_stats import sample
 
     data["vpn"] = sample()
@@ -148,6 +145,7 @@ def current_status(ready, services):
 
 
 def main():
+    from storage_guard import StorageGuard
     here = Path(__file__).resolve().parent
     ready = Path(os.environ.get("POMPEY_READY", "/tmp/pompey"))
     jobs = [
@@ -187,7 +185,8 @@ def main():
         if job.due == 0:
             job.due = time.monotonic()
     record("controller-started")
-    with ThreadPoolExecutor(max_workers=2) as pool:
+    storage = StorageGuard(ready)
+    with ThreadPoolExecutor(max_workers=3) as pool:
         next_health = 0
         observed = {}
         while True:
@@ -205,7 +204,9 @@ def main():
                         job.error = str(exc)
                         print(f"{job.name}: {exc}", flush=True)
                         job.complete(now, False)
-            dispatch(jobs, pool, now, ready)
+            storage.poll(pool, now)
+            if not storage.blocked:
+                dispatch(jobs, pool, now, ready)
             if now >= next_health:
                 current = health(ready)
                 if any(current.get(k) and not observed.get(k) for k in current):
@@ -215,6 +216,12 @@ def main():
                     notices = attention()
                 except (OSError, ValueError, TypeError) as exc:
                     notices = ["Policy state could not be read: " + str(exc)]
+                recovery = ready / "vpn-recovery.json"
+                try:
+                    if recovery.exists() and json.loads(recovery.read_text()).get("phase") == "failed":
+                        notices.append("Download reconnection needs attention. Review the qBittorrent log.")
+                except (OSError, ValueError):
+                    notices.append("Download reconnection status is unavailable.")
                 if notices:
                     record("attention", notices=notices)
                 atomic_json(

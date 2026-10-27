@@ -5,4 +5,5 @@ FROM ${POMPEY_IMAGE}
 # Tools use their own loader/libraries. No shipped runtime library is upgraded.
 COPY --from=tools / /test-tools
 COPY tests /tests
+COPY tools /tools
 ENTRYPOINT ["python3", "-u", "/tests/journey/bootstrap.py"]

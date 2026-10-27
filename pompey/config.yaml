@@ -1,9 +1,9 @@
 # https://developers.home-assistant.io/docs/apps/configuration
 name: Pompey
-version: "0.4.2"
+version: "0.5.0-beta.1"
 slug: pompey
 description: >-
-  Request and organize movies and TV series for Plex, with downloads
+  Request and organize movies and TV series, with downloads
   and internet access protected by a WireGuard VPN.
 url: https://github.com/esper256/ha-pompey/tree/main/pompey
 arch:

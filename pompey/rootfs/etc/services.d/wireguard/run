@@ -71,6 +71,7 @@ vpn-killswitch "${POMPEY_WG_CONF}"
 bashio::log.info "Waiting for VPN connection on wg0"
 pompey_status.py vpn "Waiting for VPN connection" 15 || true
 wait-for-vpn 45
+python3 /usr/local/bin/vpn_recovery.py
 mark_vpn_up
 bashio::log.info "VPN connected on wg0"
 

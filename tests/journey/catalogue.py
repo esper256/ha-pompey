@@ -30,6 +30,9 @@ class Case:
             9: "restart-partial",
             10: "vpn-download-loss",
             11: "vpn-rotation",
+            12: "executable-payload",
+            13: "storage-recovery",
+            14: "cold-start-offline",
         }.get(self.index, "movie-control")
 
     @property
@@ -143,6 +146,8 @@ class Offer:
     @property
     def files(self):
         if self.case.kind == "movie":
+            if self.case.scenario == "executable-payload":
+                return [self.release + ".mkv.EXE"]
             return [self.release + ".mkv"]
         return [
             f"{self.case.prefix}.S{self.season:02d}E{n:02d}.{self.quality}.WEB-DL.mkv"
@@ -246,6 +251,12 @@ def prepare_media(folder):
             target = folder / offer.release
             target.mkdir()
             for name in offer.files:
+                if case.scenario == "executable-payload":
+                    # Harmless data, never a real executable or malware sample.
+                    with (target / name).open("wb") as output:
+                        output.write(b"INERT executable-extension test fixture\n")
+                        output.truncate(len(original))
+                    continue
                 with (target / name).open("wb") as output:
                     output.write(original[:offset])
                     output.write(

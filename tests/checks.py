@@ -6,6 +6,7 @@ import subprocess
 subprocess.run(["python3", "/tests/test_logic.py", "-v"], check=True)
 subprocess.run(["python3", "/tests/test_storage.py", "-v"], check=True)
 subprocess.run(["python3", "/tests/test_harness.py", "-v"], check=True)
+subprocess.run(["python3", "/tests/test_release_tools.py", "-v"], check=True)
 for path in Path("/usr/local/bin").glob("*.py"):
     compile(path.read_bytes(), str(path), "exec")
 for root in ["/etc/cont-init.d", "/etc/services.d", "/usr/local/bin"]:
@@ -35,3 +36,6 @@ for index, script in enumerate(re.findall(r"<script>(.*?)</script>", html, re.S)
         check=True,
     )
 print("Application UI syntax passed")
+
+for path in Path("/usr/share/pompey").glob("*.js"):
+    subprocess.run(["/opt/pompey/engines/seerr/usr/local/bin/node", "--check", str(path)], check=True)

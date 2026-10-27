@@ -8,6 +8,8 @@ import subprocess
 def needs_code_checks(paths):
     def documentation(path):
         parts = PurePosixPath(path).parts
+        if parts[0] == "docs" and path.endswith((".md", ".html", ".jpg", ".png", ".svg")):
+            return True
         return path.endswith(".md") and (
             len(parts) == 1
             or parts[0] == "docs"

@@ -3,20 +3,25 @@
 
 import argparse
 import json
+import os
 from pathlib import Path
 import urllib.parse
 import urllib.request
 
 
 def get(url, headers=None):
+    headers = dict(headers or {})
+    headers.setdefault("User-Agent", "Pompey dependency maintenance")
+    if url.startswith("https://api.github.com/") and os.environ.get("GH_TOKEN"):
+        headers["Authorization"] = "Bearer " + os.environ["GH_TOKEN"]
     return json.load(
         urllib.request.urlopen(
-            urllib.request.Request(url, headers=headers or {}), timeout=60
+            urllib.request.Request(url, headers=headers), timeout=60
         )
     )
 
 
-def build():
+def build(component="all"):
     repos = {
         "Radarr": "Radarr/Radarr",
         "Sonarr": "Sonarr/Sonarr",
@@ -26,6 +31,8 @@ def build():
     }
     manifest = {"schema": 1, "engines": {}}
     for engine, repo in repos.items():
+        if component not in {"all", engine}:
+            continue
         release = get("https://api.github.com/repos/" + repo + "/releases/latest")
         artifacts = {}
         for arch, cpu in [("amd64", "x64")]:
@@ -59,60 +66,71 @@ def build():
             "version": release["tag_name"],
             "artifacts": artifacts,
         }
-    release = get("https://api.github.com/repos/seerr-team/seerr/releases/latest")
-    tag = release["tag_name"]
-    token = get(
-        "https://ghcr.io/token?service=ghcr.io&scope=repository:seerr-team/seerr:pull"
-    )["token"]
-    req = urllib.request.Request(
-        "https://ghcr.io/v2/seerr-team/seerr/manifests/" + tag,
-        headers={
-            "Authorization": "Bearer " + token,
-            "Accept": "application/vnd.oci.image.index.v1+json,application/vnd.docker.distribution.manifest.list.v2+json",
-        },
-    )
-    with urllib.request.urlopen(req, timeout=60) as response:
-        digest = response.headers["Docker-Content-Digest"]
-    manifest["engines"]["seerr"] = {
-        "version": tag,
-        "image": "ghcr.io/seerr-team/seerr@" + digest,
-    }
+    if component in {"all", "seerr"}:
+        release = get("https://api.github.com/repos/seerr-team/seerr/releases/latest")
+        tag = release["tag_name"]
+        token = get(
+            "https://ghcr.io/token?service=ghcr.io&scope=repository:seerr-team/seerr:pull"
+        )["token"]
+        req = urllib.request.Request(
+            "https://ghcr.io/v2/seerr-team/seerr/manifests/" + tag,
+            headers={
+                "Authorization": "Bearer " + token,
+                "Accept": "application/vnd.oci.image.index.v1+json,application/vnd.docker.distribution.manifest.list.v2+json",
+            },
+        )
+        with urllib.request.urlopen(req, timeout=60) as response:
+            digest = response.headers["Docker-Content-Digest"]
+        manifest["engines"]["seerr"] = {
+            "version": tag,
+            "image": "ghcr.io/seerr-team/seerr@" + digest,
+        }
     # The framework-dependent musl Recyclarr launcher needs a pinned runtime too.
-    net = get(
-        "https://builds.dotnet.microsoft.com/dotnet/release-metadata/10.0/releases.json"
-    )
-    runtime = net["releases"][0]["runtime"]
-    artifacts = {}
-    for arch, cpu in [("amd64", "x64")]:
-        for os_name, rid in [("linuxmusl", "linux-musl-")]:
-            asset = next(
-                f
-                for f in runtime["files"]
-                if f["rid"] == rid + cpu
-                and f["name"].startswith("dotnet-runtime-")
-                and f["name"].endswith(".tar.gz")
-            )
-            artifacts[os_name + "-" + arch] = {
-                "url": asset["url"],
-                "sha512": asset["hash"],
-            }
-    manifest["engines"]["dotnet"] = {
-        "version": runtime["version"],
-        "artifacts": artifacts,
-    }
-    manifest["resources"] = {
-        "trash_guides": get(
-            "https://api.github.com/repos/TRaSH-Guides/Guides/commits/master"
-        )["sha"],
-        "config_templates": get(
-            "https://api.github.com/repos/recyclarr/config-templates/commits/master"
-        )["sha"],
-    }
+    if component in {"all", "dotnet"}:
+        net = get(
+            "https://builds.dotnet.microsoft.com/dotnet/release-metadata/10.0/releases.json"
+        )
+        runtime = net["releases"][0]["runtime"]
+        artifacts = {}
+        for arch, cpu in [("amd64", "x64")]:
+            for os_name, rid in [("linuxmusl", "linux-musl-")]:
+                asset = next(
+                    f
+                    for f in runtime["files"]
+                    if f["rid"] == rid + cpu
+                    and f["name"].startswith("dotnet-runtime-")
+                    and f["name"].endswith(".tar.gz")
+                )
+                artifacts[os_name + "-" + arch] = {
+                    "url": asset["url"],
+                    "sha512": asset["hash"],
+                }
+        manifest["engines"]["dotnet"] = {
+            "version": runtime["version"],
+            "artifacts": artifacts,
+        }
+    if component in {"all", "quality-resources"}:
+        manifest["resources"] = {
+            "trash_guides": get(
+                "https://api.github.com/repos/TRaSH-Guides/Guides/commits/master"
+            )["sha"],
+            "config_templates": get(
+                "https://api.github.com/repos/recyclarr/config-templates/commits/master"
+            )["sha"],
+        }
     return manifest
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("output", type=Path)
+    parser.add_argument("--component", default="all", choices=["all", "Radarr", "Sonarr", "Prowlarr", "seerr", "qbittorrent-nox", "recyclarr", "dotnet", "quality-resources"])
     args = parser.parse_args()
-    args.output.write_text(json.dumps(build(), indent=2) + "\n")
+    candidate = build(args.component)
+    if args.component != "all":
+        current = json.loads(args.output.read_text())
+        current["engines"].update(candidate["engines"])
+        if "resources" in candidate:
+            current["resources"] = candidate["resources"]
+        candidate = current
+    args.output.write_text(json.dumps(candidate, indent=2) + "\n")

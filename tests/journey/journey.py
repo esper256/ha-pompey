@@ -17,6 +17,8 @@ from stack_checks import rotation_scenario, assert_ui_access
 from invariants import Invariants
 import restart
 from request_lifecycle import completed_closeout
+from executable_payload import executable_payload
+from fault_scenarios import storage_recovery, cold_start, cold_result
 from support import FixtureContractError
 from support import (
     Deadline,
@@ -157,6 +159,7 @@ def main():
         )
     root = Path("/artifacts")
     started = float(Path("/tmp/world/started").read_text())
+    boot_started = started
     plan = restart.pending_plan()
     prior = json.loads((root / "boot1-result.json").read_text()) if plan else None
     evidence = Evidence(
@@ -198,7 +201,21 @@ def main():
             json.loads(Path("/data/pompey/secrets.json").read_text()), session, evidence
         )
         restored = os.environ.get("POMPEY_TEST_CONFIGURED") == "1" or bool(plan)
+        if os.environ.get("POMPEY_TEST_COLD_OFFLINE") == "1" and not restored:
+            cold_start(client)
         configure(client, restored)
+        evidence.data["currentBoot"] = {"startupSeconds": round(time.monotonic() - boot_started, 3)}
+        if plan and os.environ.get("POMPEY_TEST_CONFIGURED") == "1":
+            # Existing metadata can legitimately survive in the released
+            # application's cache. Also prove a previously unseen lookup works
+            # through the candidate's real DNS/TLS path after the upgrade.
+            from urllib.parse import quote
+            control = catalogue[-1]
+            movies = client.arr("GET", "/movie/lookup?term=tmdb:" + str(control.movie_id))
+            assert any(row["tmdbId"] == control.movie_id for row in movies), movies
+            results = client.search("GET", "/search?query=" + quote(control.title))
+            assert any(row.get("id") == control.movie_id for row in results["results"]), results
+            evidence.data["upgradeFreshMetadataLookup"] = control.movie_id
         ledger_file = Path("/data/pompey-test/evidence.json")
         background = Background(
             json.loads(ledger_file.read_text()) if ledger_file.exists() else []
@@ -217,6 +234,7 @@ def main():
         invariants = Invariants(
             client, background, since=plan["armedAt"] if plan else None
         )
+        client.invariants = invariants
         if restored:
             invariants.checkpoint("configured-baseline", full=True)
         batch_since = time.time()
@@ -229,6 +247,14 @@ def main():
             # Each scenario gets its own budget; it cannot consume a later one's time.
             session.deadline = Deadline(SCENARIO_TIMEOUT)
             action = (
+                storage_recovery
+                if catalogue[index].scenario == "storage-recovery"
+                else cold_result
+                if catalogue[index].scenario == "cold-start-offline"
+                else
+                executable_payload
+                if catalogue[index].scenario == "executable-payload"
+                else
                 rotation_scenario
                 if catalogue[index].scenario == "vpn-rotation"
                 else tv_request
@@ -333,6 +359,8 @@ def main():
             print("Failure evidence collection also failed:", diagnostic, flush=True)
         raise
     finally:
+        evidence.data.setdefault("currentBoot", {})["elapsedSeconds"] = round(time.monotonic() - boot_started, 3)
+        evidence.checkpoint()
         external = transcript()
         save_json(root / "external-requests.json", external["requests"])
         save_json(root / "unexpected-requests.json", external["unknown"])

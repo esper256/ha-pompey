@@ -27,7 +27,7 @@ HOSTS = (
 
 
 # Explicit negative replay: these telemetry destinations were already unavailable.
-UNAVAILABLE_HOSTS = {"sentry.servarr.com", "sentry.sonarr.tv"}
+UNAVAILABLE_HOSTS = {"sentry.servarr.com", "sentry.sonarr.tv", "download.db-ip.com"}
 
 
 class DnsServer:

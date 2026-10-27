@@ -18,12 +18,34 @@ the proposed work. Priorities describe implementation order, not completed work.
 | Required | [#89 Automated dependency updates and releases](https://github.com/esper256/ha-pompey/issues/89) |
 | Required | [#90 Reliable VPN download recovery](https://github.com/esper256/ha-pompey/issues/90) |
 | Required | [#91 Per-request troubleshooting](https://github.com/esper256/ha-pompey/issues/91) |
-| Required | [#92 Targeted recovery actions](https://github.com/esper256/ha-pompey/issues/92) |
+| Deferred to 0.6.0 | [#92 Targeted recovery actions](https://github.com/esper256/ha-pompey/issues/92) |
 | Required | [#93 Setup and connectivity checks](https://github.com/esper256/ha-pompey/issues/93) |
 | Next | [#94 Storage failure protection and recovery](https://github.com/esper256/ha-pompey/issues/94) |
 | Next | [#95 Focused outage and recovery acceptance](https://github.com/esper256/ha-pompey/issues/95) |
 | Polish | [#96 Application status, versions and support logs](https://github.com/esper256/ha-pompey/issues/96) |
 | Required | [#97 Terse ecosystem overview](https://github.com/esper256/ha-pompey/issues/97) |
+
+## Accepted implementation refinements
+
+Maintainer review on issues #89–#97 supersedes the original mockups:
+
+- #92 is deferred to 0.6.0; 0.5.0 uses read-only explanations and existing native interfaces.
+- Keep the Pompey logo. Routine healthy-service details stay collapsed. Do not repeat indexer warnings beside the indexer summary.
+- Media servers are optional. Plex, Jellyfin/Emby and local playback are valid choices; none is a prerequisite for managing downloads.
+- Remove conversation-specific advice, prototype labels and development commentary from product UI. Mockup labels in this documentation are not product strings.
+- Storage attention stays an explicit contextual panel/banner on the dashboard, preserving the overview rather than silently replacing it.
+- Separate fast PR checks from release acceptance. Add fault scenarios only when their value justifies their runtime and complexity.
+- #99 adds an inert executable-payload regression and native downloader exclusion policy. This is extension protection, not an antivirus guarantee.
+
+## Development implementation status
+
+The development branch now includes the compact overview and shared observations (#97), request-focused read-only explanations (#91), optional media-server/setup checks (#93), bundled versions and bounded log repetition (#96), native executable exclusions (#99), VPN interface-replacement recovery (#90), and storage service holds/restoration (#94). These are implemented increments; the broader issue checklists remain open until their remaining cases are verified.
+
+Dependency discovery/promotion code and real previous-release upgrade coverage are prepared for #89. Repository activation and an actual GitHub discovery → PR → acceptance → publication cycle remain outstanding. The development instructions supplied for this campaign retain a manual HAOS release gate, so the workflow requires a protected `haos-release` environment rather than silently replacing that instruction with unattended publication. Main must also enforce `CI required`; no repository settings have been changed during implementation. Discovery remains inactive on the development prerelease.
+
+For #95, PRs use the movie/episode/executable cohort plus a configured clone and required packet checks. Release acceptance adds the broader shared scenarios, cold startup without VPN, storage recovery, strict VPN download resumption and actual previous-release forward upgrade. Full indexer/metadata outage families, native history-brake/rebaseline scenarios and unmatched direct-grab cases remain stretch work. Existing focused safety logic checks remain meaningful coverage, not claims that those real-engine scenarios exist.
+
+The storage guard observes periodically and establishes an actual service hold after detection. It cannot promise atomic prevention of fallback writes in the detection gap; interrupted native cleanup remains a separate data-preservation boundary. Setup observations distinguish configuration from application response; configured links alone are not proof of every remote service or browser route. The request explanation uses current native observations and the last explicit search, not a durable history of every pipeline transition.
 
 ## Overview principles
 

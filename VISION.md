@@ -1,6 +1,6 @@
 # Product direction
 
-Pompey provides a request-to-library workflow for movies and TV series using Seerr and a separate Plex installation. It manages the VPN, application configuration, storage policies and service status within one Home Assistant OS app.
+Pompey provides a request-to-library workflow for movies and TV series using Seerr and optional, separate media players or servers. It manages the VPN, application configuration, storage policies and service status within one Home Assistant OS app.
 
 Keep the integration smaller than the applications it coordinates. Arr manages release matching, upgrades, imports and library moves. Prowlarr synchronizes indexers. Recyclarr manages quality profiles. Pompey provides storage and seeding policies, conservative request closeout, diagnostics and tested application bundles.
 

@@ -24,6 +24,69 @@ from pompey_controller import Job, dispatch
 from concurrent.futures import Future
 
 
+class SupportLogEvidence(unittest.TestCase):
+    def test_native_diagnostic_messages_redact_headers_and_embedded_credentials(self):
+        from pompey_log_emit import redact_value
+        data = {"id": 8, "messages": ['Authorization: Bearer bearer-secret',
+                                     'Authorization: Basic basic-secret',
+                                     '{"apiKey":"json-secret"}', 'X-Plex-Token: plex-secret']}
+        result = redact_value(data)
+        self.assertEqual(result["id"], 8)
+        for secret in ["bearer-secret", "basic-secret", "json-secret", "plex-secret"]:
+            self.assertNotIn(secret, json.dumps(result))
+
+    def test_first_errors_and_repeat_counts_survive_without_credentials(self):
+        import contextlib
+        import io
+        import pompey_log_emit as logs
+        logs._repeated.clear()
+        stream = io.StringIO()
+        with contextlib.redirect_stderr(stream), contextlib.redirect_stdout(stream):
+            logs.emit("Prowlarr", "2026-10-27 01:00:00|Warn|Unable to connect to indexer apikey=secret-value")
+            logs.emit("Prowlarr", "2026-10-27 01:00:01|Warn|Unable to connect to indexer apikey=secret-value")
+            logs.emit("Prowlarr", "2026-10-27 01:00:02|Info|Indexer connection restored")
+            logs.flush_repeats()
+        output = stream.getvalue()
+        self.assertNotIn("secret-value", output)
+        self.assertIn("Unable to connect to indexer", output)
+        self.assertIn("repeated 1 time(s)", output)
+        self.assertIn("connection restored", output)
+
+
+class ObservationSemantics(unittest.TestCase):
+    def test_torrent_buckets_are_exclusive_and_stale_counts_stay_labelled(self):
+        from pompey_observations import torrent_counts, summarize
+        states = ["downloading", "stalledDL", "stoppedDL", "stalledUP", "checkingDL", "queuedDL"]
+        counts = torrent_counts([{"state": value} for value in states])
+        self.assertEqual(sum(counts.values()), len(states))
+        self.assertEqual(counts, dict(downloading=1, stalled=1, paused=1, seeding=1, checking=1, other=1))
+        result = summarize({"radarr": {"available": False, "updated": 12, "data": {"titles": [{"monitored": True}]}}})
+        self.assertEqual(result["movies"], {"available": False, "updated": 12, "value": 1})
+        self.assertIsNone(result["shows"]["value"])
+
+    def test_indexer_denominator_excludes_disabled_sources_and_duplicate_failures(self):
+        from datetime import datetime, timezone
+        from pompey_observations import indexer_availability
+        future = datetime.fromtimestamp(4102444800, timezone.utc).isoformat()
+        past = datetime.fromtimestamp(1, timezone.utc).isoformat()
+        data = {"indexers": [{"id": 1, "enable": True, "name": "A"}, {"id": 2, "enable": True, "name": "B"}, {"id": 3, "enable": False, "name": "C"}],
+                "status": [{"indexerId": 1, "disabledTill": future}, {"indexerId": 1, "disabledTill": future}, {"indexerId": 3, "disabledTill": future}, {"indexerId": 2, "disabledTill": past}]}
+        counts, failures = indexer_availability(data)
+        self.assertEqual(counts, {"healthy": 1, "enabled": 2})
+        self.assertEqual(len(failures), 1)
+        self.assertEqual(failures[0]["name"], "A")
+
+    def test_partial_tv_files_do_not_imply_request_completion(self):
+        from pompey_diagnostics import request_progress
+        request = {"status": 2, "media": {"status": 4}}
+        phase, _, _ = request_progress(request, {"kind": "sonarr", "hasFile": 2}, [], {})
+        self.assertEqual(phase, "Partially available")
+        phase, _, _ = request_progress(request, {"kind": "radarr", "hasFile": True}, [], {})
+        self.assertEqual(phase, "Imported to library")
+        phase, _, _ = request_progress({"status": 1}, None, [], {})
+        self.assertEqual(phase, "Awaiting approval")
+
+
 class CumulativeFailureEvidence(unittest.TestCase):
     def test_recovery_and_controller_restart_do_not_erase_failure(self):
         from pompey_events import record

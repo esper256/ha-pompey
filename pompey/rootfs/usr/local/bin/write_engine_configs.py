@@ -78,6 +78,10 @@ def configure_engines(secrets_path, media_path):
         },
         "AutoRun": {"enabled": "false"},
         "BitTorrent": {
+            # Native filename filtering is applied before libtorrent starts the
+            # transfer, including when a magnet's metadata first arrives.
+            "ExcludedFileNamesEnabled": "true",
+            "Session\\ExcludedFileNames": "*.exe, *.com, *.scr, *.msi, *.bat, *.cmd, *.ps1, *.vbs, *.js, *.lnk",
             "Session\\DefaultSavePath": complete,
             "Session\\TempPath": incomplete,
             "Session\\TempPathEnabled": "true",

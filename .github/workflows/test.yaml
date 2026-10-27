@@ -5,6 +5,11 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      candidate_pr:
+        description: 'Actions-bot dependency PR to accept and publish after release checks'
+        type: string
+        required: false
   schedule:
     - cron: '17 4 * * 1'
 permissions:
@@ -50,22 +55,36 @@ jobs:
         run: |
           docker buildx create --use --driver docker-container
           docker buildx build --load --platform linux/amd64 \
-            --build-arg BUILD_ARCH=amd64 --build-arg BUILD_VERSION=0.4.2 --build-arg BUILD_REF="$GITHUB_SHA" \
+            --build-arg BUILD_ARCH=amd64 --build-arg BUILD_VERSION="$(python3 tools/release_metadata.py current)" --build-arg BUILD_REF="$GITHUB_SHA" \
             --cache-from type=local,src=/tmp/pompey-build-cache \
             --cache-to type=local,dest=/tmp/pompey-build-cache-new,mode=max \
             -t localhost/pompey:foundation pompey/
           rm -rf /tmp/pompey-build-cache
           mv /tmp/pompey-build-cache-new /tmp/pompey-build-cache
-      - name: Validate logic, network isolation and application workflows
-        run: bash tests/run.sh --skip-build --layout ci --exclude vpn-download-loss
+      - name: Build the released upgrade baseline
+        if: github.event_name != 'pull_request'
+        run: |
+          ref="$(python3 tools/release_baseline.py)"
+          git fetch --tags origin "$ref"
+          mkdir -p /tmp/pompey-upgrade-baseline
+          git archive FETCH_HEAD pompey | tar -xf - -C /tmp/pompey-upgrade-baseline
+          docker buildx build --load --platform linux/amd64 \
+            --cache-from type=local,src=/tmp/pompey-build-cache \
+            -t localhost/pompey:upgrade-baseline /tmp/pompey-upgrade-baseline/pompey
         env:
+          GH_TOKEN: ${{ github.token }}
+      - name: Validate logic, network isolation and application workflows
+        run: |
+          args=()
+          if [[ "$POMPEY_SUITE" == release ]]; then
+            args+=(--upgrade-from localhost/pompey:upgrade-baseline)
+          fi
+          bash tests/run.sh --skip-build --layout ci --suite "$POMPEY_SUITE" "${args[@]}"
+        env:
+          POMPEY_SUITE: ${{ github.event_name == 'pull_request' && 'pr' || 'release' }}
           POMPEY_CONTAINER_COMMAND: docker
       - name: Preserve required acceptance summary
         run: cp .test-results/timing-summary.json .test-results/required-timing-summary.json
-      - name: Advisory known issue — VPN download resumption
-        run: python3 tests/known_vpn_resume.py
-        env:
-          POMPEY_CONTAINER_COMMAND: docker
       - uses: actions/upload-artifact@v7
         if: always()
         with:
@@ -94,24 +113,26 @@ jobs:
           assert jobs['acceptance']['result'] == expected, jobs
           PYTHON
 
-  candidate:
-    name: Upstream candidate validation (automatic promotion disabled)
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+  promote:
+    name: Publish accepted dependency update
+    needs: [changes, acceptance, required]
+    if: github.event_name == 'workflow_dispatch' && inputs.candidate_pr != '' && needs.required.result == 'success' && needs.acceptance.result == 'success'
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 5
+    # A real HAOS installation remains a release gate. Configure required
+    # reviewers on this environment; the verifier refuses an unprotected one.
+    environment: haos-release
+    permissions:
+      actions: read
+      contents: write
+      pull-requests: write
     steps:
       - uses: actions/checkout@v7.0.1
-      - name: Resolve stable releases and pinned resources
-        run: python3 tools/build_engine_manifest.py pompey/rootfs/usr/share/pompey/engines.json
-      - name: Validate candidate application versions
-        run: bash tests/run.sh --layout ci
-        env:
-          POMPEY_CONTAINER_COMMAND: docker
-      - uses: actions/upload-artifact@v7
-        if: always()
         with:
-          name: candidate-results
-          include-hidden-files: true
-          path: |
-            .test-results/
-            pompey/rootfs/usr/share/pompey/engines.json
+          # Never execute verifier code from the candidate with write tokens.
+          ref: main
+      - name: Merge protected candidate and publish its exact accepted tree
+        run: python3 tools/promote_candidate.py
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_PR: ${{ inputs.candidate_pr }}
