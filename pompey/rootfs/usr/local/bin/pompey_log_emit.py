@@ -11,17 +11,23 @@ from collections import OrderedDict
 import re
 import sys
 import time
+import logging
+from logging.handlers import RotatingFileHandler
+import os
+from pathlib import Path
 
 ANSI_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 
 # Structured markers only. Bare "fail"/"unable"/"error" in JSON bodies and
 # debug lines used to promote thousands of lines to WARNING/ERROR.
 ERROR_RE = re.compile(
-    r"\(C\)|\[(error|fatal|critical)\]|\|Error\||\|Fatal\||\|Critical\|",
+    r"\(C\)|\[(error|fatal|critical)\]|\|Error\||\|Fatal\||\|Critical\|"
+    r"|^\[\d\d:\d\d:\d\d\]\s+(ERROR|FATAL|CRITICAL):",
     re.I,
 )
 WARN_RE = re.compile(
-    r"\(W\)|\[(warn|warning)\]|\|Warn\||\|Warning\|",
+    r"\(W\)|\[(warn|warning)\]|\|Warn\||\|Warning\|"
+    r"|^\[\d\d:\d\d:\d\d\]\s+(WARN|WARNING):",
     re.I,
 )
 EXCEPTION_RE = re.compile(
@@ -79,6 +85,43 @@ JWT_RE = re.compile(
 NZBDRONE_RE = re.compile(r"NzbDrone\.", re.I)
 
 _last_emitted: dict[str, str] = {}
+_captures = {}
+
+
+class RawCaptureHandler(RotatingFileHandler):
+    def _open(self):
+        stream = super()._open()
+        os.chmod(self.baseFilename, 0o600)
+        return stream
+
+    def handleError(self, record):
+        pass  # Never leak a raw record to stderr when diagnostic storage is full.
+
+
+def capture(name, line):
+    """Keep a small raw window before HA-console filtering or repeat suppression."""
+    if name not in {"Pompey", "Radarr", "Sonarr", "Prowlarr", "Seerr", "qBittorrent"}:
+        return
+    root = Path(os.environ.get("POMPEY_READY", "/tmp/pompey"))
+    if not root.is_dir():
+        return
+    try:
+        folder = root / "captured-logs"
+        folder.mkdir(mode=0o700, exist_ok=True)
+        path = folder / (name + ".log")
+        key = str(path)
+        if key not in _captures:
+            handler = RawCaptureHandler(path, maxBytes=1024 * 1024, backupCount=1, encoding="utf-8")
+            path.chmod(0o600)
+            handler.setFormatter(logging.Formatter("%(asctime)s %(message)s"))
+            _captures[key] = handler
+        raw = line.rstrip("\n").encode("utf-8", errors="replace")
+        message = raw[:65536].decode("utf-8", errors="replace")
+        if len(raw) > 65536:
+            message += " [diagnostic line truncated]"
+        _captures[key].emit(logging.LogRecord(name, logging.INFO, "", 0, message, (), None))
+    except OSError:
+        pass  # Diagnostic retention must not interrupt application logging.
 _repeated = OrderedDict()
 _native_time = re.compile(r"\d{4}-\d\d-\d\d[ T]\d\d:\d\d:\d\d(?:[.,]\d+)?Z?")
 _credential = re.compile(r"((?:X-Api-Key|Authorization|X-Plex-Token|password|api[_-]?key|token)[\"']?\s*[:=]\s*)(?:\"[^\"]*\"|'[^']*'|[^\s&;,]+)", re.I)
@@ -143,6 +186,7 @@ def level_for(line: str) -> str:
 
 
 def emit(name: str, line: str) -> None:
+    capture(name, line)
     line = strip_ansi(line.rstrip("\n"))
     if name in _html_dump:
         if LOG_RECORD_RE.match(line):

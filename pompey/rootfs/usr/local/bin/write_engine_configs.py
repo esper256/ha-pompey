@@ -33,7 +33,10 @@ def arr_config(path, port, key, name, published=False):
         "EnableSsl": "False",
         "ApiKey": key,
         "AuthenticationRequired": "DisabledForLocalAddresses",
-        "LogLevel": os.environ.get("POMPEY_LOG_LEVEL", "warn"),
+        "LogLevel": os.environ.get("POMPEY_LOG_LEVEL", "debug"),
+        "ConsoleLogLevel": "warn",
+        "LogSizeLimit": "1",
+        "LogRotate": "3",
         "LaunchBrowser": "False",
         "Branch": "master",
         "UrlBase": "",
@@ -48,6 +51,14 @@ def arr_config(path, port, key, name, published=False):
         if tag is None:
             tag = ET.SubElement(root, name)
         tag.text = str(value)
+    if path.parent.name == "prowlarr":
+        from pompey_hosts import managed_hosts, merged_hosts
+        hosts = managed_hosts()
+        if hosts:
+            allowed = root.find("AllowedHosts")
+            if allowed is None:
+                allowed = ET.SubElement(root, "AllowedHosts")
+            allowed.text = merged_hosts(allowed.text, hosts)
     ET.indent(root)
     write(path, ET.tostring(root, encoding="unicode") + "\n")
 

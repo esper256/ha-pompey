@@ -1,6 +1,64 @@
 /* Native observations, explicit release inspection and validated app preferences. */
 (() => {
   const element = id => document.getElementById(id);
+  // Only this authenticated Ingress origin is learned; no proxy-supplied host
+  // header or wildcard is trusted. The controller retries during startup.
+  let accessHostRecorded = false;
+  let accessHostBusy = false;
+  async function rememberAccessHost() {
+    if (accessHostRecorded || accessHostBusy || location.protocol === "file:") return;
+    accessHostBusy = true;
+    try {
+      await diagnosticRequest("/access-host", {hostname: location.hostname});
+      accessHostRecorded = true;
+    } catch (_) { /* Retry on the next overview refresh if maintenance holds the lock. */ }
+    finally { accessHostBusy = false; }
+  }
+  const reportText = element("report-text");
+  const reportStatus = element("report-status");
+  element("collect-report").addEventListener("click", async () => {
+    const button = element("collect-report");
+    button.disabled = true;
+    button.setAttribute("aria-busy", "true");
+    button.textContent = "Collecting…";
+    reportStatus.hidden = false;
+    reportStatus.textContent = "Collecting application state, request history and recent logs…";
+    try {
+      const response = await timedFetch(ingressBase() + "diagnostics/report", {
+        method: "POST", headers: {"Content-Type": "application/json"}, body: "{}", cache: "no-store"
+      }, 65000);
+      if (!response.ok) throw new Error((await response.json()).error || "Report collection failed");
+      reportText.value = await response.text();
+      element("report-panel").hidden = false;
+      reportStatus.textContent = "Report ready. Copy it or save the text file to attach to your development agent. Collection limits and unavailable evidence are listed in the report.";
+    } catch (error) {
+      reportStatus.textContent = "Could not collect diagnostics: " + error.message;
+    } finally {
+      button.disabled = false;
+      button.removeAttribute("aria-busy");
+      button.textContent = "Collect diagnostics";
+    }
+  });
+  element("copy-report").addEventListener("click", async () => {
+    try {
+      await navigator.clipboard.writeText(reportText.value);
+      reportStatus.textContent = "Diagnostic report copied.";
+    } catch (_) {
+      reportText.focus();
+      reportText.select();
+      reportStatus.textContent = "Report selected. Use your device’s Copy command.";
+    }
+  });
+  element("save-report").addEventListener("click", () => {
+    const url = URL.createObjectURL(new Blob([reportText.value], {type: "text/plain;charset=utf-8"}));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "pompey-diagnostics-" + new Date().toISOString().replace(/[:.]/g, "-") + ".txt";
+    document.body.append(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  });
   let overview = null;
   let busy = false;
   let latestHealth = null;
@@ -301,6 +359,7 @@
   }
   async function refreshOverview() {
     if (busy || location.protocol === "file:") return;
+    rememberAccessHost();
     busy = true;
     try {
       const response = await timedFetch(ingressBase() + "diagnostics/overview", {cache:"no-store"}, 12000);

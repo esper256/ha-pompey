@@ -25,6 +25,57 @@ from concurrent.futures import Future
 
 
 class SupportLogEvidence(unittest.TestCase):
+    def test_report_survives_unavailable_applications_and_missing_files(self):
+        from pompey_report import Collector, collect_report
+        with tempfile.TemporaryDirectory() as root, patch.dict(os.environ, {
+                "POMPEY_CONFIG": root, "POMPEY_DATA": root, "POMPEY_READY": root,
+                "POMPEY_SECRETS": root + "/missing-secrets", "POMPEY_OPTIONS": root + "/missing-options"}), \
+                patch.object(Collector, "read", side_effect=OSError("application unavailable")):
+            report = json.loads(collect_report().split("\n\n", 1)[1])
+        self.assertFalse(report["requestCoverage"]["complete"])
+        self.assertEqual(report["requests"], [])
+        self.assertIn("application unavailable", report["applications"]["seerr"]["requests"]["collectionError"])
+        self.assertTrue(report["collectionNotices"])
+
+    def test_report_endpoint_preserves_raw_text_and_disables_http_caching(self):
+        import http.client
+        import threading
+        from http.server import ThreadingHTTPServer
+        from pompey_setup import Handler
+        raw = 'Real title /media/private/path Authorization: Bearer original-token\n'
+        server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            with patch("pompey_report.collect_report", return_value=raw):
+                connection = http.client.HTTPConnection(*server.server_address, timeout=2)
+                connection.request("POST", "/diagnostics/report", "{}", {"Content-Type": "application/json"})
+                response = connection.getresponse()
+                self.assertEqual(response.status, 200)
+                self.assertEqual(response.getheader("Cache-Control"), "no-store")
+                self.assertEqual(response.read().decode(), raw)
+                connection.close()
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join()
+
+    def test_development_capture_preserves_rejected_alternatives_before_console_filtering(self):
+        import contextlib
+        import io
+        import pompey_log_emit as logs
+        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {"POMPEY_READY": directory}), patch.dict(logs._captures, {}, clear=True):
+            output = io.StringIO()
+            line = "2026-10-27|Warn|Release alternative rejected: Not enough seeders: 0 apikey=original-secret"
+            with contextlib.redirect_stderr(output):
+                logs.emit("Sonarr", line)
+                logs.emit("Sonarr", line)
+            captured = (Path(directory) / "captured-logs/Sonarr.log").read_text()
+            self.assertEqual(captured.count("original-secret"), 2)
+            self.assertNotIn("original-secret", output.getvalue())
+            for handler in logs._captures.values():
+                handler.close()
+
     def test_native_diagnostic_messages_redact_headers_and_embedded_credentials(self):
         from pompey_log_emit import redact_value
         data = {"id": 8, "messages": ['Authorization: Bearer bearer-secret',
@@ -54,6 +105,49 @@ class SupportLogEvidence(unittest.TestCase):
 
 
 class ObservationSemantics(unittest.TestCase):
+    def test_access_hosts_reject_wildcards_urls_and_bind_addresses_and_preserve_explicit_names(self):
+        from pompey_hosts import hostname, merged_hosts
+        self.assertEqual(hostname("HA.Example.org"), "ha.example.org")
+        self.assertEqual(hostname("[2001:db8::1]"), "[2001:db8::1]")
+        for value in ["*", "*.example.org", "http://ha.example.org", "ha.example.org:8123", "ha.org,evil.org", "0.0.0.0", "[::]", "bad host", "1.2.3.999"]:
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                hostname(value)
+        result = merged_hosts("*,0.0.0.0,manual.example.org;*.trusted.example.org", ["ha.example.org", "127.0.0.1"])
+        self.assertEqual(result, "manual.example.org,*.trusted.example.org,ha.example.org,127.0.0.1")
+
+    def test_report_pagination_keeps_requests_beyond_the_dashboard_limit_and_partial_evidence(self):
+        from pompey_report import Collector
+        collector = Collector()
+        first = {"results": [{"id": i} for i in range(100)], "pageInfo": {"results": 101}}
+        second = {"results": [{"id": 100}], "pageInfo": {"results": 101}}
+        with patch.object(collector, "read", side_effect=[first, second]):
+            result = collector.pages("http://local/request", seerr=True)
+        self.assertTrue(result["complete"])
+        self.assertEqual(len(result["records"]), 101)
+        for final in [first, OSError("application unavailable")]:
+            with patch.object(collector, "read", side_effect=[first, final]):
+                result = collector.pages("http://local/request", seerr=True)
+            self.assertFalse(result["complete"])
+            self.assertEqual(len(result["records"]), 100)
+            self.assertTrue(result["collectionError"])
+
+    def test_report_correlates_grab_history_without_inventing_historical_seed_counts(self):
+        from pompey_report import request_evidence
+        request = {"id": 4, "type": "movie", "status": 2, "media": {"tmdbId": 12}}
+        services = {"seerr": {"requests": {"records": [request]}},
+            "radarr": {"titles": [{"id": 7, "tmdbId": 12, "title": "Real title", "monitored": True}],
+                "queue": {"complete": True, "records": [{"id": 21, "movieId": 7, "downloadId": "ABC"}]},
+                "history": {"complete": True, "records": [{"id": 31, "movieId": 7, "downloadId": "ABC", "sourceTitle": "Chosen release"}]}},
+            "qbittorrent": {"torrents": [{"hash": "abc", "state": "stalledDL", "num_seeds": 0}]}}
+        result = request_evidence(services, {})[0]
+        self.assertEqual(result["observedPhase"], "Waiting for peers")
+        self.assertEqual(result["historyIds"], [31])
+        self.assertEqual(result["downloadIds"], ["abc"])
+        self.assertEqual(result["request"], request)
+        self.assertIsNone(result["lastExplicitSearch"])
+        services["radarr"]["queue"]["complete"] = False
+        self.assertIn("incomplete", request_evidence(services, {})[0]["observedPhase"])
+
     def test_torrent_buckets_are_exclusive_and_stale_counts_stay_labelled(self):
         from pompey_observations import torrent_counts, summarize
         states = ["downloading", "stalledDL", "stoppedDL", "stalledUP", "checkingDL", "queuedDL"]

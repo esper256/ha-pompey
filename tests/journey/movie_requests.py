@@ -7,7 +7,7 @@ import time
 import urllib.parse
 from applications import tunnel_bytes
 from stack_checks import outage
-from support import digest, save_json
+from support import digest, save_json, HttpFailure
 from request_lifecycle import close_request
 
 
@@ -377,6 +377,32 @@ def _movie_request(client, case, background, ledger_file, *, resume):
         r["title"] == case.release and "rejections" in r
         for r in explanation["releases"]
     ), explanation
+    if case.scenario == "movie-pg" and os.environ.get("POMPEY_TEST_BASELINE") != "1":
+        def remember_host():
+            try:
+                result = client.session.call("POST", "http://127.0.0.1:8099/diagnostics/access-host", {"hostname": "ha.pompey-test.invalid"})
+                if not result.get("ok"):
+                    return False
+                settings = client.session.call("GET", "http://127.0.0.1:9696/api/v1/config/host", key=client.secrets["prowlarr_api_key"])
+                warnings = client.session.call("GET", "http://127.0.0.1:9696/api/v1/health", key=client.secrets["prowlarr_api_key"])
+                return settings if "ha.pompey-test.invalid" in settings["allowedHosts"] and not any("AllowedHosts" in row.get("source", "") for row in warnings) else False
+            except HttpFailure as exc:
+                if exc.status != 409:
+                    raise
+                return False
+        hosts = client.wait(remember_host, "Ingress hostname was not applied to Prowlarr", 10)
+        assert "ha.pompey-test.invalid" in hosts["allowedHosts"] and "*" not in hosts["allowedHosts"], hosts["allowedHosts"]
+        exported = client.session.call("POST", "http://127.0.0.1:8099/diagnostics/report", {})
+        report = json.loads(exported.split("\n\n", 1)[1])
+        assert report["schema"] == "pompey-development-diagnostics-v1" and report["redacted"] is False
+        own = next(row for row in report["requests"] if row["requestId"] == request["id"])
+        assert own["arrId"] == item["id"] and own["historyIds"] and own["lastExplicitSearch"]["releases"], own
+        assert report["applications"]["seerr"]["requests"]["complete"], report["applications"]["seerr"]
+        assert report["applications"]["radarr"]["history"]["complete"], report["applications"]["radarr"]
+        assert report["applications"]["radarr"]["hostSettings"]["logLevel"].lower() == "debug"
+        assert any(case.release in entry.get("file", {}).get("text", "")
+                   for entry in report["logs"]["radarr"]), "Native release-selection logs missing"
+        active["developmentReportVerified"] = True
     assert not client.peer(case)["unknown"], client.peer(case)["unknown"]
     ledger.append(
         {

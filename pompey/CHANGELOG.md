@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.3
+
+- Add Collect diagnostics in Requests, with a copyable report and text-file download for development agents. Correlate requests with native Arr history/queues, profiles, indexer settings, torrent files/trackers and recent logs. Preserve original names, paths and application data without anonymization; report incomplete evidence explicitly.
+- Retain bounded native Arr debug logs and raw application/controller log windows while keeping Home Assistant console output filtered. Include recorded release acceptance/rejection evidence without performing fresh searches or changing downloads.
+- Configure Prowlarr Allowed Hosts from access names observed through authenticated Ingress and local interface addresses. Preserve explicit user entries and avoid a wildcard or hardcoded Supervisor addresses.
+
 ## 0.5.2
 
 - Update quality-resources: trash_guides ed6d7226232c, config_templates 89eebadd4299 → trash_guides 6ac59721b3c9, config_templates 89eebadd4299.

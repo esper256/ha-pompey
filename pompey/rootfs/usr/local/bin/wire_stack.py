@@ -990,6 +990,8 @@ def main() -> int:
     sonarr = arr_api_root(sonarr_url(), sk)
     radarr = arr_api_root(radarr_url(), rk)
     prowlarr = prowlarr_url()
+    from pompey_hosts import apply_hosts
+    apply_hosts(pk)
 
     complete = downloads_complete()
     manual = downloads_manual()

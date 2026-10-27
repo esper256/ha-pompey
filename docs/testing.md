@@ -2,6 +2,8 @@
 
 ## Fast development checks
 
+Development-report coverage verifies pagination past 100 requests, preservation of partial pages on failure, request/history/download-hash correlation, raw HTTP export without anonymization, and raw log retention before console filtering. The existing first movie journey also collects the report through Ingress after a real grab/import and explicit release inspection, checks native history and release-decision logs, and registers an access hostname through the real Prowlarr settings API. It adds no separate stack boot. Collection itself must not initiate release searches or change download policy.
+
 Run `bash tests/run.sh` after an edit. Its default is the fast tier: focused safety-logic, harness, release/CI-policy tests, Python/JavaScript syntax and shell-entrypoint lint. It targets **under five seconds total**, starts no applications, and never builds Pompey, downloads dependencies or runs packet/integration tests. Simple UI edits use this command plus browser inspection when useful; agents should not repeat end-to-end validation locally before every push.
 
 Use Python, Node.js and ShellCheck on the development host. If Node.js/ShellCheck are unavailable, run `bash tests/run.sh --prepare` once to build a small local development-tool image, then the same fast command uses that cached image with the source mounted read-only and networking disabled. Preparation is explicit and is not included in the edit loop. The image contains no vendored applications or torrent clients. `--fast --host` requires host tools and never uses a container. CI's Ubuntu runner already supplies these tools; provisioning/queue time is separate from test execution.

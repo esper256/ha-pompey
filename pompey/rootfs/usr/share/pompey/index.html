@@ -332,6 +332,10 @@
     .check-warning { color: var(--err); }
     #setup-note, #support-note { margin-top: .8rem; font-size: .8rem; }
     .section-heading { display: flex; align-items: center; justify-content: space-between; gap: .75rem; margin-bottom: .7rem; }
+    .section-actions { display: flex; flex-wrap: wrap; gap: .4rem; }
+    #diagnostic-panel > .diagnostic-body > .section-heading { flex-wrap: wrap; }
+    #report-panel { border-block: 1px solid var(--line); padding: .8rem 0; margin-bottom: 1rem; }
+    #report-text { box-sizing: border-box; width: 100%; min-height: 14rem; max-height: 50vh; resize: vertical; background: #080c12; color: var(--fg); border: 1px solid var(--line); border-radius: .3rem; padding: .65rem; font: .7rem ui-monospace, monospace; }
     .dashboard-panel .section-heading .panel-title { margin: 0; }
     .section-heading a { color: var(--muted); font-size: .75rem; text-decoration: none; }
     #diagnostic-panel .section-heading button { margin: 0; font-size: .75rem; padding: .3rem .55rem; }
@@ -439,8 +443,15 @@
       </section>
       <section id="diagnostic-panel" class="dashboard-panel dashboard-view" role="tabpanel" aria-labelledby="requests-tab" tabindex="0" hidden>
         <div class="diagnostic-body">
-          <div class="section-heading"><h2 class="panel-title">Request workflow</h2><button id="inspect">Refresh</button></div>
+          <div class="section-heading"><h2 class="panel-title">Request workflow</h2><div class="section-actions"><button id="inspect">Refresh</button><button id="collect-report" type="button">Collect diagnostics</button></div></div>
           <p class="intro">Follow missing media through search, download and import. Manage requests in Seerr.</p>
+          <p id="report-status" role="status" class="fine-print" hidden></p>
+          <section id="report-panel" aria-label="Development diagnostics" hidden>
+            <p class="fine-print" id="report-description">Copy or save this snapshot for your development agent. It contains real request details, paths, server addresses and raw logs without anonymization. Nothing is uploaded automatically.</p>
+            <label for="report-text">Diagnostic report</label>
+            <textarea id="report-text" readonly spellcheck="false" aria-describedby="report-description" wrap="off"></textarea>
+            <button id="copy-report" type="button">Copy report</button><button id="save-report" type="button">Save text file</button>
+          </section>
           <div id="diagnostics" aria-live="polite"></div>
         </div>
       </section>
