@@ -7,6 +7,7 @@ import struct
 import subprocess
 import sys
 import threading
+import http.client
 
 PEER_IP = "10.77.0.2"
 HOSTS = (
@@ -155,8 +156,28 @@ def control(action):
             check=True,
         )
     elif action == "underlay-listening":
-        with socket.create_connection(("198.18.0.2", 18080), timeout=1):
+        with socket.create_connection(("198.19.0.3", 18080), timeout=1):
             pass
+    elif action == "ui-access":
+        observed = []
+        for port, path, expected in [
+            (5055, "/api/v1/settings/public", 200),
+            (9696, "/ping", 200),
+            (8099, "/", 403),
+        ]:
+            connection = http.client.HTTPConnection(
+                "198.18.0.1", port, timeout=2,
+                source_address=("198.19.0.2", 0),
+            )
+            try:
+                connection.request("GET", path)
+                response = connection.getresponse()
+                response.read()
+                assert response.status == expected, (port, response.status)
+                observed.append({"port": port, "status": response.status})
+            finally:
+                connection.close()
+        print(json.dumps(observed), flush=True)
     else:
         raise ValueError("Unknown fixture control")
 

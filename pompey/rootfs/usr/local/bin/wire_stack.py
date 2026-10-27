@@ -711,8 +711,6 @@ def configure_seerr(
 
     s.api_key = seerr_api_key_from_disk()
     have_plex = bool(plex_url() and plex_token())
-    if not have_plex:
-        log("Plex settings are incomplete; complete the Seerr setup wizard")
 
     if have_plex:
         try:
@@ -753,6 +751,8 @@ def configure_seerr(
         return isinstance(public, dict) and bool(public.get("initialized"))
 
     initialized = public_initialized()
+    if not initialized and not have_plex:
+        log("Complete Plex setup in the Seerr setup wizard")
 
     if have_plex:
         host, port, ssl = parse_plex(plex_url())

@@ -13,7 +13,7 @@ from catalogue import cases, offers
 from applications import ApplicationStack, Background, configure, identities
 from movie_requests import movie_request
 from tv_requests import tv_request
-from stack_checks import rotation_scenario
+from stack_checks import rotation_scenario, assert_ui_access
 from invariants import Invariants
 import restart
 from request_lifecycle import completed_closeout
@@ -213,6 +213,7 @@ def main():
                 os.environ.get("POMPEY_JOB_INTERVALS", "{}")
             ),
         )
+        assert_ui_access(client)
         invariants = Invariants(
             client, background, since=plan["armedAt"] if plan else None
         )

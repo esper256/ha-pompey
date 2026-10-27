@@ -136,6 +136,9 @@ def prepare():
     )
     run("ip", "addr", "add", "198.18.0.1/30", "dev", "fixture-link")
     run("ip", "link", "set", "fixture-link", "up")
+    # This gateway exists only in the isolated fixture namespace, with no
+    # external route. Model a normal container's original default route.
+    run("ip", "route", "add", "default", "via", "198.18.0.2", "dev", "fixture-link")
     config = f"""[Interface]
 PrivateKey = {client.decode()}
 Address = 10.77.0.1/32

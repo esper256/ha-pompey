@@ -48,13 +48,28 @@ def assert_firewall(client):
         for row in table["nftables"]
     ), table
     fixture_control("underlay-listening")
-    for port, kind in [(18080, "tcp"), (53, "dns")]:
-        result = probe("198.18.0.2", port, kind)
-        client.evidence.data.setdefault("stackChecks", {}).setdefault(
-            "underlayProbes", []
-        ).append(result)
-        assert not result["connected"], ("Engine escaped over the underlay", result)
+    # A non-connected address deliberately forced onto the unprotected route:
+    # container-neighbor services are allowed, arbitrary underlay traffic is not.
+    subprocess.run(["ip", "route", "replace", "198.19.0.3/32", "via", "198.18.0.2", "dev", "fixture-link"], check=True)
+    try:
+        for port, kind in [(18080, "tcp"), (53, "dns")]:
+            result = probe("198.19.0.3", port, kind)
+            client.evidence.data.setdefault("stackChecks", {}).setdefault(
+                "underlayProbes", []
+            ).append(result)
+            assert not result["connected"], ("Engine escaped over the underlay", result)
+    finally:
+        subprocess.run(["ip", "route", "del", "198.19.0.3/32"], check=True)
     client.evidence.data.setdefault("stackChecks", {})["firewall"] = table
+    client.evidence.checkpoint()
+
+
+def assert_ui_access(client):
+    result = json.loads(subprocess.check_output(
+        [sys.executable, "/tests/journey/fixture_network.py", "ui-access"],
+        text=True, timeout=8,
+    ))
+    client.evidence.data.setdefault("stackChecks", {}).setdefault("publishedInterfaces", []).append(result)
     client.evidence.checkpoint()
 
 
@@ -103,6 +118,7 @@ def _outage(client):
         ]:
             client.session.call("GET", url)
         client.qbit("app/version")
+        assert_ui_access(client)
         assert not probe(PEER_IP, 53, "dns")["connected"], (
             "DNS remained reachable during outage"
         )

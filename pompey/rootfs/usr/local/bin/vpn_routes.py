@@ -7,9 +7,57 @@ import os
 from pathlib import Path
 import subprocess
 
+UI_PORTS = (5055, 9696, 8099)
+UI_REPLY_TABLE = 20560
+UI_REPLY_PRIORITY = 11000
+
 
 def ip(*args):
     return subprocess.check_output(["ip", *args], text=True)
+
+
+def preserve_ui_replies(family, original):
+    """Route published TCP service replies through the original interface.
+
+    The firewall separately permits established reply traffic only. Selecting a
+    source port here cannot authorize a new cleartext outbound connection.
+    """
+    if not original:
+        return
+    flag = f"-{family}"
+    dev = original["dev"]
+    # Keep same-bridge Supervisor/Ingress clients directly reachable too.
+    for route in json.loads(ip(flag, "-j", "route", "show", "dev", dev)):
+        destination = route.get("dst")
+        if (
+            destination
+            and destination != "default"
+            and not route.get("gateway")
+            and route.get("type", "unicast") == "unicast"
+        ):
+            ip(
+                flag, "route", "replace", "table", str(UI_REPLY_TABLE),
+                destination, "dev", dev,
+            )
+    via = ["via", original["gateway"]] if original.get("gateway") else []
+    ip(
+        flag, "route", "replace", "table", str(UI_REPLY_TABLE),
+        "default", *via, "dev", dev,
+    )
+    installed = json.loads(ip(flag, "-j", "rule", "show"))
+    for offset, port in enumerate(UI_PORTS):
+        priority = UI_REPLY_PRIORITY + offset
+        existing = next(
+            (rule for rule in installed if rule.get("priority") == priority), None,
+        )
+        if existing:
+            if str(existing.get("table")) != str(UI_REPLY_TABLE):
+                raise RuntimeError("Published-interface routing priority is already in use")
+            continue
+        ip(
+            flag, "rule", "add", "priority", str(priority), "ipproto", "tcp",
+            "sport", str(port), "lookup", str(UI_REPLY_TABLE),
+        )
 
 
 def main():
@@ -18,6 +66,7 @@ def main():
     for family in (4, 6):
         routes = json.loads(ip(f"-{family}", "-j", "route", "show", "default"))
         orig = next((r for r in routes if r.get("dev") != "wg0"), None)
+        preserve_ui_replies(family, orig)
         destinations = [
             p["ip"]
             for p in config["endpoints"]

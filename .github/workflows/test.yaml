@@ -50,7 +50,7 @@ jobs:
         run: |
           docker buildx create --use --driver docker-container
           docker buildx build --load --platform linux/amd64 \
-            --build-arg BUILD_ARCH=amd64 --build-arg BUILD_VERSION=0.4.1 --build-arg BUILD_REF="$GITHUB_SHA" \
+            --build-arg BUILD_ARCH=amd64 --build-arg BUILD_VERSION=0.4.2 --build-arg BUILD_REF="$GITHUB_SHA" \
             --cache-from type=local,src=/tmp/pompey-build-cache \
             --cache-to type=local,dest=/tmp/pompey-build-cache-new,mode=max \
             -t localhost/pompey:foundation pompey/

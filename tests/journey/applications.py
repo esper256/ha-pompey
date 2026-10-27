@@ -272,7 +272,7 @@ def configure(client, restored):
     stamp("seerr-account-ready")
     if not restored:
         client.search(
-            "POST", "/settings/plex", {"ip": PEER_IP, "port": 80, "useSsl": False}
+            "POST", "/settings/plex", {"ip": "198.18.0.2", "port": 80, "useSsl": False}
         )
         schemas = client.prow("GET", "/indexer/schema")
         indexer = next(row for row in schemas if row["implementation"] == "Torznab")
@@ -300,6 +300,8 @@ def configure(client, restored):
     if not restored:
         client.search("POST", "/settings/initialize", {})
     assert client.search("GET", "/settings/public")["initialized"] is True
+    assert client.search("GET", "/settings/plex/library") == []
+    client.evidence.data.setdefault("stackChecks", {})["sameHostPlex"] = True
     wait(
         lambda: client.arr("GET", "/indexer"),
         "Prowlarr did not synchronize into Radarr",

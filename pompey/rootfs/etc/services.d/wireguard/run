@@ -72,6 +72,7 @@ bashio::log.info "Waiting for VPN connection on wg0"
 pompey_status.py vpn "Waiting for VPN connection" 15 || true
 wait-for-vpn 45
 mark_vpn_up
+bashio::log.info "VPN connected on wg0"
 
 signature="$(sha256sum "${POMPEY_WG_FILE}")"
 while wait-for-vpn 1; do
