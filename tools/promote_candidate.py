@@ -7,6 +7,7 @@ import subprocess
 import base64
 import copy
 import json
+import time
 from dependency_updates import api
 from release_metadata import current, next_patch, split_unreleased
 from release_protection import required_protection
@@ -104,6 +105,23 @@ def validate_plan(plan, pr, main_sha, merge):
         raise ValueError("Tested merge content changed")
 
 
+def validate_check_target(plan, head):
+    if head["sha"] != plan["head"] or head["tree"]["sha"] != plan["tree"]:
+        raise ValueError("Required-check target must contain exactly the accepted release tree")
+
+
+def await_merge_gate(base, number, plan):
+    for attempt in range(8):
+        pr = api(base + "/pulls/" + number)
+        if pr["head"]["sha"] != plan["head"] or pr["base"]["sha"] != plan["base"]:
+            raise ValueError("Release changed while GitHub was recognizing its required check")
+        if pr.get("mergeable_state") == "clean":
+            return
+        if attempt < 7:
+            time.sleep(2)
+    raise ValueError("GitHub has not recognized the accepted required check; publication withheld")
+
+
 def main():
     repo = "esper256/ha-pompey"
     if os.environ.get("GITHUB_REPOSITORY") != repo or os.environ.get("GITHUB_REF") != "refs/heads/main":
@@ -135,17 +153,19 @@ def main():
             return {path: base64.b64decode(api(base + "/contents/" + path + "?ref=" + ref)["content"]).decode() for path in ALLOWED}
         validate_contents(pr["head"]["ref"].removeprefix("codex/upstream-"), contents(plan["base"]), contents(plan["head"]), plan["version"])
     if not pr.get("merged"):
-        # This is the real full-suite result on the exact tested merge commit,
-        # under the Actions app required by branch protection. No admin bypass.
+        # GitHub can replace its temporary merge SHA after marking a PR ready.
+        # Report against the stable head only after proving identical content.
+        validate_check_target(plan, api(base + "/git/commits/" + plan["head"]))
         if pr["draft"]:
             api("graphql", "POST", {"query": "mutation($id:ID!){markPullRequestReadyForReview(input:{pullRequestId:$id}){pullRequest{id}}}", "variables": {"id": pr["node_id"]}})
         current_merge_sha = api(base + "/git/ref/pull/" + number + "/merge")["object"]["sha"]
         current_merge = api(base + "/git/commits/" + current_merge_sha)
         validate_plan(plan, pr, api(base + "/git/ref/heads/main")["object"]["sha"], current_merge)
-        api(base + "/check-runs", "POST", {"name": "CI required", "head_sha": current_merge_sha,
+        api(base + "/check-runs", "POST", {"name": "CI required", "head_sha": plan["head"],
             "status": "completed", "conclusion": "success", "details_url": run["html_url"],
             "output": {"title": "Full release and upgrade acceptance passed",
                        "summary": "Accepted merge tree: `" + plan["tree"] + "`. " + run["html_url"]}})
+        await_merge_gate(base, number, plan)
         result = api(base + "/pulls/" + number + "/merge", "PUT", {"sha": plan["head"], "merge_method": "squash"})
         if result.get("merged") is not True:
             raise RuntimeError("GitHub did not merge the protected release PR")
