@@ -2,6 +2,9 @@
 
 import json
 import hashlib
+import os
+import subprocess
+import sys
 from pathlib import Path
 from support import save_json
 
@@ -27,6 +30,18 @@ def pending_plan():
 
 def prepare(client, invariants, remaining):
     evidence = client.evidence
+    if os.environ.get("POMPEY_TEST_BASELINE") == "1":
+        # Establish an upgrade fixture with the released implementation at its
+        # production request cadence, not the accelerated candidate stress loop.
+        # Persist its actual ownership ledger once the three requests are settled.
+        from pompey_runtime import stack_lock
+        with stack_lock():
+            subprocess.run([sys.executable, "/usr/local/bin/wire_stack.py", "closeout"], check=True, timeout=60)
+        ownership = json.loads(Path("/data/pompey/state/requests.json").read_text())
+        expected = {c["tmdbId"] for c in evidence.data["cases"]}
+        observed = {row["externalId"] for row in ownership["owned"].values()}
+        assert expected <= observed and ownership.get("instanceId"), ownership
+        evidence.data["releasedRequestOwnershipVerified"] = sorted(expected)
     invariants.checkpoint("before-container-restart", full=True)
     pending = [
         c for c in evidence.data["cases"] if c["status"] in {"waiting", "paused"}

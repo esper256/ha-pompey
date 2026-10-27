@@ -162,6 +162,24 @@ class WorkflowEvidence(unittest.TestCase):
         self.assertEqual(rows[0]["phase"], "Monitoring disabled")
 
 
+class ChangingRequestHistory(unittest.TestCase):
+    def test_changed_snapshots_defer_without_loading_or_mutating_monitoring(self):
+        from request_policy import reconcile_requests
+        with patch("request_policy.requests_snapshot", side_effect=[[{"id": 1}], [{"id": 1}, {"id": 2}]]), \
+             patch("request_policy.api.log_if_new") as log, patch("request_policy.state.load") as load, \
+             patch("request_policy.api.http") as http:
+            reconcile_requests()
+            log.assert_called_once()
+            load.assert_not_called()
+            http.assert_not_called()
+
+    def test_snapshot_api_failure_is_still_a_real_failure(self):
+        from request_policy import reconcile_requests
+        with patch("request_policy.requests_snapshot", side_effect=RuntimeError("Seerr unavailable")):
+            with self.assertRaisesRegex(RuntimeError, "Seerr unavailable"):
+                reconcile_requests()
+
+
 class CumulativeFailureEvidence(unittest.TestCase):
     def test_recovery_and_controller_restart_do_not_erase_failure(self):
         from pompey_events import record

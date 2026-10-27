@@ -36,6 +36,24 @@ def next_patch(value):
     return f"{major}.{minor}.{patch + 1}"
 
 
+
+def split_unreleased(changelog):
+    header = "# Changelog\n\n"
+    if not changelog.startswith(header):
+        raise ValueError("Changelog header missing")
+    body = changelog[len(header):]
+    marker = "## Unreleased\n"
+    if not body.startswith(marker):
+        return "", body
+    pending, separator, history = body[len(marker):].partition("\n## ")
+    return pending.strip(), "## " + history if separator else ""
+
+
+def release_notes(changelog, version, addition):
+    pending, history = split_unreleased(changelog)
+    entries = addition.strip() + ("\n\n" + pending if pending else "")
+    return "# Changelog\n\n## " + version + "\n\n" + entries + "\n\n" + history
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("action", choices=["current", "set"])
@@ -44,3 +62,4 @@ if __name__ == "__main__":
     if args.action == "set":
         set_version(args.version or "")
     print(current())
+
