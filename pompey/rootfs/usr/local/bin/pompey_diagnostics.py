@@ -111,7 +111,13 @@ def workflow(sources, titles, queues, torrents, requested=()):
                     phase, action = "Unmatched download", "Arr has not matched this download to a library title."
                 observed = [source] + ([sources.get("qbittorrent", {})] if queued else [])
                 available = all(item.get("available") for item in observed)
+                episode = (queued or {}).get("episode") or {}
+                season = episode.get("seasonNumber")
+                number = episode.get("episodeNumber")
+                scope = f"S{season:02d}E{number:02d}" if type(season) is int and type(number) is int else None
                 rows.append({"kind": kind, "id": ident if title else None,
+                    "key": f"{kind}:download:{token}:queue:{queued.get('id', '')}" if token else f"{kind}:queue:{queued['id']}" if queued else f"{kind}:title:{ident}",
+                    "downloadId": token or None, "scope": scope,
                     "title": (title or {}).get("title") or (queued or {}).get("title", "Unmatched download"),
                     "release": (queued or {}).get("title"),
                     "phase": phase if available else "Current progress unavailable", "lastKnownPhase": phase,
@@ -124,6 +130,7 @@ def workflow(sources, titles, queues, torrents, requested=()):
             continue
         source = sources.get("qbittorrent", {})
         rows.append({"kind": "qbittorrent", "id": None, "title": torrent.get("name", "Download"),
+            "key": "qbittorrent:" + token, "downloadId": token,
             "phase": "Outside Arr queue" if source.get("available") else "Current progress unavailable",
             "nextAction": "This may be a manual grab, seeding, or awaiting queue synchronization. Files are retained.",
             "messages": [], "download": download_evidence(torrent), "available": source.get("available", False),
@@ -151,6 +158,7 @@ def snapshot():
         for row in data.get("titles", []):
             title = {"kind": kind, "id": row["id"], "title": row.get("title", "Untitled"),
                      "monitored": row.get("monitored"), "path": row.get("path"),
+                     "fileId": (row.get("movieFile") or {}).get("id") if kind == "radarr" else None,
                      "hasFile": row.get("hasFile") if kind == "radarr" else (row.get("statistics") or {}).get("episodeFileCount", 0),
                      "lastSearch": state.load("search-" + kind + "-" + str(row["id"])),
                      "available": sources[kind].get("available", False), "updated": sources[kind].get("updated")}
@@ -197,7 +205,9 @@ def snapshot():
     result["workflow"] = workflow(sources, result["titles"], queues, torrents, requested)
     for request in result["requests"]:
         if request["state"] == "Approved" and not request["arrLinked"]:
-            result["workflow"].append({**request, "kind": "seerr", "id": None, "attention": True})
+            result["workflow"].append({**request, "key": "seerr:request:" + str(request["id"]), "kind": "seerr", "id": None, "attention": True})
+    from pompey_recovery import sequences
+    result["sequences"] = sequences()
     result["requestReview"] = state.load("requests").get("reviewRequired", "")
     return result
 

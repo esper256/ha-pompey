@@ -86,6 +86,13 @@ class Handler(BaseHTTPRequestHandler):
         self._send(200 if proc.returncode == 0 else 400, json.loads(proc.stdout))
 
     def do_GET(self):
+        if self.path.split("?")[0] == "/diagnostics/sequences":
+            try:
+                from pompey_recovery import sequences
+                self._send(200, {"sequences": sequences()})
+            except (OSError, ValueError):
+                self._send(503, {"error": "Release sequence history is temporarily unavailable"})
+            return
         if self.path.split("?")[0] == "/diagnostics/preferences":
             try:
                 from pompey_preferences import status
@@ -103,7 +110,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         path = self.path.split("?", 1)[0]
-        if path in {"/diagnostics/search", "/diagnostics/rebaseline", "/diagnostics/preferences"}:
+        if path in {"/diagnostics/search", "/diagnostics/rebaseline", "/diagnostics/preferences", "/diagnostics/report", "/diagnostics/access-host", "/diagnostics/recovery/preview", "/diagnostics/recovery/reject", "/diagnostics/recovery/releases"}:
             try:
                 length = int(self.headers.get("Content-Length", "0"))
                 if not 0 < length < 4096:
@@ -111,6 +118,28 @@ class Handler(BaseHTTPRequestHandler):
                 payload = json.loads(self.rfile.read(length))
                 if not isinstance(payload, dict):
                     raise ValueError("Expected an object")
+                if "/recovery/" in path:
+                    from pompey_recovery import preview, reject, releases
+                    action = {"preview": preview, "reject": reject, "releases": releases}[path.rsplit("/", 1)[-1]]
+                    self._send(200, action(payload))
+                    return
+                if path.endswith("access-host"):
+                    from pompey_hosts import remember
+                    self._send(200, remember(payload.get("hostname")))
+                    return
+                if path.endswith("report"):
+                    from pompey_report import collect_report
+                    # Deliberately raw: this explicit developer export is not the
+                    # redacted routine dashboard/HA-console response path.
+                    raw = collect_report().encode("utf-8")
+                    self.send_response(200)
+                    self.send_header("Content-Type", "text/plain; charset=utf-8")
+                    self.send_header("Cache-Control", "no-store")
+                    self.send_header("X-Content-Type-Options", "nosniff")
+                    self.send_header("Content-Length", str(len(raw)))
+                    self.end_headers()
+                    self.wfile.write(raw)
+                    return
                 if path.endswith("rebaseline") and payload.get("confirm") is not True:
                     raise ValueError("Confirm that monitoring should be preserved")
                 if path.endswith("preferences"):
@@ -120,9 +149,9 @@ class Handler(BaseHTTPRequestHandler):
                 self._diagnostic(
                     "rebaseline" if path.endswith("rebaseline") else "search", payload
                 )
-            except BlockingIOError:
-                self._send(409, {"error": "Maintenance is running. Try saving again shortly."})
-            except (ValueError, OSError, subprocess.TimeoutExpired) as exc:
+            except BlockingIOError as exc:
+                self._send(409, {"error": str(exc) if path.endswith("report") else "Maintenance is running. Try again shortly."})
+            except (ValueError, OSError, RuntimeError, subprocess.TimeoutExpired) as exc:
                 self._send(400, {"error": str(exc)})
             return
         if path not in {"/setup/vpn", "/vpn"}:

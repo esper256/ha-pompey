@@ -365,13 +365,14 @@ class World:
                 case = offer.case
                 torrent = self.torrents[offer.movie_id]
                 category = (5070 if case.anime else 5040) if tv else 2040
+                seeders = 4 - offer.variant if case.index in {1, 6} else 1
                 url = f"http://{PEER_IP}:18080/download/{offer.movie_id}"
                 published = formatdate(
                     self.controls.get("visible:" + str(case.movie_id), 1792972800),
                     usegmt=True,
                 )
                 items.append(
-                    f'''<item><title>{offer.release}</title><guid isPermaLink="false">{torrent.digest.hex()}</guid><link>{url}</link><pubDate>{published}</pubDate><category>{category}</category><enclosure url="{url}" length="{torrent.size}" type="application/x-bittorrent"/><torznab:attr name="category" value="{category}"/><torznab:attr name="size" value="{torrent.size}"/><torznab:attr name="seeders" value="1"/><torznab:attr name="peers" value="1"/><torznab:attr name="tmdbid" value="{case.movie_id}"/><torznab:attr name="tvdbid" value="{case.tvdb_id}"/><torznab:attr name="imdbid" value="{case.imdb_id}"/><torznab:attr name="infohash" value="{torrent.digest.hex()}"/></item>'''
+                    f'''<item><title>{offer.release}</title><guid isPermaLink="false">{torrent.digest.hex()}</guid><link>{url}</link><pubDate>{published}</pubDate><category>{category}</category><enclosure url="{url}" length="{torrent.size}" type="application/x-bittorrent"/><torznab:attr name="category" value="{category}"/><torznab:attr name="size" value="{torrent.size}"/><torznab:attr name="seeders" value="{seeders}"/><torznab:attr name="peers" value="1"/><torznab:attr name="tmdbid" value="{case.movie_id}"/><torznab:attr name="tvdbid" value="{case.tvdb_id}"/><torznab:attr name="imdbid" value="{case.imdb_id}"/><torznab:attr name="infohash" value="{torrent.digest.hex()}"/></item>'''
                 )
             body = f'''<?xml version="1.0"?><rss version="2.0" xmlns:torznab="http://torznab.com/schemas/2015/feed" xmlns:newznab="http://www.newznab.com/DTD/2010/feeds/attributes/"><channel><title>Fixture</title><newznab:response offset="{offset}" total="{len(selected_offers)}"/>{"".join(items)}</channel></rss>'''
             return "application/xml", body.encode(), 200
