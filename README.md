@@ -2,7 +2,7 @@
 
 Pompey runs Seerr, Prowlarr, Radarr, Sonarr and qBittorrent in one Home Assistant OS app. Internet traffic uses a WireGuard VPN. Plex runs separately. The Home Assistant sidebar provides setup, service status and diagnostics. Seerr on port **5055** provides search and media requests; Prowlarr on **9696** manages indexers.
 
-Pompey is experimental software. Version 0.4.0 supports fresh amd64 installations with bundled, pinned applications. Migration from earlier installation layouts is not supported. See [release validation and current coverage](docs/testing.md).
+Pompey is experimental software. Version 0.4.1 supports fresh amd64 installations with bundled, pinned applications. Migration from earlier installation layouts is not supported. See [release validation and current coverage](docs/testing.md).
 
 ## Installation
 
@@ -73,4 +73,4 @@ Home Assistant's **Logs** view combines Pompey and application output, including
 
 Home Assistant cold backups stop Pompey while persistent state is copied. Use a backup to recover from an unsuccessful application or database update. Pompey does not provide automatic binary or database rollback. See [architecture](docs/arr-auto-update.md) and [testing](docs/testing.md).
 
-**Known issue in 0.4.0:** a download interrupted by VPN loss can remain stalled after the tunnel recovers. Local access and the firewall remain functional in the reproduced scenario. Release CI permits only this documented resume timeout after verifying the other network and service checks. Automatic upstream dependency promotion remains disabled.
+**Known issue:** a download interrupted by VPN loss can remain stalled after the tunnel recovers. Local access and the firewall remain functional in the reproduced scenario. Release CI permits only this documented resume timeout after verifying the other network and service checks. Automatic upstream dependency promotion remains disabled.

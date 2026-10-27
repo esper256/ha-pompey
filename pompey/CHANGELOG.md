@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.4.1
 
 - Revert UID/GID 1000 application execution for compatibility with Home Assistant SMB media mounts. Run the stack as container root without changing existing directory ownership; retain VPN-only application DNS with a separate endpoint resolver identity.
 - Report storage operation failures with numeric ownership, parent permissions and safe mount details. Forward qBittorrent file logs to Home Assistant Logs.

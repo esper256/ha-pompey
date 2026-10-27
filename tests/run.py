@@ -106,7 +106,7 @@ def execute(args, engine, results, summary, checkpoint):
                 "--build-arg",
                 "BUILD_ARCH=amd64",
                 "--build-arg",
-                "BUILD_VERSION=0.4.0",
+                "BUILD_VERSION=0.4.1",
                 "-t",
                 args.image,
                 "pompey/",
