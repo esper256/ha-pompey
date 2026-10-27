@@ -4,11 +4,8 @@ set -euo pipefail
 # shellcheck source=/dev/null
 source "$(command -v pompey-env)"
 
-until [[ -f "${POMPEY_READY}/engines-ready" ]]; do
-  sleep 2
-done
 
 pompey-log start "Prowlarr"
-exec > >(pompey-log prefix "Prowlarr")
+exec > >(s6-setuidgid pompey pompey-log prefix "Prowlarr")
 exec 2>&1
-exec "${POMPEY_ENGINES}/Prowlarr/Prowlarr" -nobrowser -data="${POMPEY_CONFIG}/prowlarr"
+exec s6-setuidgid pompey "${POMPEY_ENGINES}/Prowlarr/Prowlarr" -nobrowser -data="${POMPEY_CONFIG}/prowlarr"

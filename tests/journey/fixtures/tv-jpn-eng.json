@@ -1,0 +1,13 @@
+{
+  "sha256": "2e1b2effc8488961c98762b52e9fb10afed27f324a598878ee9bcb475397d8e7",
+  "bytes": 16823251,
+  "durationSeconds": 60,
+  "width": 1920,
+  "height": 1080,
+  "audioLanguages": [
+    "jpn",
+    "eng"
+  ],
+  "identityPaddingOffset": 1144,
+  "sparsePaddingEnd": 16778193
+}

@@ -7,7 +7,5 @@ source "$(command -v pompey-env)"
 python3 "$(command -v vpn_config.py)" \
   "${POMPEY_WG_FILE}" "${POMPEY_WG_CONF}" "${POMPEY_READY}/vpn-config.json"
 printf '%s\n' "${POMPEY_LAN_NETWORKS}" > "${POMPEY_LAN_FILE}"
-if [[ "${POMPEY_FAKE_VPN:-}" != "1" ]]; then
-  vpn-killswitch "${POMPEY_WG_CONF}" || exit 4
-fi
+vpn-killswitch "${POMPEY_WG_CONF}" || exit 4
 touch "${POMPEY_READY}/vpn-applied"

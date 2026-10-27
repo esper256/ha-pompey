@@ -1,78 +1,10 @@
 #!/command/with-contenv bashio
 # shellcheck shell=bash
 set -euo pipefail
-# shellcheck source=/dev/null
-source "$(command -v pompey-env)"
-
-if ! command -v ip >/dev/null 2>&1; then
-  export PATH="/usr/sbin:/sbin:${PATH}"
-fi
-
-IFACE="${WG_IFACE:-wg0}"
-MAX_AGE="${WG_HANDSHAKE_MAX_AGE:-180}"
-
-quiet=0
-if [[ "${1:-}" == "--quiet" ]]; then
-  quiet=1
-  shift
-fi
-if [[ "${WAIT_FOR_VPN_QUIET:-}" == "1" ]]; then
-  quiet=1
-fi
 TRIES="${1:-60}"
-
-iface_up() {
-  local ns="${POMPEY_FAKE_VPN_NETNS:-pompey-dev}"
-  if [[ "${POMPEY_FAKE_VPN:-}" == "1" ]] \
-    && ip netns list 2>/dev/null | awk '{ print $1 }' | grep -qx "${ns}"; then
-    local show
-    if [[ "$(id -u)" -eq 0 ]]; then
-      show="$(ip netns exec "${ns}" ip -o link show "${IFACE}" 2>/dev/null)" || return 1
-    elif sudo -n true 2>/dev/null; then
-      show="$(sudo -n ip netns exec "${ns}" ip -o link show "${IFACE}" 2>/dev/null)" || return 1
-    else
-      return 1
-    fi
-    grep -q '[,<]UP[,>]' <<<"${show}"
-    return
-  fi
-  ip link show "${IFACE}" >/dev/null 2>&1 || return 1
-  ip -o link show "${IFACE}" | grep -q '[,<]UP[,>]'
-}
-
-handshake_ok() {
-  if [[ "${POMPEY_FAKE_VPN:-}" == "1" ]]; then
-    # Agent/dev veth: no WireGuard handshake. wg0 must exist and be UP.
-    iface_up
-    return
-  fi
-  command -v wg >/dev/null 2>&1 || return 1
-  wg show "${IFACE}" >/dev/null 2>&1 || return 1
-  local ts now
-  ts="$(wg show "${IFACE}" latest-handshakes 2>/dev/null | awk 'NR==1 { print $2 }')"
-  [[ -n "${ts}" && "${ts}" != "0" ]] || return 1
-  now="$(date +%s)"
-  (( now - ts < MAX_AGE ))
-}
-
-i=0
-until handshake_ok; do
-  i=$((i + 1))
-  if [[ "${i}" -ge "${TRIES}" ]]; then
-    # TRIES=1 is the monitor loop; the caller logs. --quiet so engines/NAT-PMP
-    # do not duplicate the WireGuard service (with-contenv drops env flags).
-    if [[ "${TRIES}" -gt 1 && "${quiet}" -ne 1 ]]; then
-      bashio::log.error "WireGuard ${IFACE} has no fresh handshake"
-      # Search can already be up; do not rewind the sidebar to 15%.
-      if [[ ! -f "${POMPEY_READY}/wired" ]]; then
-        if [[ "${POMPEY_FAKE_VPN:-}" == "1" ]]; then
-          pompey_status.py vpn "Waiting for fake wg0" 15 "POMPEY_FAKE_VPN is set but ${IFACE} is not up. Run pompey-dev-vpn up." || true
-        else
-          pompey_status.py vpn "Waiting for VPN connection" 15 "Check your VPN configuration." || true
-        fi
-      fi
-    fi
-    exit 1
-  fi
-  sleep 2
+for ((i=0; i<TRIES; i++)); do
+  ts="$(wg show "${WG_IFACE:-wg0}" latest-handshakes 2>/dev/null | awk 'NR==1 {print $2}')" || ts=0
+  if [[ "${ts:-0}" -gt 0 ]] && (( $(date +%s) - ts < ${WG_HANDSHAKE_MAX_AGE:-180} )); then exit 0; fi
+  [[ "${TRIES}" -eq 1 ]] || sleep 2
 done
+exit 1

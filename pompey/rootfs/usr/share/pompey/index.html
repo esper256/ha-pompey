@@ -338,6 +338,12 @@
     <p id="file-hint" hidden>Open Pompey from the Home Assistant sidebar.</p>
     <p class="error" id="err" hidden></p>
   </main>
+  <details style="max-width:48rem;margin:1.5rem auto;padding:1rem">
+    <summary>Why isn't this available?</summary>
+    <p>Inspect current requests, downloads and import messages. A new search contacts your sources and shows Arr's release decisions.</p>
+    <button id="inspect">Inspect current state</button>
+    <div id="diagnostics" aria-live="polite"></div>
+  </details>
   <script>
     const fileHint = document.getElementById("file-hint");
     const fill = document.getElementById("fill");
@@ -524,12 +530,12 @@
       });
       if (Number(data.search_port)) lastPorts.search = Number(data.search_port);
       if (Number(data.sources_port)) lastPorts.sources = Number(data.sources_port);
-      if (dashboard && !showForm) {
+      if (data.search && !showForm) {
         const port = lastPorts.search;
         const sourcesPort = lastPorts.sources;
         const url = "http://" + location.hostname + ":" + port + "/";
         const sourcesUrl = "http://" + location.hostname + ":" + sourcesPort + "/";
-        now.textContent = "Ready";
+        now.textContent = data.label || "Ready";
         openSearch.hidden = false;
         openSearchBtn.href = url;
         openSourcesBtn.href = sourcesUrl;
@@ -573,6 +579,69 @@
       } finally {
         wgGo.disabled = false;
       }
+    });
+
+    const diagnosis = document.getElementById("diagnostics");
+    function paragraph(text) {
+      const p = document.createElement("p");
+      p.textContent = text;
+      diagnosis.append(p);
+    }
+    async function diagnosticRequest(path, body) {
+      const response = await fetch(ingressBase() + "diagnostics" + path, {
+        method: body ? "POST" : "GET",
+        headers: {"Content-Type":"application/json"},
+        ...(body ? {body:JSON.stringify(body)} : {})
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Evidence unavailable");
+      return data;
+    }
+    document.getElementById("inspect").addEventListener("click", async () => {
+      diagnosis.replaceChildren();
+      paragraph("Collecting evidence…");
+      try {
+        const data = await diagnosticRequest("");
+        diagnosis.replaceChildren();
+        paragraph("Observed " + new Date(data.updated * 1000).toLocaleString());
+        (data.attention || []).forEach(paragraph);
+        (data.requests || []).forEach(request => paragraph(request.title + ": " + request.state + (request.arrLinked ? "" : "; not yet linked to a library title")));
+        (data.downloads || []).forEach(download => paragraph(
+          (download.title || "Unidentified download") + ": " + (download.state || "unknown") +
+          (download.messages?.length ? ". " + download.messages.join("; ") : "") +
+          (download.note ? ". " + download.note : "")
+        ));
+        (data.titles || []).forEach(title => {
+          paragraph(title.title + ": " + (title.hasFile ? "Imported at " + title.path : "Awaiting import") +
+            (title.monitored ? "" : "; monitoring is off"));
+          const button = document.createElement("button");
+          button.textContent = "Search and explain: " + title.title;
+          button.addEventListener("click", async () => {
+            button.disabled = true;
+            try {
+              const result = await diagnosticRequest("/search", {kind:title.kind,id:title.id});
+              paragraph(result.status + " at " + new Date(result.updated * 1000).toLocaleString());
+              if (!result.releases?.length) paragraph("The search returned no releases. This does not establish that none exist elsewhere.");
+              (result.releases || []).forEach(release => paragraph(release.title + ": " +
+                (release.rejections?.length ? release.rejections.join("; ") : "Eligible according to Arr") +
+                "; source reports " + (release.reportedSeeders ?? "unknown") + " seeders"));
+            } catch (error) { paragraph(error.message); }
+            finally { button.disabled = false; }
+          });
+          diagnosis.append(button);
+        });
+        if (data.requestReview) {
+          paragraph(data.requestReview);
+          const button = document.createElement("button");
+          button.textContent = "Keep existing monitoring and track the current request history";
+          button.addEventListener("click", async () => {
+            button.disabled = true;
+            try { paragraph((await diagnosticRequest("/rebaseline", {confirm:true})).message); }
+            catch (error) { paragraph(error.message); button.disabled = false; }
+          });
+          diagnosis.append(button);
+        }
+      } catch (error) { diagnosis.replaceChildren(); paragraph(error.message); }
     });
 
     async function tick() {

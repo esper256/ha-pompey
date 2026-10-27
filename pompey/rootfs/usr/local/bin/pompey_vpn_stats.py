@@ -1,244 +1,32 @@
-#!/usr/bin/env python3
-"""Sample wg0 byte counters into status.json for the wait-screen graph.
+"""Read tunnel counters for the controller's live status snapshot."""
 
-Reads /proc/net/dev (or the fake-VPN netns). Does not change boot step fields
-unless search is already wired and a later writer rewound the installer bar —
-then restore the dashboard. Shares the status.json lock with pompey_status.py.
-"""
-from __future__ import annotations
-
-import fcntl
-import json
 import os
-import subprocess
-import sys
+from pathlib import Path
 import time
 
-STEPS = (
-    ("vpn", "VPN tunnel"),
-    ("fetch", "Download household UI and engines"),
-    ("start", "Start hidden engines"),
-    ("wire", "Connect search to your library"),
-    ("ready", "Ready"),
-)
 
-
-def status_path() -> str:
-    return os.environ.get("POMPEY_STATUS") or os.path.join(
-        os.environ.get("POMPEY_READY", "/tmp/pompey"), "status.json"
-    )
-
-
-def ready_dir() -> str:
-    return os.environ.get("POMPEY_READY", "/tmp/pompey")
-
-
-def is_wired() -> bool:
-    return os.path.isfile(os.path.join(ready_dir(), "wired"))
-
-
-def iface_name() -> str:
-    return os.environ.get("WG_IFACE", "wg0")
-
-
-def parse_net_dev(text: str, iface: str):
-    for raw in text.splitlines():
-        if ":" not in raw:
-            continue
-        name, rest = raw.split(":", 1)
-        if name.strip() != iface:
-            continue
-        cols = rest.split()
-        if len(cols) < 9:
-            return None
-        try:
-            return int(cols[0]), int(cols[8])
-        except ValueError:
-            return None
-    return None
-
-
-def read_host_dev(iface: str):
-    path = os.environ.get("POMPEY_NET_DEV", "/proc/net/dev")
-    try:
-        with open(path, encoding="utf-8") as fh:
-            text = fh.read()
-    except OSError:
-        return None
-    return parse_net_dev(text, iface)
-
-
-def read_netns_dev(iface: str):
-    ns = os.environ.get("POMPEY_FAKE_VPN_NETNS", "pompey-dev")
-    inner = ["ip", "netns", "exec", ns, "cat", "/proc/net/dev"]
-    cmd = inner if os.geteuid() == 0 else ["sudo", "-n", *inner]
-    try:
-        proc = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=2, check=False
-        )
-    except (OSError, subprocess.TimeoutExpired):
-        return None
-    if proc.returncode != 0:
-        return None
-    return parse_net_dev(proc.stdout, iface)
-
-
-def read_iface_bytes(iface: str):
-    got = read_host_dev(iface)
-    if got is not None:
-        return got
-    if os.environ.get("POMPEY_FAKE_VPN") == "1":
-        return read_netns_dev(iface)
-    return None
-
-
-def lock_status(path: str) -> int:
-    directory = os.path.dirname(path) or "."
-    os.makedirs(directory, exist_ok=True)
-    fd = os.open(path + ".lock", os.O_CREAT | os.O_RDWR, 0o600)
-    fcntl.flock(fd, fcntl.LOCK_EX)
-    return fd
-
-
-def debug_enabled() -> bool:
-    return os.environ.get("POMPEY_DEBUG", "").strip().lower() in {
-        "1",
-        "true",
-        "yes",
-        "on",
-    }
-
-
-def dashboard_status() -> dict:
-    seerr = int(os.environ.get("SEERR_PORT", "5055"))
-    sources = int(os.environ.get("PROWLARR_PORT", "9696"))
-    return {
-        "updated": int(time.time()),
-        "step": "ready",
-        "label": "Ready",
-        "percent": 100,
-        "error": "",
-        "need_vpn": False,
-        "search": True,
-        "search_port": seerr,
-        "sources_port": sources,
-        "debug": debug_enabled(),
-        "steps": [{"id": i, "label": lab, "state": "done"} for i, lab in STEPS],
-    }
-
-
-def load_status() -> dict | None:
-    path = status_path()
-    if not os.path.isfile(path) or os.path.getsize(path) <= 0:
-        return None
-    try:
-        with open(path, encoding="utf-8") as fh:
-            data = json.load(fh)
-    except (OSError, json.JSONDecodeError, TypeError):
-        return None
-    return data if isinstance(data, dict) else None
-
-
-def save_status(data: dict) -> None:
-    path = status_path()
-    directory = os.path.dirname(path) or "."
-    tmp = path + ".vpn.tmp"
-    payload = json.dumps(data, indent=2) + "\n"
-    last: OSError | None = None
-    for _ in range(5):
-        try:
-            os.makedirs(directory, exist_ok=True)
-            with open(tmp, "w", encoding="utf-8") as fh:
-                fh.write(payload)
-            os.replace(tmp, path)
-            return
-        except OSError as exc:
-            last = exc
-            time.sleep(0.02)
-    if last is not None:
-        raise last
-
-
-def heal_dashboard(data: dict) -> dict:
-    """Once search is wired, do not keep an installer playhead on the sidebar."""
-    if not is_wired() or data.get("need_vpn"):
-        return data
-    data["search"] = True
-    if data.get("step") != "ready":
-        data["step"] = "ready"
-        data["label"] = "Ready"
-        data["percent"] = 100
-        data["error"] = ""
-        for item in data.get("steps") or []:
-            if isinstance(item, dict):
-                item["state"] = "done"
-    return data
-
-
-def sample() -> dict:
-    iface = iface_name()
-    got = read_iface_bytes(iface)
-    now_ms = int(time.time() * 1000)
-    if got is None:
-        return {
-            "iface": iface,
-            "up": False,
-            "rx_bytes": 0,
-            "tx_bytes": 0,
-            "sample_ms": now_ms,
-        }
-    rx, tx = got
-    return {
+def sample():
+    iface = os.environ.get("WG_IFACE", "wg0")
+    result = {
         "iface": iface,
-        "up": True,
-        "rx_bytes": rx,
-        "tx_bytes": tx,
-        "sample_ms": now_ms,
+        "up": False,
+        "rx_bytes": 0,
+        "tx_bytes": 0,
+        "sample_ms": int(time.time() * 1000),
     }
-
-
-def write_once() -> int:
-    path = status_path()
-    fd = lock_status(path)
     try:
-        data = load_status()
-        if data is None:
-            if not is_wired():
-                return 0
-            data = dashboard_status()
-        else:
-            data = heal_dashboard(data)
-        data["debug"] = debug_enabled()
-        data["vpn"] = sample()
-        try:
-            save_status(data)
-        except OSError:
-            return 0
-        return 0
-    finally:
-        try:
-            fcntl.flock(fd, fcntl.LOCK_UN)
-        finally:
-            os.close(fd)
-
-
-def loop() -> int:
-    interval = float(os.environ.get("POMPEY_VPN_STATS_INTERVAL", "1"))
-    if interval < 0.2:
-        interval = 0.2
-    while True:
-        write_once()
-        time.sleep(interval)
-
-
-def main(argv: list[str]) -> int:
-    if argv[1:] == ["loop"]:
-        return loop()
-    if argv[1:]:
-        print("usage: pompey_vpn_stats.py [loop]", file=sys.stderr)
-        return 2
-    return write_once()
-
-
-if __name__ == "__main__":
-    raise SystemExit(main(sys.argv))
+        for line in Path("/proc/net/dev").read_text().splitlines():
+            name, sep, values = line.partition(":")
+            if sep and name.strip() == iface:
+                fields = values.split()
+                result.update(
+                    rx_bytes=int(fields[0]),
+                    tx_bytes=int(fields[8]),
+                    up=(
+                        Path(os.environ.get("POMPEY_READY", "/tmp/pompey")) / "vpn-up"
+                    ).exists(),
+                )
+                break
+    except (OSError, ValueError, IndexError):
+        pass
+    return result

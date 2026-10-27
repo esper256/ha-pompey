@@ -10,11 +10,6 @@ if [[ -z "${gateway}" || "${gateway}" == "null" ]]; then
   bashio::log.info "VPN port forwarding disabled (no NAT-PMP gateway configured)"
   exec sleep infinity
 fi
-if [[ "${POMPEY_FAKE_VPN:-}" == "1" ]]; then
-  bashio::log.info "Fake VPN: skip VPN NAT-PMP"
-  exec sleep infinity
-fi
-
 until [[ -f "${POMPEY_READY}/vpn-up" ]]; do
   sleep 2
 done

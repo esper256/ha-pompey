@@ -1,261 +1,64 @@
 #!/usr/bin/env python3
-"""Write household-facing status for the wait screen.
-
-This is a report, not an installer playhead. Opening Ingress only reads
-status.json — it must not look like boot is still running because a later
-service called pompey_status.py fetch/start/wire. Once search is wired, keep
-the dashboard (Open search + VPN graph) unless VPN is explicitly needed
-again.
-"""
-from __future__ import annotations
+"""Initial setup status. Once running, the controller owns live status."""
 
 import fcntl
-import json
 import os
+from pathlib import Path
 import sys
 import time
+from pompey_runtime import atomic_json
 
-STATUS_PATH = os.environ.get("POMPEY_STATUS", "")
-READY = os.environ.get("POMPEY_READY", "/tmp/pompey")
-if not STATUS_PATH:
-    STATUS_PATH = os.path.join(READY, "status.json")
-
-STEPS = (
-    ("vpn", "VPN tunnel"),
-    ("fetch", "Download apps"),
-    ("start", "Start apps"),
-    ("wire", "Connect search to your library"),
-    ("ready", "Ready"),
-)
-
-
-def wired_path() -> str:
-    return os.path.join(READY, "wired")
-
-
-def search_is_up() -> bool:
-    return os.path.isfile(wired_path())
-
-
-def ports() -> tuple[int, int]:
-    return (
-        int(os.environ.get("SEERR_PORT", "5055")),
-        int(os.environ.get("PROWLARR_PORT", "9696")),
-    )
-
-
-def debug_enabled() -> bool:
-    return os.environ.get("POMPEY_DEBUG", "").strip().lower() in {
-        "1",
-        "true",
-        "yes",
-        "on",
-    }
-
-
-def default_status(*, search: bool) -> dict:
-    seerr, sources = ports()
-    if search:
-        return {
-            "updated": 0,
-            "step": "ready",
-            "label": "Ready",
-            "percent": 100,
-            "error": "",
-            "need_vpn": False,
-            "search": True,
-            "search_port": seerr,
-            "sources_port": sources,
-            "debug": debug_enabled(),
-            "steps": [{"id": i, "label": lab, "state": "done"} for i, lab in STEPS],
-        }
-    return {
-        "updated": 0,
-        "step": "vpn",
-        "label": "Starting",
-        "percent": 5,
-        "error": "",
-        "search": False,
-        "search_port": seerr,
-        "sources_port": sources,
-        "debug": debug_enabled(),
-        "steps": [{"id": i, "label": lab, "state": "pending"} for i, lab in STEPS],
-    }
+READY = Path(os.environ.get("POMPEY_READY", "/tmp/pompey"))
+STATUS_PATH = Path(os.environ.get("POMPEY_STATUS", str(READY / "status.json")))
 
 
 def lock_status():
-    directory = os.path.dirname(STATUS_PATH) or "."
-    os.makedirs(directory, exist_ok=True)
-    fd = os.open(STATUS_PATH + ".lock", os.O_CREAT | os.O_RDWR, 0o600)
+    STATUS_PATH.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(str(STATUS_PATH) + ".lock", os.O_CREAT | os.O_RDWR, 0o600)
     fcntl.flock(fd, fcntl.LOCK_EX)
     return fd
 
 
-def load() -> tuple[dict, bool]:
-    """Return (status, dirty). dirty means the file was missing or unreadable."""
-    search = search_is_up()
-    if os.path.isfile(STATUS_PATH) and os.path.getsize(STATUS_PATH) > 0:
-        try:
-            with open(STATUS_PATH, encoding="utf-8") as fh:
-                data = json.load(fh)
-            if isinstance(data, dict):
-                if search:
-                    data["search"] = True
-                return data, False
-        except (OSError, json.JSONDecodeError, TypeError):
-            pass
-    return default_status(search=search), True
+def default_status(*, search=False):
+    return {
+        "updated": time.time(),
+        "step": "start",
+        "label": "Starting apps",
+        "percent": 20,
+        "error": "",
+        "need_vpn": False,
+        "search": search,
+        "search_port": int(os.environ.get("SEERR_PORT", "5055")),
+        "sources_port": int(os.environ.get("PROWLARR_PORT", "9696")),
+        "debug": os.environ.get("POMPEY_DEBUG", "0") == "1",
+        "steps": [
+            {"id": name, "label": label, "state": "pending"}
+            for name, label in [
+                ("start", "Start apps"),
+                ("wire", "Connect search to your library"),
+                ("ready", "Ready"),
+            ]
+        ],
+    }
 
 
-def is_dashboard(data: dict) -> bool:
-    try:
-        percent = int(data.get("percent") or 0)
-    except (TypeError, ValueError):
-        percent = 0
-    return (
-        data.get("step") == "ready"
-        and bool(data.get("search"))
-        and not data.get("need_vpn")
-        and percent == 100
+def main():
+    if (READY / "health.json").exists():
+        return
+    data = default_status()
+    data.update(
+        step=sys.argv[1],
+        label=sys.argv[2],
+        percent=int(sys.argv[3]) if len(sys.argv) > 3 else 20,
+        error=" ".join(sys.argv[4:]),
+        need_vpn=os.environ.get("POMPEY_STATUS_NEED_VPN") == "1",
     )
-
-
-def save(data: dict) -> None:
-    directory = os.path.dirname(STATUS_PATH) or "."
-    tmp = STATUS_PATH + ".tmp"
-    payload = json.dumps(data, indent=2) + "\n"
-    last: OSError | None = None
-    for _ in range(5):
-        try:
-            os.makedirs(directory, exist_ok=True)
-            with open(tmp, "w", encoding="utf-8") as fh:
-                fh.write(payload)
-            os.replace(tmp, STATUS_PATH)
-            return
-        except OSError as exc:
-            last = exc
-            time.sleep(0.02)
-    if last is not None:
-        raise last
-
-
-def _need_vpn_flag(current: bool) -> tuple[bool, str]:
-    """Return (need_vpn, explicit) where explicit is 'on', 'off', or ''."""
-    raw = os.environ.get("POMPEY_STATUS_NEED_VPN", "").strip().lower()
-    if raw in {"1", "true", "yes", "on"}:
-        return True, "on"
-    if raw in {"0", "false", "no", "off"}:
-        return False, "off"
-    return current, ""
-
-
-def mark_steps_done(data: dict) -> None:
-    for item in data.get("steps") or []:
-        if isinstance(item, dict):
-            item["state"] = "done"
-
-
-def main(argv: list[str]) -> int:
-    if len(argv) < 3:
-        print("usage: pompey_status.py STEP LABEL [PERCENT] [error message]", file=sys.stderr)
-        return 2
-    step, label = argv[1], argv[2]
-    percent = None
-    error = ""
-    rest = argv[3:]
-    if rest and rest[0].isdigit():
-        percent = int(rest[0])
-        rest = rest[1:]
-    if rest:
-        error = " ".join(rest)
-
-    order = [s[0] for s in STEPS]
-    fd = lock_status()
+    lock = lock_status()
     try:
-        data, dirty = load()
-        need, explicit = _need_vpn_flag(bool(data.get("need_vpn")))
-        wired = search_is_up()
-        vpn = data.get("vpn") if isinstance(data.get("vpn"), dict) else None
-
-        def persist_dashboard() -> None:
-            healed = default_status(search=True)
-            healed["updated"] = int(time.time())
-            if vpn:
-                healed["vpn"] = vpn
-            try:
-                save(healed)
-            except OSError as exc:
-                stamp = time.strftime("%H:%M:%S")
-                print(f"[{stamp}] WARNING: pompey_status.py: could not write {STATUS_PATH}: {exc}", file=sys.stderr)
-
-        # While VPN is missing, ignore engine/wire chatter so the paste
-        # textarea does not flicker. Ready must still land: search can be up
-        # after a paste, and the dashboard must not stay on the installer.
-        if (
-            need
-            and explicit == ""
-            and step != "ready"
-            and not wired
-            and not data.get("search")
-        ):
-            return 0
-        # Search is already wired. Boot-step writers (engines/wire restart,
-        # handshake monitor) must not rewind the dashboard to 30%. If the
-        # file was torn or left on paste, repair it — do not keep candy.
-        if wired and step != "ready" and explicit != "on":
-            if dirty or not is_dashboard(data):
-                persist_dashboard()
-            return 0
-        if explicit == "on":
-            data["need_vpn"] = True
-        elif explicit == "off" or step == "ready" or wired:
-            data["need_vpn"] = False
-        else:
-            data["need_vpn"] = need
-        data["updated"] = int(time.time())
-        data["step"] = step
-        data["label"] = label
-        data["error"] = error
-        ready = bool(step == "ready" and not error) or wired
-        data["search"] = ready
-        seerr, sources = ports()
-        data["search_port"] = seerr
-        data["sources_port"] = sources
-        data["debug"] = debug_enabled()
-        if percent is not None:
-            data["percent"] = max(0, min(100, percent))
-        elif step in order:
-            data["percent"] = int((order.index(step) / (len(order) - 1)) * 100)
-        if ready:
-            data["percent"] = 100
-            mark_steps_done(data)
-        else:
-            seen = False
-            for item in data.get("steps") or []:
-                sid = item.get("id")
-                if sid == step:
-                    item["state"] = "error" if error else ("done" if step == "ready" else "active")
-                    seen = True
-                elif not error and step in order and sid in order and order.index(sid) < order.index(step):
-                    item["state"] = "done"
-                elif step in order and sid in order and order.index(sid) > order.index(step):
-                    item["state"] = "pending"
-            if not seen:
-                data.setdefault("steps", []).append(
-                    {"id": step, "label": label, "state": "error" if error else "active"}
-                )
-        try:
-            save(data)
-        except OSError as exc:
-            stamp = time.strftime("%H:%M:%S")
-            print(f"[{stamp}] WARNING: pompey_status.py: could not write {STATUS_PATH}: {exc}", file=sys.stderr)
-        return 0
+        atomic_json(STATUS_PATH, data)
     finally:
-        try:
-            fcntl.flock(fd, fcntl.LOCK_UN)
-        finally:
-            os.close(fd)
+        os.close(lock)
 
 
 if __name__ == "__main__":
-    raise SystemExit(main(sys.argv))
+    main()

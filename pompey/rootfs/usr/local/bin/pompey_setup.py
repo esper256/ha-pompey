@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """Accept a VPN WireGuard .conf from the wait screen. Do not log secrets."""
+
 from __future__ import annotations
 
 import json
+import subprocess
 import os
 import tempfile
 import sys
@@ -16,6 +18,7 @@ LISTEN = os.environ.get("POMPEY_SETUP_LISTEN", "127.0.0.1:8097")
 def validate_wg(text: str) -> str:
     """Return an error string, or empty if this looks like a VPN WireGuard file."""
     from vpn_config import parse
+
     try:
         parse(text)
         return ""
@@ -62,8 +65,49 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(raw)
 
+    def _diagnostic(self, action, payload=None):
+        proc = subprocess.run(
+            [
+                "s6-setuidgid",
+                "pompey",
+                sys.executable,
+                "/usr/local/bin/pompey_diagnostics.py",
+                action,
+            ],
+            input=json.dumps(payload or {}),
+            capture_output=True,
+            text=True,
+            timeout=150,
+        )
+        self._send(200 if proc.returncode == 0 else 400, json.loads(proc.stdout))
+
+    def do_GET(self):
+        if self.path.split("?")[0] == "/diagnostics":
+            try:
+                self._diagnostic("snapshot")
+            except (OSError, ValueError, subprocess.TimeoutExpired):
+                self._send(503, {"error": "Diagnostics are temporarily unavailable"})
+        else:
+            self._send(404, {"error": "Not found"})
+
     def do_POST(self) -> None:
         path = self.path.split("?", 1)[0]
+        if path in {"/diagnostics/search", "/diagnostics/rebaseline"}:
+            try:
+                length = int(self.headers.get("Content-Length", "0"))
+                if not 0 < length < 4096:
+                    raise ValueError("Invalid request size")
+                payload = json.loads(self.rfile.read(length))
+                if not isinstance(payload, dict):
+                    raise ValueError("Expected an object")
+                if path.endswith("rebaseline") and payload.get("confirm") is not True:
+                    raise ValueError("Confirm that monitoring should be preserved")
+                self._diagnostic(
+                    "rebaseline" if path.endswith("rebaseline") else "search", payload
+                )
+            except (ValueError, OSError, subprocess.TimeoutExpired) as exc:
+                self._send(400, {"error": str(exc)})
+            return
         if path not in {"/setup/vpn", "/vpn"}:
             self._send(404, {"ok": False, "error": "not found"})
             return
@@ -72,7 +116,13 @@ class Handler(BaseHTTPRequestHandler):
         except ValueError:
             length = -1
         if not 0 <= length <= MAX_BODY:
-            self._send(400, {"ok": False, "error": "That file is too large. Paste only the VPN .conf."})
+            self._send(
+                400,
+                {
+                    "ok": False,
+                    "error": "That file is too large. Paste only the VPN .conf.",
+                },
+            )
             return
         raw = self.rfile.read(length) if length else b""
         ctype = (self.headers.get("Content-Type") or "").split(";")[0].strip().lower()
@@ -84,7 +134,9 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(400, {"ok": False, "error": "Could not read that paste."})
                 return
             if not isinstance(payload, dict):
-                self._send(400, {"ok": False, "error": "Expected a configuration object."})
+                self._send(
+                    400, {"ok": False, "error": "Expected a configuration object."}
+                )
                 return
             text = str(payload.get("config") or payload.get("text") or "")
         err = validate_wg(text)

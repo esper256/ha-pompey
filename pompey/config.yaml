@@ -1,6 +1,6 @@
 # https://developers.home-assistant.io/docs/apps/configuration
 name: Pompey
-version: "0.3.7"
+version: "0.4.0"
 slug: pompey
 description: >-
   Search for a movie or TV show. Confirm if we need you. It lands in the
@@ -8,14 +8,18 @@ description: >-
   WireGuard; if the tunnel is down, internet is dropped.
 url: https://github.com/esper256/ha-pompey/tree/main/pompey
 arch:
-  - aarch64
   - amd64
 init: false
 stage: experimental
+breaking_versions:
+  - "0.4.0"
 # Docker start/stop wait. Supervisor Range(min=10, max=300); over 300 skips the app.
 timeout: 300
 startup: application
 boot: auto
+backup: cold
+backup_exclude:
+  - "*/logs/*"
 panel_icon: mdi:magnify
 panel_title: Pompey
 panel_admin: false
@@ -62,6 +66,7 @@ options:
   simultaneous_downloads: 8
   debug: false
   nat_pmp_gateway: ""
+  lan_networks: ""
 schema:
   media_folder: str
   movies_folder: str
@@ -72,3 +77,4 @@ schema:
   simultaneous_downloads: int(1,20)
   debug: bool
   nat_pmp_gateway: str
+  lan_networks: str

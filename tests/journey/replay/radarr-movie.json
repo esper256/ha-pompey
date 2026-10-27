@@ -1,0 +1,94 @@
+{
+  "TmdbId": 1184918,
+  "ImdbId": "tt29623480",
+  "Title": "Pompey Foundation",
+  "Overview": "Synthetic short film for Pompey acceptance.",
+  "OriginalTitle": "Pompey Foundation",
+  "OriginalLanguage": "en",
+  "TitleSlug": "pompey-foundation-1184918",
+  "Runtime": 1,
+  "Popularity": 78.9553,
+  "Year": 2024,
+  "Premier": "2024-09-08T00:00:00Z",
+  "InCinema": "2024-09-12T00:00:00Z",
+  "PhysicalRelease": "2024-12-03T00:00:00Z",
+  "DigitalRelease": "2024-10-14T00:00:00Z",
+  "Images": [],
+  "Ratings": [
+    {
+      "Count": 6748,
+      "Value": 8.31,
+      "Origin": "Tmdb",
+      "Type": "User"
+    }
+  ],
+  "MovieRatings": {
+    "Tmdb": {
+      "Count": 6748,
+      "Value": 8.31,
+      "Type": "User"
+    },
+    "Imdb": {
+      "Count": 240468,
+      "Value": 8.1,
+      "Type": "User"
+    },
+    "Metacritic": {
+      "Count": 0,
+      "Value": 85,
+      "Type": "User"
+    },
+    "RottenTomatoes": {
+      "Count": 0,
+      "Value": 97,
+      "Type": "User"
+    },
+    "Trakt": {
+      "Count": 23383,
+      "Value": 8.64979,
+      "Type": "User"
+    }
+  },
+  "Genres": [
+    "Family",
+    "Animation",
+    "Science Fiction",
+    "Adventure"
+  ],
+  "Keywords": [
+    "3d animation",
+    "adopted son",
+    "aftercreditsstinger",
+    "based on children's book",
+    "based on novel or book",
+    "duringcreditsstinger",
+    "fox",
+    "goose",
+    "island",
+    "kids",
+    "kindness",
+    "nostalgic",
+    "parent child relationship",
+    "robot",
+    "shipwrecked",
+    "woodland animals"
+  ],
+  "AlternativeTitles": [],
+  "Translations": [],
+  "Recommendations": [],
+  "Credits": {
+    "Cast": [],
+    "Crew": []
+  },
+  "Studio": "DreamWorks Animation",
+  "YoutubeTrailerId": "",
+  "Certifications": [
+    {
+      "Country": "US",
+      "Certification": "PG"
+    }
+  ],
+  "Status": null,
+  "Collection": null,
+  "Homepage": ""
+}

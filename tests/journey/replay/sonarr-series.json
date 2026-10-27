@@ -1,0 +1,60 @@
+{
+  "tvdbId": 900001,
+  "title": "Pompey TV",
+  "overview": "Synthetic short episodes for acceptance.",
+  "slug": "pompey-tv",
+  "originalCountry": "usa",
+  "originalLanguage": "eng",
+  "language": "eng",
+  "firstAired": "2024-01-01",
+  "lastAired": "2024-01-02",
+  "tvRageId": 0,
+  "tvMazeId": 0,
+  "tmdbId": 900001,
+  "imdbId": "tt90000001",
+  "malIds": [],
+  "anidbIds": [],
+  "aniListIds": [],
+  "lastUpdated": "2026-10-23T21:36:15Z",
+  "status": "Ended",
+  "runtime": 1,
+  "timeOfDay": {
+    "hours": 21,
+    "minutes": 0
+  },
+  "originalNetwork": "Fixture",
+  "network": "Fixture",
+  "genres": [],
+  "contentRating": "TV-PG",
+  "rating": {
+    "count": 1,
+    "value": "7.0"
+  },
+  "alternativeTitles": [],
+  "actors": [],
+  "images": [],
+  "seasons": [
+    {
+      "seasonNumber": 1,
+      "images": []
+    },
+    {
+      "seasonNumber": 2,
+      "images": []
+    }
+  ],
+  "episodes": [
+    {
+      "tvdbShowId": 900001,
+      "tvdbId": 9000101,
+      "seasonNumber": 1,
+      "episodeNumber": 1,
+      "title": "Synthetic episode",
+      "airDate": "2024-01-01",
+      "airDateUtc": "2024-01-01T00:00:00Z",
+      "runtime": 1,
+      "overview": "Synthetic episode for acceptance.",
+      "image": null
+    }
+  ]
+}

@@ -3,51 +3,10 @@
 set -euo pipefail
 # shellcheck source=/dev/null
 source "$(command -v pompey-env)"
-
-until [[ -f "${POMPEY_READY}/engines-ready" ]]; do
-  sleep 2
-done
-
-NODE="${POMPEY_NODE:-}"
-APP="${POMPEY_ENGINES}/seerr/app"
-
-node_works() {
-  local n="$1"
-  [[ -n "${n}" && -x "${n}" ]] || return 1
-  "${n}" -e 'process.exit(0)' >/dev/null 2>&1
-}
-
-if ! node_works "${NODE}"; then
-  NODE="${POMPEY_ENGINES}/seerr/usr/local/bin/node"
-fi
-if ! node_works "${NODE}"; then
-  NODE="$(find "${POMPEY_ENGINES}/seerr" -type f -name node -perm -111 2>/dev/null | head -n1 || true)"
-fi
-# Alpine image node is musl; this Ubuntu VM needs a glibc node (host /usr/bin/node).
-if ! node_works "${NODE}"; then
-  NODE="$(command -v node || true)"
-fi
-if ! node_works "${NODE}" || [[ ! -d "${APP}" ]]; then
-  bashio::exit.nok "Seerr unpack missing a working node or /app"
-fi
-
-mkdir -p "${POMPEY_CONFIG}/seerr"
-# Seerr banners "volume mount was not configured" when a DOCKER sentinel
-# exists. The official image uses that file so a bind-mount hides it.
-# /config is Home Assistant addon_config and already persists. 0.2.16
-# planted the sentinel; remove leftovers and do not recreate it.
-rm -f "${POMPEY_CONFIG}/seerr/DOCKER"
-ln -sfn "${POMPEY_CONFIG}/seerr" "${APP}/config"
-export NODE_ENV=production
-export LOG_LEVEL=info
-export PORT="${SEERR_PORT:-5055}"
-# Published on the Home Assistant host. Binding only localhost would
-# make the mapped port refuse LAN clients. Plex is not this process.
-export HOST=0.0.0.0
-export BIND_IP=0.0.0.0
-export CONFIG_DIRECTORY="${POMPEY_CONFIG}/seerr"
-cd "${APP}"
+export NODE_ENV=production LOG_LEVEL=info HOST=0.0.0.0 BIND_IP=0.0.0.0
+export PORT="${SEERR_PORT:-5055}" CONFIG_DIRECTORY="${POMPEY_CONFIG}/seerr"
+cd "${POMPEY_ENGINES}/seerr/app"
 pompey-log start "Seerr"
-exec > >(pompey-log prefix "Seerr")
+exec > >(s6-setuidgid pompey pompey-log prefix "Seerr")
 exec 2>&1
-exec "${NODE}" dist/index.js
+exec s6-setuidgid pompey "${POMPEY_ENGINES}/seerr/usr/local/bin/node" dist/index.js

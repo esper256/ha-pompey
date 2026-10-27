@@ -2,8 +2,17 @@
 
 ## Unreleased
 
-- Reject TV releases that lack the original language. Sonarr Default, Anime, and Max now refuse them (for example an English-only anime dub), reversing the 0.3.7 preference that kept dubbed releases possible. Dual-audio releases that include the original language stay allowed, and season packs are preferred again.
-- Reset the minimum custom-format score to 0 on existing Sonarr installs.
+## 0.4.0
+
+- Reject TV releases that lack the original language while allowing dual audio that includes it, prefer season packs, and explicitly set Sonarr’s minimum custom-format score to 0.
+
+- Target fresh amd64 installations; migration from earlier layouts is not supported.
+- Bundle pinned current stable applications and quality resources during the Supervisor build. Remove runtime application downloads and replacement/rollback machinery.
+- Run applications and household maintenance as one unprivileged user; keep VPN setup privileged and engine DNS blocked outside the tunnel. Local applications start without a fresh VPN handshake.
+- Use Home Assistant cold backups for recovery, and pause request closeout when search history appears reset or bulk-deleted.
+- Add household diagnostics with explicit release searches and real Arr rejection reasons.
+- Verify real movie and TV imports, selected seasons, language/anime preferences, quality profiles, unwanted-file cleanup, request deletion, same-container restart and configured-clone preservation. Keep automatic dependency promotion disabled pending broader and forward-upgrade coverage.
+- Known issue: an interrupted download can remain stalled after VPN connectivity recovers. Local applications remain available and the kill switch stays active. The strict recovery scenario runs as advisory CI for this release; other acceptance and packet checks remain required.
 
 ## 0.3.7
 
