@@ -119,9 +119,6 @@ jobs:
     if: github.event_name == 'workflow_dispatch' && inputs.candidate_pr != '' && needs.required.result == 'success' && needs.acceptance.result == 'success'
     runs-on: ubuntu-24.04
     timeout-minutes: 5
-    # A real HAOS installation remains a release gate. Configure required
-    # reviewers on this environment; the verifier refuses an unprotected one.
-    environment: haos-release
     permissions:
       actions: read
       contents: write

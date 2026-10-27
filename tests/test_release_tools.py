@@ -8,24 +8,44 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
-from promote_candidate import validate, validate_contents, validate_release_gate, MANIFEST
+from promote_candidate import validate, validate_contents, validate_acceptance, MANIFEST
 from release_baseline import choose, FALLBACK
 from release_metadata import next_patch
 
 
 class PromotionPolicy(unittest.TestCase):
-    def test_release_requires_protected_manual_haos_gate(self):
-        validate_release_gate({"protection_rules": [{"type": "required_reviewers", "reviewers": [{"id": 1}]}]})
-        for environment in [{}, {"protection_rules": []}, {"protection_rules": [{"type": "required_reviewers", "reviewers": []}]}]:
-            with self.assertRaises(ValueError):
-                validate_release_gate(environment)
-
     def setUp(self):
         self.pr = {"user": {"login": "github-actions[bot]"},
                    "head": {"repo": {"full_name": "esper256/ha-pompey"}, "ref": "codex/upstream-sonarr", "sha": "accepted"},
                    "base": {"ref": "main"}, "state": "open", "draft": False}
         self.files = [{"filename": "pompey/rootfs/usr/share/pompey/engines.json", "status": "modified"}]
         self.protection = {"strict": True, "checks": [{"context": "CI required", "app_id": 15368}]}
+        self.run = {"event": "workflow_dispatch", "head_sha": "accepted",
+                    "path": ".github/workflows/test.yaml", "run_attempt": 2}
+        self.jobs = [{"name": name, "status": "completed", "conclusion": "success"}
+                     for name in ["Application integration and network isolation", "CI required"]]
+
+    def test_acceptance_requires_the_exact_candidate_and_workflow_attempt(self):
+        validate_acceptance(self.run, self.jobs, "accepted", 2)
+        for key, value in [("event", "pull_request"), ("head_sha", "another-candidate"),
+                           ("path", ".github/workflows/another.yaml"), ("run_attempt", 1)]:
+            with self.subTest(field=key), self.assertRaises(ValueError):
+                validate_acceptance({**self.run, key: value}, self.jobs, "accepted", 2)
+
+    def test_failed_incomplete_or_missing_checks_cannot_authorize_publication(self):
+        for index in range(len(self.jobs)):
+            for state in ["failure", "cancelled", "skipped", None]:
+                jobs = copy.deepcopy(self.jobs)
+                jobs[index]["conclusion"] = state
+                with self.subTest(job=index, conclusion=state), self.assertRaises(ValueError):
+                    validate_acceptance(self.run, jobs, "accepted", 2)
+            jobs = copy.deepcopy(self.jobs)
+            jobs[index]["status"] = "in_progress"
+            with self.assertRaises(ValueError):
+                validate_acceptance(self.run, jobs, "accepted", 2)
+        for jobs in [self.jobs[:1], self.jobs[1:], self.jobs + [self.jobs[0]]]:
+            with self.assertRaises(ValueError):
+                validate_acceptance(self.run, jobs, "accepted", 2)
 
     def test_only_current_protected_bot_candidate_is_accepted(self):
         validate(self.pr, self.files, "accepted", {"behind_by": 0}, self.protection)

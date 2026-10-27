@@ -8,7 +8,7 @@
 - Detect unavailable or unwritable media storage, pause affected applications and resume after access returns. Preserve known network-mount expectations across restarts.
 - Retain the first actionable source error while summarizing repeated log warnings.
 - Split focused PR tests from broader release acceptance; add storage, first-boot VPN outage and real previous-release upgrade checks.
-- Prepare isolated dependency-update PR discovery and guarded source releases. Activation requires repository settings, required CI and the manual HAOS release gate.
+- Prepare isolated dependency-update PR discovery and guarded source releases. Release approval uses required automated integration and forward-upgrade acceptance without a manual HAOS gate; repository CI protection and read-only default workflow permissions remain enforced.
 
 ## 0.4.2
 

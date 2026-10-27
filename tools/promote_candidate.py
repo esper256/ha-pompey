@@ -14,10 +14,17 @@ ALLOWED = {"pompey/rootfs/usr/share/pompey/engines.json", "pompey/config.yaml", 
 MANIFEST = "pompey/rootfs/usr/share/pompey/engines.json"
 
 
-def validate_release_gate(environment):
-    if not any(rule.get("type") == "required_reviewers" and rule.get("reviewers")
-               for rule in environment.get("protection_rules", [])):
-        raise ValueError("The haos-release environment requires a manual HAOS reviewer gate")
+def validate_acceptance(run, jobs, sha, attempt):
+    """Only successful release acceptance for this exact workflow run may publish."""
+    if (run.get("event") != "workflow_dispatch" or run.get("head_sha") != sha
+            or run.get("path") != ".github/workflows/test.yaml"
+            or run.get("run_attempt") != attempt):
+        raise ValueError("Release acceptance must match the exact candidate workflow attempt")
+    for name in ["Application integration and network isolation", "CI required"]:
+        matches = [job for job in jobs if job.get("name") == name]
+        if (len(matches) != 1 or matches[0].get("status") != "completed"
+                or matches[0].get("conclusion") != "success"):
+            raise ValueError("Required automated acceptance did not pass: " + name)
 
 
 def validate_contents(component, before, after, version):
@@ -87,8 +94,15 @@ def main():
     if os.environ.get("GITHUB_REPOSITORY") != repo:
         raise ValueError("Promotion is disabled for this repository")
     base = "repos/" + repo
-    validate_release_gate(api(base + "/environments/haos-release"))
     sha = os.environ["GITHUB_SHA"]
+    run_id = os.environ.get("GITHUB_RUN_ID", "")
+    attempt = os.environ.get("GITHUB_RUN_ATTEMPT", "")
+    if not re.fullmatch(r"[1-9][0-9]*", run_id) or not re.fullmatch(r"[1-9][0-9]*", attempt):
+        raise ValueError("Promotion requires an identified GitHub Actions workflow attempt")
+    run_path = base + "/actions/runs/" + run_id
+    run = api(run_path)
+    jobs = api(run_path + "/attempts/" + attempt + "/jobs?per_page=100")["jobs"]
+    validate_acceptance(run, jobs, sha, int(attempt))
     pr = api(base + "/pulls/" + number)
     files = api(base + "/pulls/" + number + "/files?per_page=100")
     comparison = api(base + "/compare/main..." + sha)
