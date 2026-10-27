@@ -109,6 +109,22 @@ class PromotionPolicy(unittest.TestCase):
 
 
 class ReleasePlanning(unittest.TestCase):
+    def test_effective_rules_require_the_actions_check_in_the_same_strict_policy(self):
+        from release_protection import protection_from_rules
+        rule = {"type": "required_status_checks", "parameters": {
+            "strict_required_status_checks_policy": True,
+            "required_status_checks": [{"context": "CI required", "integration_id": 15368}]}}
+        self.assertTrue(protection_from_rules([rule])["strict"])
+        loose = copy.deepcopy(rule)
+        loose["parameters"]["strict_required_status_checks_policy"] = False
+        foreign = copy.deepcopy(rule)
+        foreign["parameters"]["required_status_checks"][0]["integration_id"] = 1
+        missing_app = copy.deepcopy(rule)
+        missing_app["parameters"]["required_status_checks"][0].pop("integration_id")
+        for rules in [[], [loose], [foreign], [missing_app], [loose, foreign], [{"type": "pull_request"}]]:
+            with self.subTest(rules=rules), self.assertRaises(ValueError):
+                protection_from_rules(rules)
+
     def test_merge_gate_rejects_changed_head_base_tree_and_foreign_repo(self):
         plan = dict(kind="release", head="head", base="base", revision="merge", tree="tree")
         pr = {"head": {"sha": "head", "repo": {"full_name": "esper256/ha-pompey"}},

@@ -2,7 +2,7 @@
 
 **Current implementation, with illustrative data.** These screenshots were captured on October 27, 2026 from the product HTML, CSS and JavaScript for 0.5.0-beta.2. Titles, counts, failures, timestamps and API responses are synthetic; bundled app versions come from the manifest. They demonstrate the interface, not production connectivity or release acceptance.
 
-Home Assistant reads `main`, so merging a version change offers that app update independently of a GitHub tag. The maintainer approved this interface and authorized stable **0.5.0** after full integration acceptance, including the previous-release upgrade. The screenshots retain the beta version label from their capture; the stable candidate uses the same interface.
+Home Assistant reads `main`, so merging a version change offers that app update independently of a GitHub tag. The maintainer approved this interface and stable [0.5.0](https://github.com/esper256/ha-pompey/releases/tag/v0.5.0) shipped after full integration acceptance, including the previous-release upgrade. The screenshots retain the beta version label from their capture; the stable release uses the same interface.
 
 ## Overview
 
