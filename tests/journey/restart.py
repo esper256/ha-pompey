@@ -1,10 +1,21 @@
 """A clean two-boot protocol for the same container, not a scenario retry."""
 
 import json
+import hashlib
 from pathlib import Path
 from support import save_json
 
 PLAN = Path("/data/pompey-test/restart.json")
+
+
+def source_signature(client):
+    sources = [
+        {"id": row["id"], "name": row["name"], "enable": row["enable"],
+         "fields": {field["name"]: field.get("value") for field in row["fields"]
+                    if field["name"] in {"baseUrl", "apiPath"}}}
+        for row in client.prow("GET", "/indexer")
+    ]
+    return hashlib.sha256(json.dumps(sorted(sources, key=lambda row: row["id"]), sort_keys=True).encode()).hexdigest()
 
 
 def pending_plan():
@@ -31,6 +42,7 @@ def prepare(client, invariants, remaining):
         "pendingPrefixes": [c["prefix"] for c in pending],
         "remaining": remaining,
         "completedTitles": len({r["prefix"] for r in invariants.background.ledger}),
+        "sourceSignature": source_signature(client),
     }
     save_json(PLAN, plan)
     evidence.data.update(restartRequired=True, phaseComplete=True)
@@ -38,6 +50,10 @@ def prepare(client, invariants, remaining):
 
 
 def finish(client, plan):
+    assert source_signature(client) == plan["sourceSignature"], "Configured indexer identity or address changed"
+    # Fulfilment after restart/upgrade goes through the same real Prowlarr
+    # source and authenticated fixture. API masking of secret fields is not a
+    # durable credential representation to compare between application versions.
     save_json(PLAN, {**plan, "phase": "completed"})
     client.evidence.data["containerRestart"] = {
         "sameContainer": True,

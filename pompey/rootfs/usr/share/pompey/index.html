@@ -284,22 +284,15 @@
       color: var(--muted);
     }
 
-    #diagnostic-panel {
-      margin-top: 1.35rem;
-      border: 1px solid var(--line);
-      border-radius: 0.45rem;
-      background: #0c1018;
-      overflow-wrap: anywhere;
-      font-family: ui-sans-serif, system-ui, sans-serif;
-    }
-
-    #diagnostic-panel summary {
-      padding: 0.85rem 0.95rem;
-      cursor: pointer;
-      font-size: 0.95rem;
-    }
-
-    .diagnostic-body { padding: 0 0.95rem 0.95rem; }
+    .dashboard-tabs { display: flex; gap: .35rem; margin-top: 1.3rem; border-bottom: 1px solid var(--line); }
+    .dashboard-tabs button { flex: 1; min-width: 0; padding: .75rem .35rem; border: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--muted); font: .9rem ui-sans-serif, system-ui, sans-serif; cursor: pointer; }
+    .dashboard-tabs button:hover { color: var(--fg); background: #0c1018; }
+    .dashboard-tabs button[aria-selected="true"] { color: var(--focus); border-bottom-color: var(--focus); }
+    .dashboard-tabs button:focus-visible { outline: 2px solid var(--focus); outline-offset: -3px; }
+    .dashboard-view { margin-top: 1.1rem; }
+    .dashboard-view:focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; }
+    #overview-panel > #ecosystem { margin-top: 0; }
+    .diagnostic-body { padding: .95rem; }
     .diagnostic-body p { margin-bottom: 0.65rem; }
     #diagnostics { max-height: 24rem; overflow: auto; }
     #diagnostic-panel button {
@@ -318,6 +311,32 @@
     }
     #diagnostic-panel button:disabled { opacity: 0.6; cursor: wait; }
     #diagnostic-panel :focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; }
+    .dashboard-panel { margin-top: 1.1rem; border: 1px solid var(--line); border-radius: .45rem; background: #0c1018; font-family: ui-sans-serif, system-ui, sans-serif; overflow-wrap: anywhere; }
+    .dashboard-panel summary { padding: .85rem .95rem; cursor: pointer; font-size: .95rem; }
+    .panel-body { padding: .95rem; }
+    #ecosystem { padding: .9rem; }
+    .ecosystem-grid { display: grid; grid-template-columns: 1fr 1fr; gap: .75rem; }
+    .metric { text-align: left; color: var(--fg); background: transparent; border: 0; border-left: 2px solid var(--line); padding: .2rem .65rem; cursor: pointer; }
+    .metric strong { display: block; font-size: 1.1rem; font-weight: 500; line-height: 1.5; }
+    .metric span, .metric small { display: block; color: var(--muted); font-size: .75rem; line-height: 1.5; }
+    .metric.warning { border-color: var(--err); }
+    .metric.warning strong { color: var(--err); }
+    .metric.stale strong { color: var(--muted); }
+    #overview-note { margin-top: .65rem; font-size: .8rem; }
+    .request-card { border-top: 1px solid var(--line); padding: .8rem 0; }
+    .request-card summary { padding: .2rem 0; font-size: .9rem; }
+    .request-card p { margin: .4rem 0; font-size: .85rem; }
+    .request-card .request-phase { color: var(--fg); font-size: .8rem; margin-left: .4rem; }
+    .native-link, .dashboard-panel button { display: inline-block; padding: .4rem .65rem; margin: .4rem .4rem 0 0; border: 1px solid var(--line); border-radius: .35rem; background: #1a2230; color: var(--fg); font: inherit; font-size: .8rem; text-decoration: none; cursor: pointer; }
+    .dashboard-panel table { width: 100%; border-collapse: collapse; font-size: .8rem; overflow-wrap: anywhere; }
+    .dashboard-panel td { padding: .5rem 0; border-bottom: 1px solid var(--line); }
+    .dashboard-panel td:last-child { text-align: right; padding-left: .7rem; }
+    .dashboard-panel h2 { font-size: .9rem; margin: 1rem 0 .4rem; font-weight: 500; }
+    .dashboard-panel .panel-title { margin: 0 0 .65rem; font-size: 1rem; }
+    .dashboard-panel :focus-visible, .metric:focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; }
+    .check-warning { color: var(--err); }
+    #setup-note, #support-note { margin-top: .8rem; font-size: .8rem; }
+    @media (max-width: 390px) { body { padding: 1rem; } .ecosystem-grid { gap: .65rem .25rem; } }
   </style>
 </head>
 <body>
@@ -336,48 +355,68 @@
       <a id="open-sources-btn" href="#" target="_blank" rel="noopener">Manage indexers</a>
       <p class="hint" id="open-search-url"></p>
     </div>
-    <section id="debug-consoles" hidden aria-label="Troubleshooting">
-      <div class="debug-head">Troubleshooting</div>
-      <div class="debug-links">
-        <a id="debug-radarr-btn" href="#" target="_blank" rel="noopener">Radarr</a>
-        <a id="debug-sonarr-btn" href="#" target="_blank" rel="noopener">Sonarr</a>
-        <a id="debug-qbit-btn" href="#" target="_blank" rel="noopener">qBittorrent</a>
-      </div>
-    </section>
-    <section id="vpn-bw" hidden aria-label="VPN tunnel bandwidth">
-      <div class="vpn-head">
-        <span>VPN</span>
-        <span class="vpn-iface" id="vpn-iface">Connected</span>
-      </div>
-      <div class="vpn-rates">
-        <div class="vpn-col down">
-          <div class="dir">Download</div>
-          <div class="rate" id="vpn-down-rate">—</div>
-          <div class="total" id="vpn-down-total">0 B received</div>
-        </div>
-        <div class="vpn-col up">
-          <div class="dir">Upload</div>
-          <div class="rate" id="vpn-up-rate">—</div>
-          <div class="total" id="vpn-up-total">0 B sent</div>
-        </div>
-      </div>
-      <svg id="vpn-graph" viewBox="0 0 320 68" preserveAspectRatio="none" aria-hidden="true">
-        <path id="vpn-down-fill" fill="rgba(212,175,55,0.16)"></path>
-        <path id="vpn-down-line" fill="none" stroke="#d4af37" stroke-width="1.6"></path>
-        <path id="vpn-up-line" fill="none" stroke="#8aa0b4" stroke-width="1.4"></path>
-      </svg>
-      <p class="vpn-axis" id="vpn-axis">Last two minutes</p>
-    </section>
     <p id="file-hint" hidden>Open Pompey from the Home Assistant sidebar.</p>
     <p class="error" id="err" hidden></p>
-    <details id="diagnostic-panel">
-      <summary>Request and download diagnostics</summary>
-      <div class="diagnostic-body">
-        <p>Review requests, downloads and import messages. Use Search releases to query your indexers and view release rejection reasons.</p>
-        <button id="inspect">Refresh diagnostics</button>
-        <div id="diagnostics" aria-live="polite"></div>
-      </div>
-    </details>
+    <div id="dashboard" hidden>
+      <nav id="dashboard-tabs" class="dashboard-tabs" role="tablist" aria-label="Pompey sections">
+        <button id="overview-tab" type="button" role="tab" aria-selected="true" aria-controls="overview-panel">Overview</button>
+        <button id="requests-tab" type="button" role="tab" aria-selected="false" aria-controls="diagnostic-panel" tabindex="-1">Requests</button>
+        <button id="setup-tab" type="button" role="tab" aria-selected="false" aria-controls="setup-panel" tabindex="-1">Setup</button>
+        <button id="status-tab" type="button" role="tab" aria-selected="false" aria-controls="status-panel" tabindex="-1">Status</button>
+      </nav>
+      <aside id="storage-alert" class="dashboard-panel" hidden aria-label="Storage needs attention" role="status"><div class="panel-body"><h2 class="panel-title">Storage needs attention</h2><p id="storage-reason"></p><p id="storage-action"></p></div></aside>
+      <section id="overview-panel" class="dashboard-view" role="tabpanel" aria-labelledby="overview-tab" tabindex="0">
+        <section id="ecosystem" class="dashboard-panel" hidden aria-label="Application overview">
+          <div id="ecosystem-counts" class="ecosystem-grid"></div>
+          <p id="overview-note" hidden></p>
+        </section>
+        <section id="debug-consoles" hidden aria-label="Troubleshooting">
+          <div class="debug-head">Troubleshooting</div>
+          <div class="debug-links">
+            <a id="debug-radarr-btn" href="#" target="_blank" rel="noopener">Radarr</a>
+            <a id="debug-sonarr-btn" href="#" target="_blank" rel="noopener">Sonarr</a>
+            <a id="debug-qbit-btn" href="#" target="_blank" rel="noopener">qBittorrent</a>
+          </div>
+        </section>
+        <section id="vpn-bw" hidden aria-label="VPN tunnel bandwidth">
+          <div class="vpn-head">
+            <span>VPN</span>
+            <span class="vpn-iface" id="vpn-iface">Connected</span>
+          </div>
+          <div class="vpn-rates">
+            <div class="vpn-col down">
+              <div class="dir">Download</div>
+              <div class="rate" id="vpn-down-rate">—</div>
+              <div class="total" id="vpn-down-total">0 B received</div>
+            </div>
+            <div class="vpn-col up">
+              <div class="dir">Upload</div>
+              <div class="rate" id="vpn-up-rate">—</div>
+              <div class="total" id="vpn-up-total">0 B sent</div>
+            </div>
+          </div>
+          <svg id="vpn-graph" viewBox="0 0 320 68" preserveAspectRatio="none" aria-hidden="true">
+            <path id="vpn-down-fill" fill="rgba(212,175,55,0.16)"></path>
+            <path id="vpn-down-line" fill="none" stroke="#d4af37" stroke-width="1.6"></path>
+            <path id="vpn-up-line" fill="none" stroke="#8aa0b4" stroke-width="1.4"></path>
+          </svg>
+          <p class="vpn-axis" id="vpn-axis">Last two minutes</p>
+        </section>
+      </section>
+      <section id="diagnostic-panel" class="dashboard-panel dashboard-view" role="tabpanel" aria-labelledby="requests-tab" tabindex="0" hidden>
+        <div class="diagnostic-body">
+          <h2 class="panel-title">Requests and downloads</h2>
+          <button id="inspect">Refresh diagnostics</button>
+          <div id="diagnostics" aria-live="polite"></div>
+        </div>
+      </section>
+      <section id="setup-panel" class="dashboard-panel dashboard-view" role="tabpanel" aria-labelledby="setup-tab" tabindex="0" hidden>
+        <div class="panel-body"><h2 class="panel-title">Setup and connections</h2><table id="setup-checks" aria-label="Connection checks"></table><p id="setup-note"></p><button id="setup-recheck">Check again</button></div>
+      </section>
+      <section id="status-panel" class="dashboard-panel dashboard-view" role="tabpanel" aria-labelledby="status-tab" tabindex="0" hidden>
+        <div class="panel-body"><h2 class="panel-title">Application status</h2><p id="bundle-version"></p><table id="application-versions" aria-label="Bundled applications"></table><h2>Last successful maintenance</h2><table id="maintenance-status" aria-label="Maintenance status"></table><details><summary>Quality resources</summary><p id="quality-resources"></p></details><p id="support-note">Home Assistant Logs include Pompey and application output. Review logs for private information before sharing them.</p></div>
+      </section>
+    </div>
   </main>
   <script>
     const fileHint = document.getElementById("file-hint");
@@ -411,6 +450,7 @@
     let lastSig = "";
     const vpnHist = [];
     const VPN_KEEP_MS = 120000;
+    let tickBusy = false;
     let vpnLast = null;
     let sawDashboard = false;
     let lastPorts = { search: 5055, sources: 9696 };
@@ -421,6 +461,13 @@
         path = path.replace(/\/[^/]*$/, "/");
       }
       return path;
+    }
+
+    async function timedFetch(url, options = {}, timeout = 8000) {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), timeout);
+      try { return await fetch(url, {...options, signal: controller.signal}); }
+      finally { clearTimeout(timer); }
     }
 
     function isDashboard(data) {
@@ -523,6 +570,8 @@
 
     function render(data) {
       const dashboard = isDashboard(data);
+      document.getElementById("dashboard").hidden = !dashboard;
+      now.hidden = dashboard && data.label === "Ready";
       document.body.classList.toggle("is-ready", dashboard);
       const showForm = isVpnFormVisible(data);
       vpn.hidden = !showForm;
@@ -574,7 +623,7 @@
         openSearch.hidden = false;
         openSearchBtn.href = url;
         openSourcesBtn.href = sourcesUrl;
-        openSearchUrl.textContent = "These interfaces require access to the Home Assistant server through your local network.";
+        openSearchUrl.textContent = "Opens on your local network.";
       } else {
         openSearch.hidden = true;
       }
@@ -617,86 +666,34 @@
     });
 
     const diagnosis = document.getElementById("diagnostics");
-    function paragraph(text) {
-      const p = document.createElement("p");
-      p.textContent = text;
-      diagnosis.append(p);
-    }
     async function diagnosticRequest(path, body) {
-      const response = await fetch(ingressBase() + "diagnostics" + path, {
+      const response = await timedFetch(ingressBase() + "diagnostics" + path, {
         method: body ? "POST" : "GET",
         headers: {"Content-Type":"application/json"},
         ...(body ? {body:JSON.stringify(body)} : {})
-      });
+      }, body ? 150000 : 20000);
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "Diagnostic information is unavailable");
       return data;
     }
-    document.getElementById("inspect").addEventListener("click", async () => {
-      diagnosis.replaceChildren();
-      paragraph("Loading diagnostics…");
-      try {
-        const data = await diagnosticRequest("");
-        diagnosis.replaceChildren();
-        paragraph("Updated " + new Date(data.updated * 1000).toLocaleString());
-        (data.attention || []).forEach(paragraph);
-        (data.requests || []).forEach(request => paragraph(request.title + ": " + request.state + (request.arrLinked ? "" : "; not yet linked to a Radarr or Sonarr entry")));
-        (data.downloads || []).forEach(download => paragraph(
-          (download.title || "Unidentified download") + ": " + (download.state || "Unknown state") +
-          (download.messages?.length ? ". " + download.messages.join("; ") : "") +
-          (download.note ? ". " + download.note : "")
-        ));
-        (data.titles || []).forEach(title => {
-          paragraph(title.title + ": " + (title.hasFile ? "Library location: " + title.path : "Awaiting import") +
-            (title.monitored ? "" : "; monitoring disabled"));
-          const button = document.createElement("button");
-          button.textContent = "Search releases: " + title.title;
-          button.addEventListener("click", async () => {
-            button.disabled = true;
-            try {
-              const result = await diagnosticRequest("/search", {kind:title.kind,id:title.id});
-              paragraph(result.status + " at " + new Date(result.updated * 1000).toLocaleString());
-              if (!result.releases?.length) paragraph("The configured indexers returned no releases.");
-              (result.releases || []).forEach(release => paragraph(release.title + ": " +
-                (release.rejections?.length ? release.rejections.join("; ") : "No rejection reasons reported") +
-                "; reported seeders: " + (release.reportedSeeders ?? "unknown")));
-            } catch (error) { paragraph(error.message); }
-            finally { button.disabled = false; }
-          });
-          diagnosis.append(button);
-        });
-        if (data.requestReview) {
-          paragraph(data.requestReview);
-          paragraph("Existing monitoring is preserved. Future monitoring changes will use the current request history.");
-          const button = document.createElement("button");
-          button.textContent = "Accept current request history";
-          button.addEventListener("click", async () => {
-            button.disabled = true;
-            try { paragraph((await diagnosticRequest("/rebaseline", {confirm:true})).message); }
-            catch (error) { paragraph(error.message); button.disabled = false; }
-          });
-          diagnosis.append(button);
-        }
-      } catch (error) { diagnosis.replaceChildren(); paragraph(error.message); }
-    });
-
     async function tick() {
-      if (location.protocol === "file:") return;
+      if (location.protocol === "file:" || tickBusy) return;
+      tickBusy = true;
       try {
-        const res = await fetch("status.json", { cache: "no-store" });
+        const res = await timedFetch("status.json", { cache: "no-store" });
         if (!res.ok) return;
         const data = await res.json();
         render(data);
         renderVpn(data);
         if (data.search && !isVpnFormVisible(data)) {
           try {
-            const response = await fetch("health.json", { cache: "no-store" });
+            const response = await timedFetch("health.json", { cache: "no-store" });
             const health = response.ok ? await response.json() : null;
             if (!health || Date.now() / 1000 - (Number(health.updated) || 0) > 35) {
               err.textContent = "Service status is unavailable. Check the Pompey log.";
               err.hidden = false;
             } else {
-              const down = Object.entries(health.services || {}).filter(([, up]) => !up).map(([name]) => name);
+              const down = Object.entries(health.services || {}).filter(([name, up]) => !up && !(window.pompeyStorageBlocked && ["qbittorrent", "radarr", "sonarr"].includes(name))).map(([name]) => name);
               const failed = Object.entries(health.jobs || {}).filter(([, job]) => job && job.failures > 0).map(([name]) => name);
               const overdue = Object.entries(health.jobs || {}).filter(([, job]) => job && job.overdue).map(([name]) => name);
               const messages = [...(health.attention || [])];
@@ -717,12 +714,13 @@
         if (!document.body.classList.contains("is-ready")) {
           now.textContent = "Waiting for service status…";
         }
-      }
+      } finally { tickBusy = false; }
     }
 
     tick();
     setInterval(tick, 1000);
   </script>
+  <script src="dashboard.js"></script>
 </body>
 </html>
 

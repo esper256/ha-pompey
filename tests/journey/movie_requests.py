@@ -2,6 +2,7 @@
 
 from pathlib import Path
 import json
+import os
 import time
 import urllib.parse
 from applications import tunnel_bytes
@@ -199,8 +200,26 @@ def _movie_request(client, case, background, ledger_file, *, resume):
         active["restartPreservedPartial"] = True
     received_before_incident = 0
     if case.scenario == "vpn-download-loss":
+        from catalogue import cases, offers
+        # The unselected low-quality alternative has its own hash, so this
+        # stopped control cannot collide with an earlier imported owner or the
+        # configured clone's next requested title.
+        control = offers(cases()[0])[1]
+        paused_hash = client.peer(control)["infoHash"]
+        client.qbit("torrents/createCategory", {"category": "pompey-test-paused"})
+        client.qbit("torrents/add", {"urls": f"http://10.77.0.2:18080/download/{control.movie_id}", "category": "pompey-test-paused", "stopped": "true"})
+        def stopped_control():
+            rows = client.qbit("torrents/info?hashes=" + paused_hash)
+            return rows and rows[0]["state"] in {"stoppedDL", "pausedDL"} and rows[0]
+        paused = wait(stopped_control, "Control torrent did not settle into its requested stopped state", 10)
+        partial_bytes = current["completed"]
         received_before_incident = tunnel_bytes() - before
         outage(client)
+        preserved = wait(lambda: (rows := client.qbit("torrents/info?hashes=" + infohash)) and rows[0]["completed"] >= partial_bytes and rows[0], "Partial bytes were not retained through downloader reconnection")
+        paused = wait(stopped_control, "Reconnection did not retain the user-stopped torrent", 10)
+        assert paused["state"] in {"stoppedDL", "pausedDL"} and paused["downloaded"] == 0, paused
+        active["pausedControlPreserved"] = True
+        active["partialBytesRetained"] = preserved["completed"]
         active["vpnLossDuringDownload"] = True
         assert not movie()["hasFile"], (
             "Incomplete movie imported during VPN interruption"
@@ -340,6 +359,15 @@ def _movie_request(client, case, background, ledger_file, *, resume):
         t["id"] == item["id"] and t["title"] == case.title and t["hasFile"]
         for t in diagnosis["titles"]
     ), diagnosis
+    if os.environ.get("POMPEY_TEST_BASELINE") != "1":
+        overview = client.session.call("GET", "http://127.0.0.1:8099/diagnostics/overview")
+        assert all(row["available"] for row in overview["summary"].values()), overview
+        assert overview["summary"]["indexers"]["value"] == {"healthy": 1, "enabled": 1}, overview
+        assert overview["setup"]["initialized"] is True, overview
+        assert overview["setup"]["sources"] == {"radarr": True, "sonarr": True}, overview
+        assert {"Radarr", "Sonarr", "Prowlarr", "seerr", "qbittorrent-nox"} <= overview["versions"]["applications"].keys(), overview
+        assert not any(secret and secret in json.dumps(overview) for name, secret in client.secrets.items() if "key" in name.lower() or "password" in name.lower()), "Dashboard disclosed credentials"
+        active["overviewVerified"] = overview["summary"]
     explanation = client.session.call(
         "POST",
         "http://127.0.0.1:8099/diagnostics/search",

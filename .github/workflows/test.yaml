@@ -2,11 +2,15 @@ name: Validation
 on:
   pull_request:
     branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review, converted_to_draft]
   push:
     branches: [main]
   workflow_dispatch:
-  schedule:
-    - cron: '17 4 * * 1'
+    inputs:
+      candidate_pr:
+        description: 'Actions-bot dependency PR to accept and publish after release checks'
+        type: string
+        required: false
 permissions:
   contents: read
 concurrency:
@@ -19,6 +23,9 @@ jobs:
     timeout-minutes: 3
     outputs:
       code: ${{ steps.scope.outputs.code }}
+      suite: ${{ steps.scope.outputs.suite }}
+      draft: ${{ steps.scope.outputs.draft }}
+      context: ${{ steps.scope.outputs.context }}
     steps:
       - uses: actions/checkout@v7.0.1
         with:
@@ -28,12 +35,23 @@ jobs:
           EVENT: ${{ github.event_name }}
           BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
           HEAD: ${{ github.sha }}
+          DRAFT: ${{ github.event.pull_request.draft || false }}
         run: python3 tools/ci_scope.py
+
+  fast:
+    name: Fast development checks
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - run: python3 tests/fast.py --host
 
   acceptance:
     name: Application integration and network isolation
-    needs: changes
-    if: needs.changes.outputs.code == 'true'
+    needs: [changes, fast]
+    if: needs.changes.outputs.suite != 'none'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -50,22 +68,38 @@ jobs:
         run: |
           docker buildx create --use --driver docker-container
           docker buildx build --load --platform linux/amd64 \
-            --build-arg BUILD_ARCH=amd64 --build-arg BUILD_VERSION=0.4.2 --build-arg BUILD_REF="$GITHUB_SHA" \
+            --build-arg BUILD_ARCH=amd64 --build-arg BUILD_VERSION="$(python3 tools/release_metadata.py current)" --build-arg BUILD_REF="$GITHUB_SHA" \
             --cache-from type=local,src=/tmp/pompey-build-cache \
             --cache-to type=local,dest=/tmp/pompey-build-cache-new,mode=max \
             -t localhost/pompey:foundation pompey/
           rm -rf /tmp/pompey-build-cache
           mv /tmp/pompey-build-cache-new /tmp/pompey-build-cache
-      - name: Validate logic, network isolation and application workflows
-        run: bash tests/run.sh --skip-build --layout ci --exclude vpn-download-loss
+      - name: Build the released upgrade baseline
+        if: needs.changes.outputs.suite == 'release'
+        run: |
+          ref="$(python3 tools/release_baseline.py)"
+          git fetch --tags origin "$ref"
+          mkdir -p /tmp/pompey-upgrade-baseline
+          git archive FETCH_HEAD pompey | tar -xf - -C /tmp/pompey-upgrade-baseline
+          docker buildx build --load --platform linux/amd64 \
+            --cache-from type=local,src=/tmp/pompey-build-cache \
+            -t localhost/pompey:upgrade-baseline /tmp/pompey-upgrade-baseline/pompey
         env:
+          GH_TOKEN: ${{ github.token }}
+      - name: Validate logic, network isolation and application workflows
+        run: |
+          args=()
+          if [[ "$POMPEY_SUITE" == release ]]; then
+            args+=(--release --upgrade-from localhost/pompey:upgrade-baseline)
+          else
+            args+=(--pr)
+          fi
+          bash tests/run.sh "${args[@]}" --skip-build
+        env:
+          POMPEY_SUITE: ${{ needs.changes.outputs.suite }}
           POMPEY_CONTAINER_COMMAND: docker
       - name: Preserve required acceptance summary
         run: cp .test-results/timing-summary.json .test-results/required-timing-summary.json
-      - name: Advisory known issue — VPN download resumption
-        run: python3 tests/known_vpn_resume.py
-        env:
-          POMPEY_CONTAINER_COMMAND: docker
       - uses: actions/upload-artifact@v7
         if: always()
         with:
@@ -74,44 +108,36 @@ jobs:
           path: .test-results/
 
   required:
-    name: CI required
+    # Draft fast checks may be green without creating a green merge gate.
+    name: ${{ needs.changes.outputs.context || 'CI required' }}
     if: always()
-    needs: [changes, acceptance]
+    needs: [changes, fast, acceptance]
     runs-on: ubuntu-24.04
     timeout-minutes: 2
     steps:
+      - uses: actions/checkout@v7.0.1
       - name: Require every selected check
         env:
           NEEDS: ${{ toJSON(needs) }}
-        run: |
-          python3 - <<'PYTHON'
-          import json, os
-          jobs = json.loads(os.environ['NEEDS'])
-          assert jobs['changes']['result'] == 'success', jobs
-          code = jobs['changes']['outputs']['code']
-          assert code in {'true', 'false'}, jobs
-          expected = 'success' if code == 'true' else 'skipped'
-          assert jobs['acceptance']['result'] == expected, jobs
-          PYTHON
+        run: python3 tools/ci_scope.py --require
 
-  candidate:
-    name: Upstream candidate validation (automatic promotion disabled)
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+  promote:
+    name: Publish accepted dependency update
+    needs: [changes, acceptance, required]
+    if: github.event_name == 'workflow_dispatch' && inputs.candidate_pr != '' && needs.required.result == 'success' && needs.acceptance.result == 'success'
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 5
+    permissions:
+      actions: read
+      contents: write
+      pull-requests: write
     steps:
       - uses: actions/checkout@v7.0.1
-      - name: Resolve stable releases and pinned resources
-        run: python3 tools/build_engine_manifest.py pompey/rootfs/usr/share/pompey/engines.json
-      - name: Validate candidate application versions
-        run: bash tests/run.sh --layout ci
-        env:
-          POMPEY_CONTAINER_COMMAND: docker
-      - uses: actions/upload-artifact@v7
-        if: always()
         with:
-          name: candidate-results
-          include-hidden-files: true
-          path: |
-            .test-results/
-            pompey/rootfs/usr/share/pompey/engines.json
+          # Never execute verifier code from the candidate with write tokens.
+          ref: main
+      - name: Merge protected candidate and publish its exact accepted tree
+        run: python3 tools/promote_candidate.py
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_PR: ${{ inputs.candidate_pr }}

@@ -45,6 +45,17 @@ class StorageAccess(unittest.TestCase):
         self.assertIn("UID=0 GID=0", result.stderr)
         self.assertIn("Read-only file system", result.stderr)
 
+    def test_changed_mount_is_rejected_before_any_write_probe(self):
+        import json
+        with tempfile.TemporaryDirectory() as tmp:
+            ready = Path(tmp)
+            (ready / "storage-baseline.json").write_text(json.dumps({"/media/share": {"filesystem": "cifs"}}))
+            with patch.dict(os.environ, POMPEY_READY=tmp), patch.object(storage, "mount_identity", return_value={"filesystem": "overlay"}), patch.object(storage, "check") as probe:
+                result = storage.report()
+                self.assertFalse(result["ok"])
+                self.assertEqual(result["path"], "/media/share")
+                probe.assert_not_called()
+
     def test_mount_report_excludes_credentials_and_shows_parent_modes(self):
         mountinfo = (
             "10 1 0:5 / / rw - overlay overlay rw\n"

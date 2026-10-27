@@ -194,6 +194,9 @@ PersistentKeepalive = 1
             raise RuntimeError("External fixture services did not become ready")
         time.sleep(0.05)
     stamp("fixtures-prepared")
+    if (os.environ.get("POMPEY_TEST_COLD_OFFLINE") == "1"
+            and not Path("/data/pompey-test/restart.json").exists()):
+        run(sys.executable, "/tests/journey/fixture_network.py", "down")
     os.execv(
         "/init",
         [

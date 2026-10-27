@@ -6,113 +6,117 @@ import pompey_common as api
 import pompey_state as state
 
 
-def snapshot():
-    secrets = api.load_secrets()
-    result = {"updated": time.time(), "titles": [], "downloads": [], "attention": []}
-    title_names = {}
-    for kind, host, collection in [
-        ("radarr", api.radarr_url(), "movie"),
-        ("sonarr", api.sonarr_url(), "series"),
-    ]:
-        key = secrets[kind + "_api_key"]
-        base = api.arr_api_root(host, key)
-        try:
-            titles = api.object_list(
-                api.http("GET", base + "/" + collection, headers=api.arr_headers(key)),
-                "Arr titles",
-                ("id",),
-            )
-            queue = api.http(
-                "GET",
-                base
-                + "/queue?page=1&pageSize=100&includeUnknownSeriesItems=true&includeUnknownMovieItems=true",
-                headers=api.arr_headers(key),
-            )
-            for title in titles:
-                title_names[
-                    (
-                        "movie" if kind == "radarr" else "tv",
-                        str(title.get("tmdbId" if kind == "radarr" else "tvdbId")),
-                    )
-                ] = title.get("title", "Untitled")
-                result["titles"].append(
-                    {
-                        "kind": kind,
-                        "id": title["id"],
-                        "title": title.get("title", "Untitled"),
-                        "monitored": title.get("monitored"),
-                        "path": title.get("path"),
-                        "hasFile": title.get("hasFile")
-                        if kind == "radarr"
-                        else (title.get("statistics") or {}).get("episodeFileCount", 0),
-                        "lastSearch": state.load(
-                            "search-" + kind + "-" + str(title["id"])
-                        ),
-                    }
-                )
-            for row in queue.get("records", []):
-                result["downloads"].append(
-                    {
-                        "service": kind,
-                        "title": row.get("title"),
-                        "state": row.get("status"),
-                        "remainingBytes": row.get("sizeleft"),
-                        "importState": row.get("trackedDownloadState"),
-                        "messages": [
-                            message
-                            for group in row.get("statusMessages", [])
-                            for message in group.get("messages", [])
-                        ],
-                    }
-                )
-            if queue.get("totalRecords", 0) > len(queue.get("records", [])):
-                result["attention"].append(
-                    kind + ": more downloads are available in the native queue."
-                )
-        except (RuntimeError, OSError, ValueError) as exc:
-            result["attention"].append(kind + ": diagnostic information unavailable: " + str(exc))
-    try:
-        torrents = api.http("GET", api.qbit_url() + "/api/v2/torrents/info")
-        for item in api.object_list(torrents, "Downloads", ("hash",)):
-            result["downloads"].append(
-                {
-                    "service": "downloader",
-                    "title": item.get("name"),
-                    "state": item.get("state"),
-                    "category": item.get("category"),
-                    "progress": item.get("progress"),
-                    "connectedSeeds": item.get("num_seeds"),
-                    "path": item.get("content_path"),
-                    "note": "Downloads can originate outside Seerr. Unmatched files are retained for review.",
-                }
-            )
-    except (RuntimeError, OSError, ValueError) as exc:
-        result["attention"].append("Download information unavailable: " + str(exc))
-    try:
-        from request_policy import requests_snapshot, identity
+def request_progress(request, title, queue, torrents):
+    """Explain only observed native state; series files do not prove fulfilment."""
+    status = request.get("status")
+    messages = [str(text) for row in queue for group in row.get("statusMessages", [])
+                for text in group.get("messages", [])]
+    if status not in {1, 2, 3, 4, 5}:
+        return "Request state unavailable", "Review this request in Seerr.", messages
+    if status == 1:
+        return "Awaiting approval", "Approve or decline this request in Seerr.", messages
+    if status == 3:
+        return "Declined", "Review the request in Seerr.", messages
+    if status == 4:
+        return "Request failed", "Review the request and its application connection in Seerr.", messages
+    if status == 5:
+        return "Completed", "", messages
+    if not title:
+        return "Waiting for Arr", "Check the Seerr application connections.", messages
+    if messages and any(row.get("trackedDownloadStatus") in {"warning", "error"} for row in queue):
+        return "Import needs attention", "Review the native queue messages below.", messages
+    for row in queue:
+        torrent = torrents.get(str(row.get("downloadId", "")).lower(), {})
+        native = torrent.get("state", "")
+        if native in {"stalledDL", "metaDL", "forcedMetaDL"}:
+            return "Waiting for peers" if native == "stalledDL" else "Retrieving torrent metadata", "Review the downloader if this persists.", messages
+        if native in {"stoppedDL", "pausedDL"}:
+            return "Download stopped", "Review the downloader and any skipped files.", messages
+        if row.get("sizeleft", 0) > 0:
+            return "Downloading", "", messages
+        return "Waiting for import", "Review the native queue if this persists.", messages
+    media = request.get("media") or {}
+    available = media.get("status4k" if request.get("is4k") else "status") == 5
+    if available:
+        return "Available according to Seerr", "", messages
+    if title["kind"] == "radarr" and title.get("hasFile"):
+        return "Imported to library", "Check your media player if the title is not visible yet.", messages
+    if title["kind"] == "sonarr" and title.get("hasFile"):
+        if media.get("status4k" if request.get("is4k") else "status") == 4:
+            return "Partially available", "Review the requested seasons for episodes that are still missing.", messages
+        return "Waiting for requested episodes", "The series has library files; these do not establish that the requested seasons are available.", messages
+    if title.get("monitored") is False:
+        return "Monitoring disabled", "Review monitoring in the native application.", messages
+    search = title.get("lastSearch") or {}
+    if search.get("status") == "Search complete":
+        releases = search.get("releases", [])
+        if not releases:
+            return "No releases found at last search", "Search again later or review indexer health.", messages
+        if all(row.get("rejections") for row in releases):
+            return "All releases rejected at last search", "Review the release rejection reasons.", messages
+    return "Waiting for a suitable release", "Search releases to inspect availability and rejection reasons.", messages
 
-        states = {
-            1: "Awaiting approval",
-            2: "Approved",
-            3: "Declined",
-            4: "Failed",
-            5: "Completed",
-        }
-        result["requests"] = [
-            {
-                "id": r.get("id"),
-                "type": r.get("type"),
-                "state": states.get(r.get("status"), "Unknown state"),
-                "title": title_names.get(
-                    identity(r),
-                    "Movie request" if r.get("type") == "movie" else "TV request",
-                ),
-                "arrLinked": identity(r) in title_names,
-            }
-            for r in requests_snapshot()
-        ]
-    except (RuntimeError, OSError, ValueError) as exc:
-        result["attention"].append("Request information unavailable: " + str(exc))
+
+def snapshot():
+    from pompey_observations import snapshot as observations
+    from request_policy import identity
+
+    sources = observations(max_age=2)
+    result = {"updated": time.time(), "titles": [], "downloads": [], "requests": [], "attention": []}
+    titles_by_identity = {}
+    queues = {}
+    torrents = {}
+    for name, source in sources.items():
+        if not source.get("available"):
+            result["attention"].append(name + ": information unavailable" +
+                ("; showing the last successful observation" if source.get("updated") else ""))
+    for kind in ["radarr", "sonarr"]:
+        data = sources.get(kind, {}).get("data", {})
+        queue = data.get("queue", {})
+        queues[kind] = queue.get("records", [])
+        for row in data.get("titles", []):
+            title = {"kind": kind, "id": row["id"], "title": row.get("title", "Untitled"),
+                     "monitored": row.get("monitored"), "path": row.get("path"),
+                     "hasFile": row.get("hasFile") if kind == "radarr" else (row.get("statistics") or {}).get("episodeFileCount", 0),
+                     "lastSearch": state.load("search-" + kind + "-" + str(row["id"])),
+                     "available": sources[kind].get("available", False), "updated": sources[kind].get("updated")}
+            result["titles"].append(title)
+            titles_by_identity[("movie" if kind == "radarr" else "tv", str(row.get("tmdbId" if kind == "radarr" else "tvdbId")))] = title
+        for row in queues[kind]:
+            result["downloads"].append({"service": kind, "title": row.get("title"), "state": row.get("status"),
+                "remainingBytes": row.get("sizeleft"), "importState": row.get("trackedDownloadState"),
+                "messages": [str(text) for group in row.get("statusMessages", []) for text in group.get("messages", [])]})
+        if queue.get("totalRecords", 0) > len(queues[kind]):
+            result["attention"].append(kind + ": additional downloads are available in the native queue.")
+    for row in sources.get("qbittorrent", {}).get("data", {}).get("torrents", []):
+        torrents[str(row.get("hash", "")).lower()] = row
+        result["downloads"].append({"service": "downloader", "title": row.get("name"), "state": row.get("state"),
+            "category": row.get("category"), "progress": row.get("progress"), "connectedSeeds": row.get("num_seeds"), "path": row.get("content_path")})
+    seerr = sources.get("seerr", {}).get("data", {})
+    if seerr.get("initialized") is False:
+        result["attention"].append("Complete Seerr setup to use requests. Library management remains available.")
+    states = {1: "Awaiting approval", 2: "Approved", 3: "Declined", 4: "Failed", 5: "Completed"}
+    for row in seerr.get("requests", []):
+        title = titles_by_identity.get(identity(row))
+        kind = title["kind"] if title else None
+        owned_queue = [q for q in queues.get(kind, []) if q.get("movieId" if kind == "radarr" else "seriesId") == title["id"]] if title else []
+        phase, action, messages = request_progress(row, title, owned_queue, torrents)
+        expected_kind = "sonarr" if row.get("type") == "tv" else "radarr"
+        required_sources = [sources.get("seerr", {})]
+        if row.get("status") == 2:
+            required_sources.append(sources.get(expected_kind, {}))
+            if owned_queue:
+                required_sources.append(sources.get("qbittorrent", {}))
+        available = all(source.get("available", False) for source in required_sources)
+        observed = min(source["updated"] for source in required_sources) if all(source.get("updated") for source in required_sources) else None
+        result["requests"].append({"id": row.get("id"), "type": row.get("type"), "state": states.get(row.get("status"), "Unknown"),
+            "title": title["title"] if title else ("Movie" if row.get("type") == "movie" else "TV") + " request #" + str(row["id"]),
+            "arrLinked": bool(title), "arrId": title["id"] if title else None, "kind": kind,
+            "phase": phase if available else "Current progress unavailable", "lastKnownPhase": phase if observed else None,
+            "nextAction": action if available else "Check the application status and try again.", "messages": messages,
+            "updated": observed, "available": available, "observedIn": ["Seerr"] + (["Radarr" if kind == "radarr" else "Sonarr"] if kind else []) + (["qBittorrent"] if owned_queue else [])})
+    if seerr.get("total", 0) > len(result["requests"]):
+        result["attention"].append("Showing the 100 most recent requests. Open Seerr for the full history.")
     result["requestReview"] = state.load("requests").get("reviewRequired", "")
     return result
 

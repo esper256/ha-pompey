@@ -1,0 +1,28 @@
+name: Vendored dependency maintenance
+on:
+  schedule:
+    - cron: '41 5 * * *'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: vendored-dependency-maintenance
+  cancel-in-progress: false
+jobs:
+  discover:
+    if: github.repository == 'esper256/ha-pompey'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      pull-requests: write
+      actions: write
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: main
+          fetch-depth: 0
+      - name: Resolve stable dependencies and refresh update PRs
+        run: python3 tools/dependency_updates.py
+        env:
+          GH_TOKEN: ${{ github.token }}

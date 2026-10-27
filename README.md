@@ -1,8 +1,8 @@
 # Pompey
 
-Pompey runs Seerr, Prowlarr, Radarr, Sonarr and qBittorrent in one Home Assistant OS app. Internet traffic uses a WireGuard VPN. Plex runs separately. The Home Assistant sidebar provides setup, service status and diagnostics. Seerr on port **5055** provides search and media requests; Prowlarr on **9696** manages indexers.
+Pompey runs Seerr, Prowlarr, Radarr, Sonarr and qBittorrent in one Home Assistant OS app. Internet traffic uses a WireGuard VPN. Use Plex, Jellyfin, Emby or another player separately; a media server is optional. The Home Assistant sidebar provides setup, service status and diagnostics. Seerr on port **5055** provides search and media requests; Prowlarr on **9696** manages indexers.
 
-Pompey is experimental software. Version 0.4.2 supports fresh amd64 installations with bundled, pinned applications. Migration from earlier installation layouts is not supported. See [release validation and current coverage](docs/testing.md).
+Pompey is experimental software. The current architecture supports fresh amd64 installations with bundled, pinned applications. Migration from earlier installation layouts is not supported. See [release validation and current coverage](docs/testing.md).
 
 ## Installation
 
@@ -10,7 +10,7 @@ Pompey is experimental software. Version 0.4.2 supports fresh amd64 installation
 2. Install Pompey. Home Assistant Supervisor builds the image locally; no separate Docker setup is required.
 3. Configure the media and library directories. Services on private networks directly connected to the app container, including the same HAOS host, are detected automatically. For Plex or an indexer on another device, add its network range under **Local network access**, for example `192.168.1.0/24`. Start Pompey and open its sidebar.
 4. Paste a full-tunnel WireGuard `.conf` configuration from your VPN provider. It must route all IPv4 traffic. IPv6 internet access remains blocked unless the configuration also supplies an IPv6 tunnel. Provider-supplied shell hooks are removed.
-5. Select **Search and requests** and complete Seerr's Plex setup. Use your Plex server's local IP address if its hostname cannot be resolved through VPN DNS.
+5. To use requests, select **Search and requests** and complete Seerr's setup for your chosen media server. Native library/indexer management remains available independently. A media server's local IP may be needed if its hostname cannot be resolved through VPN DNS.
 6. Select **Manage indexers**, configure Prowlarr authentication and add your indexers. Pompey does not include an indexer service or subscription.
 
 Restrict ports 5055 and 9696 to your local network. Radarr, Sonarr and qBittorrent listen on localhost. Enable **Advanced application interfaces** to access their web interfaces through authenticated Home Assistant Ingress.
@@ -33,7 +33,7 @@ Library paths are relative to the media directory. They must not overlap one ano
 
 The default directory names are retained for compatibility. You can configure different names for your libraries. Automatic routing sends G, PG and PG-13 movies, and TV-Y, TV-Y7, TV-G and TV-PG series, to the libraries for lower age ratings. Other and unavailable ratings use the general libraries. Select a specific library in Seerr to override automatic routing.
 
-Arr manages imports and upgrades. Replaced media files are retained in `downloads/recycle` for seven days. Configure Plex to use the library directories and exclude `downloads`.
+Arr manages imports and upgrades. Replaced media files are retained in `downloads/recycle` for seven days. Point your media player or server at the library directories and exclude `downloads`.
 
 **Stop sharing** stops completed torrents so Arr can move media into the library. **Share to ratio** seeds until the upload/download ratio reaches 1.0. **Share one day** seeds for 24 hours. Continued seeding uses hardlinks where supported, otherwise it requires an additional file copy. Arr removes completed torrents after import and the selected seeding target. Stalled transfers do not count toward the active download limit.
 
@@ -55,7 +55,7 @@ Pompey supports compatible full-tunnel WireGuard configurations without requirin
 
 An atomic IPv4/IPv6 firewall update installs the fail-closed policy before applications start. Local interfaces remain accessible during a VPN outage. Replies from the published web interfaces retain the original container-network route even while the VPN is active and Local network access is empty. Direct private container networks are detected from live routes; additional LAN access is explicitly configured. Internet traffic and application DNS remain restricted to the tunnel. Saving a replacement WireGuard configuration reconnects the VPN.
 
-The sidebar reports service health, delayed maintenance, library move failures and blocked imports. **Request and download diagnostics** displays current requests, downloads and import messages. **Search releases** performs an explicit indexer search and displays Arr's rejection reasons. Opening diagnostics does not initiate a search.
+The sidebar shows a compact overview of torrents, monitored titles, enabled indexers and open requests. The Overview, Requests, Setup and Status tabs show current counts, request progress, setup checks, bundled versions and maintenance freshness. Unavailable observations retain their last known values and age. **Requests and downloads** displays current requests, downloads and import messages. **Search releases** performs an explicit indexer search and displays Arr's rejection reasons. Opening diagnostics does not initiate a search.
 
 Configuration, requests, download policies and library routing run as separate jobs with bounded execution and retry backoff. They continue retrying after an outage.
 
@@ -65,7 +65,7 @@ Application versions, artifact checksums, Seerr's image digest and quality-resou
 
 Applications and maintenance jobs run as root inside the Home Assistant app container so they can write to Supervisor-managed SMB/CIFS media mounts. Container isolation and the Home Assistant AppArmor profile provide containment; shipped applications share a trust boundary. Pompey does not request privileged-container mode or additional capabilities for this storage access.
 
-Startup checks directory listing and file creation, rename and removal as that user. A failure logs numeric ownership and permissions for the directory and its parents, the filesystem type and relevant mount permission settings. The share account also needs write access on the server.
+Startup checks directory listing and file creation, rename and removal as the application identity. A failure logs numeric ownership and permissions for the directory and its parents, the filesystem type and relevant mount permission settings. The share account also needs write access on the server. During operation, detected storage failure pauses downloading and imports until access returns; checks run periodically and cannot prevent every write during the detection interval.
 
 Pompey preserves existing directory ownership and does not recursively change media or application configuration ownership. Root-owned SMB directories with mode `0755` are supported. The SMB account still needs server-side write access, and a read-only, unavailable or full share will fail the storage check. Deleting `downloads` is not a permissions repair and can discard active downloads, manual grabs and recycled media.
 
@@ -73,4 +73,4 @@ Home Assistant's **Logs** view combines Pompey and application output, including
 
 Home Assistant cold backups stop Pompey while persistent state is copied. Use a backup to recover from an unsuccessful application or database update. Pompey does not provide automatic binary or database rollback. See [architecture](docs/arr-auto-update.md) and [testing](docs/testing.md).
 
-**Known issue:** a download interrupted by VPN loss can remain stalled after the tunnel recovers. Local access and the firewall remain functional in the reproduced scenario. Release CI permits only this documented resume timeout after verifying the other network and service checks. Automatic upstream dependency promotion remains disabled.
+After replacement of the VPN interface, Pompey gracefully reconnects qBittorrent under the maintenance lock. Native resume state preserves partial downloads and user-stopped torrents. Extension filtering excludes common executable/script payloads before transfer; it does not scan media for malware, and skipped files in mixed torrents can share torrent pieces with selected files.

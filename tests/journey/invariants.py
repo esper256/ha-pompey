@@ -1,6 +1,7 @@
 """One integration checkpoint, with failure evidence that recovery cannot erase."""
 
 from datetime import datetime
+from contextlib import contextmanager
 import fcntl
 import json
 import os
@@ -77,6 +78,7 @@ class Invariants:
         self.since = client.ready_at if since is None else since
         self.commands = CommandHistory()
         self.checkpoints = []
+        self.expected_faults = []
         # Retain startup events too, but only failures after initialization are
         # unexpected: before this point Seerr and the source are not configured.
         assert any(e["kind"] == "controller-started" for e in source_events()), (
@@ -91,11 +93,17 @@ class Invariants:
             for e in events
         ]
         all_events.extend(self.commands.failures.values())
+        for event in all_events:
+            for fault in getattr(self, "expected_faults", []):
+                if (event["kind"] == "job-failed" and event.get("job") in fault["jobs"]
+                        and fault["start"] <= event["time"] <= fault.get("end", time.time())):
+                    event["expectedBy"] = fault["name"]
         save_json(self.client.evidence.root / "invariant-events.json", all_events)
         unexpected = [
             e
             for e in all_events
             if e.get("phase") != "setup"
+            and not e.get("expectedBy")
             and e["kind"] in {"job-failed", "attention", "native-command-failed"}
         ]
         self.client.evidence.data["invariants"] = {
@@ -105,6 +113,21 @@ class Invariants:
         }
         self.client.evidence.checkpoint()
         return unexpected
+
+    @contextmanager
+    def expect_fault(self, name, jobs):
+        """Retain specifically declared job failures during an injected fault.
+
+        The caller must prove recovery before leaving this bounded scenario.
+        Native command/media failures remain unexpected.
+        """
+        fault = {"name": name, "jobs": list(jobs), "start": time.time()}
+        self.expected_faults.append(fault)
+        try:
+            yield
+        finally:
+            fault["end"] = time.time()
+            self.capture()
 
     def assert_events(self):
         unexpected = self.capture()

@@ -7,6 +7,8 @@ import os
 from pathlib import Path
 import shlex
 import shutil
+import subprocess
+import sys
 import time
 import uuid
 from container_runtime import Runtime
@@ -30,6 +32,7 @@ def runtime():
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--skip-build", action="store_true")
+    parser.add_argument("--upgrade-from", help="Also run a real cold forward upgrade from this released product image")
     parser.add_argument("--image", default="localhost/pompey:foundation")
     parser.add_argument(
         "--integration-only",
@@ -47,7 +50,7 @@ def main():
     parser.add_argument(
         "--scenarios",
         type=int,
-        default=12,
+        default=15,
         help="Distinct integration scenarios per batch",
     )
     parser.add_argument(
@@ -63,7 +66,11 @@ def main():
     selection.add_argument(
         "--exclude", nargs="+", help="Exclude named shared/CI-layout scenarios"
     )
+    parser.add_argument("--suite", choices=["pr", "release"], default="release",
+                        help="Fast representative PR checks or complete release acceptance")
     args = parser.parse_args()
+    if args.suite == "pr" and not (args.only or args.exclude):
+        args.only = ["movie-pg", "single-episode", "executable-payload"]
     if (args.only or args.exclude) and args.layout not in {"shared", "ci"}:
         parser.error("--only/--exclude requires --layout shared or ci")
     if args.runs < 1 or not 1 <= args.scenarios <= (99 if args.layout == "ci" else 100):
@@ -106,7 +113,7 @@ def execute(args, engine, results, summary, checkpoint):
                 "--build-arg",
                 "BUILD_ARCH=amd64",
                 "--build-arg",
-                "BUILD_VERSION=0.4.2",
+                "BUILD_VERSION=" + subprocess.check_output([sys.executable, str(ROOT / "tools/release_metadata.py"), "current"], text=True).strip(),
                 "-t",
                 args.image,
                 "pompey/",
@@ -130,6 +137,13 @@ def execute(args, engine, results, summary, checkpoint):
         label="test-image-build",
     )
     test_image = engine.image_id(test_image)
+    base_test_image = None
+    if args.upgrade_from:
+        base_tag = args.image + "-upgrade-base-tests"
+        run(build + ["--build-arg", "POMPEY_IMAGE=" + args.upgrade_from,
+                     "-f", "tests/journey/Dockerfile", "-t", base_tag, "."],
+            600, label="upgrade-base-test-image-build")
+        base_test_image = engine.image_id(base_tag)
     if not args.journey_only:
         check_suite(engine, test_image)
     summary["testImageId"] = test_image
@@ -159,6 +173,12 @@ def execute(args, engine, results, summary, checkpoint):
         summary["journeys"].append(sample)
         checkpoint()
         batch(engine, test_image, results, sample, args.scenarios)
+        if base_test_image:
+            upgrade = {"layout": "forward-upgrade", "runId": uuid.uuid4().hex[:10], "containers": [], "success": False}
+            summary["journeys"].append(upgrade)
+            base = journey(engine, base_test_image, results, upgrade, args.scenarios, [0, 4, 9], export_seed=True, handoff=True, baseline=True)
+            journey(engine, test_image, results, upgrade, args.scenarios, [4, 9], seed=base["configuredSeed"], resume_evidence=Path(base["artifacts"]) / "result.json")
+            upgrade["success"] = True
         checkpoint()
 
 
@@ -232,13 +252,16 @@ def batch(engine, test_image, results, sample, count):
 
 
 def journey(
-    engine, test_image, results, batch, count, selected, seed=None, export_seed=False
+    engine, test_image, results, batch, count, selected, seed=None, export_seed=False,
+    handoff=False, baseline=False, resume_evidence=None
 ):
     run = engine.run
     run_id = batch["runId"]
     name = "pompey-journey-" + uuid.uuid4().hex[:10]
     destination = results / name
     destination.mkdir()
+    if resume_evidence:
+        shutil.copy2(resume_evidence, destination / "boot1-result.json")
     started = time.monotonic()
     snapshot_seconds = restore_seconds = 0
     sample = {
@@ -276,6 +299,10 @@ def journey(
         + json.dumps({"configuration": 2, "routing": 2, "requests": 2, "downloads": 2}),
     ]
     flags += engine.namespace_security
+    if baseline:
+        flags += ["-e", "POMPEY_TEST_BASELINE=1"]
+    if 14 in selected and not seed:
+        flags += ["-e", "POMPEY_TEST_COLD_OFFLINE=1"]
     try:
         if seed:
             run(["create", *flags, "-e", "POMPEY_TEST_CONFIGURED=1", test_image], 60)
@@ -292,7 +319,7 @@ def journey(
                 log=destination / "container.log",
             )
         report = json.loads((destination / "result.json").read_text())
-        if report.get("restartRequired"):
+        if report.get("restartRequired") and not handoff:
             assert report.get("phaseComplete") and not report.get("error"), report
             engine.assert_clean_stop(destination)
             for filename in [
@@ -319,7 +346,9 @@ def journey(
             assert not report.get("restartRequired"), (
                 "Unexpected second restart request"
             )
-        assert report["success"], report
+        assert report["success"] or (handoff and report.get("phaseComplete") and report.get("restartRequired")), report
+        if handoff:
+            sample["phase"] = "upgrade-seed"
         engine.assert_clean_stop(destination)
         assert "[qBittorrent]" in (destination / "container.log").read_text(), (
             "qBittorrent's file log was not forwarded to Home Assistant output"
@@ -359,9 +388,11 @@ def journey(
             engine.progress()
             print("Acceptance artifacts:", destination, flush=True)
     elapsed = round(time.monotonic() - started, 3)
+    startup = (report["currentBoot"]["startupSeconds"] if resume_evidence
+               else report["timings"]["application-setup-complete"])
     print(
         "Startup:",
-        report["timings"]["application-setup-complete"],
+        startup,
         "seconds",
         flush=True,
     )
@@ -372,20 +403,21 @@ def journey(
             "certification",
             repr(case["certification"]),
             "seconds",
-            case["durationSeconds"],
+            case.get("durationSeconds", "pending handoff"),
             "prior titles preserved",
-            case["priorTitlesVerified"],
+            case.get("priorTitlesVerified", 0),
             flush=True,
         )
         previous = 0
         for stage, cumulative in case["timings"].items():
             print(f"  {stage:30} {cumulative - previous:7.3f}", flush=True)
             previous = cumulative
+    # Cross-image evidence contains both boots' cumulative case durations. Only
+    # this candidate boot belongs to this host container's lifecycle cost.
+    work_seconds = (report["currentBoot"]["elapsedSeconds"] if resume_evidence or handoff
+                    else report["timings"]["batch-complete"])
     overhead = round(
-        elapsed
-        - report["timings"]["batch-complete"]
-        - snapshot_seconds
-        - restore_seconds,
+        elapsed - work_seconds - snapshot_seconds - restore_seconds,
         3,
     )
     print(
@@ -396,7 +428,7 @@ def journey(
         flush=True,
     )
     sample.update(
-        startupSeconds=report["timings"]["application-setup-complete"],
+        startupSeconds=startup,
         lifecycleOverheadSeconds=overhead,
     )
     save_json(destination / "timing.json", sample)

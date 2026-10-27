@@ -752,7 +752,7 @@ def configure_seerr(
 
     initialized = public_initialized()
     if not initialized and not have_plex:
-        log("Complete Plex setup in the Seerr setup wizard")
+        log("Complete the Seerr setup wizard to enable requests")
 
     if have_plex:
         host, port, ssl = parse_plex(plex_url())
@@ -927,7 +927,6 @@ def configure_seerr(
                 "defaultPermissions": SEERR_USER_PERMISSIONS,
                 "hideAvailable": False,
                 "localLogin": True,
-                "newPlexLogin": True,
             },
         )
     except RuntimeError as exc:

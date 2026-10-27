@@ -34,9 +34,9 @@ This is the numbered list used to select the first expansion. An outcome can be 
 | 28 | Source changes update synchronization and health | Stretch |
 | 29 | Source outage preserves pending requests and recovers | Stretch |
 | 30 | Metadata outage preserves downloads and recovers | Stretch |
-| 31 | Storage failures preserve data and recover | Stretch |
+| 31 | Storage failures preserve data and recover | `storage-recovery`: established library, detected read-only mount, service hold and restoration; interrupted-import cleanup remains stretch |
 | 32 | Maintenance jobs fail independently | Stretch |
-| 33 | Local startup works without VPN, with internet blocked | Stretch |
+| 33 | Local startup works without VPN, with internet blocked | `cold-start-offline`, real first boot before the fixture VPN is restored |
 | 34 | VPN loss during download preserves local access and resumes | `vpn-download-loss`, separate destructive network scenario |
 | 35 | VPN configuration rotation reconnects without leaking | `vpn-rotation`, paste a new client key and endpoint port through setup |
 | 36 | Individual app restarts preserve fulfilment | Stretch |
@@ -61,3 +61,7 @@ bash tests/run.sh --skip-build --integration-only --only vpn-download-loss
 ```
 
 The full CI layout additionally checks the logic/packet suites and a configured clone. Focused runs are diagnosis tools and do not replace that gate. Passing/failing observations for this expansion are recorded in the testing guide and PR; this table describes intended assertions, not an unconditional validation claim.
+
+## Additional 0.5.0 acceptance
+
+`executable-payload` proves native executable filename exclusion before any payload transfer, using inert bytes and an uppercase `.mkv.EXE` suffix. This is a download safety boundary, not malware detection. The release cohort also runs a separate actual-released-image → candidate upgrade with completed, waiting and partially downloaded state. PRs select the smaller movie/episode/executable cohort plus a clone; main and candidates retain the broader release scenarios. Expensive stretch families above are not claimed as implemented.

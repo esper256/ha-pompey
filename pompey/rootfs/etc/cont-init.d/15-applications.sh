@@ -4,6 +4,7 @@ set -euo pipefail
 # shellcheck source=/dev/null
 source "$(command -v pompey-env)"
 write-engine-configs
+python3 /usr/local/bin/pompey_storage.py validate-expected
 # Applications share the container's root identity for HAOS network storage.
 # Preserve existing ownership; no recursive media or configuration changes.
 media_failure() {
@@ -27,4 +28,5 @@ print("\n".join([
 ]))
 FOLDERS
 )
+python3 /usr/local/bin/pompey_storage.py baseline
 chmod 755 "${POMPEY_READY}"

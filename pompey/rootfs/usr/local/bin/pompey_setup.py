@@ -57,7 +57,8 @@ class Handler(BaseHTTPRequestHandler):
         _log(fmt % args)
 
     def _send(self, code: int, body: dict) -> None:
-        raw = json.dumps(body).encode()
+        from pompey_log_emit import redact_value
+        raw = json.dumps(redact_value(body)).encode()
         self.send_response(code)
         self.send_header("Content-Type", "application/json")
         self.send_header("Cache-Control", "no-store")
@@ -66,6 +67,11 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(raw)
 
     def _diagnostic(self, action, payload=None):
+        if action in {"overview", "snapshot"}:
+            from pompey_observations import overview
+            from pompey_diagnostics import snapshot
+            self._send(200, overview() if action == "overview" else snapshot())
+            return
         proc = subprocess.run(
             [
                 sys.executable,
@@ -80,9 +86,9 @@ class Handler(BaseHTTPRequestHandler):
         self._send(200 if proc.returncode == 0 else 400, json.loads(proc.stdout))
 
     def do_GET(self):
-        if self.path.split("?")[0] == "/diagnostics":
+        if self.path.split("?")[0] in {"/diagnostics", "/diagnostics/overview"}:
             try:
-                self._diagnostic("snapshot")
+                self._diagnostic("overview" if self.path.split("?")[0].endswith("/overview") else "snapshot")
             except (OSError, ValueError, subprocess.TimeoutExpired):
                 self._send(503, {"error": "Diagnostics are temporarily unavailable"})
         else:
