@@ -35,19 +35,17 @@ configuration:
       directory; the default is TV/Kid Friendly. Add this directory as a
       separate Plex library or as an additional location in an existing TV library.
   after_download:
-    name: Torrent seeding policy
+    name: Legacy seeding policy
     description: >-
-      Choose whether completed torrents stop seeding immediately, seed to
-      a 1.0 upload/download ratio, or seed for 24 hours. Stop sharing is
-      the default. Radarr or Sonarr imports the media and removes the torrent after
-      import and the selected seeding target. Imported library files are
-      retained. Continued seeding requires hardlinks or an additional file copy.
+      Use Config in the Pompey sidebar to manage seeding. This existing value
+      is retained only until preferences are first saved there; subsequent
+      changes to this Home Assistant option have no effect.
   simultaneous_downloads:
-    name: Active download limit
+    name: Legacy active download limit
     description: >-
-      Maximum number of active downloads, from 1 to 20. The default is 8.
-      Slow and stalled torrents are excluded according to qBittorrent activity thresholds. Increase the limit to allow more
-      transfers to run concurrently. Restart Pompey after changing this setting.
+      Use Config in the Pompey sidebar to manage download concurrency. This
+      existing value is retained only until preferences are first saved
+      there; subsequent changes to this Home Assistant option have no effect.
   debug:
     name: Advanced application interfaces
     description: >-

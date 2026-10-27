@@ -219,7 +219,7 @@
 
     #vpn-bw .vpn-head {
       display: flex;
-      justify-content: space-between;
+      gap: .6rem;
       align-items: baseline;
       margin-bottom: 0.65rem;
       font-family: ui-sans-serif, system-ui, sans-serif;
@@ -294,7 +294,7 @@
     #overview-panel > #ecosystem { margin-top: 0; }
     .diagnostic-body { padding: .95rem; }
     .diagnostic-body p { margin-bottom: 0.65rem; }
-    #diagnostics { max-height: 24rem; overflow: auto; }
+
     #diagnostic-panel button {
       max-width: 100%;
       padding: 0.45rem 0.8rem;
@@ -312,7 +312,6 @@
     #diagnostic-panel button:disabled { opacity: 0.6; cursor: wait; }
     #diagnostic-panel :focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; }
     .dashboard-panel { margin-top: 1.1rem; border: 1px solid var(--line); border-radius: .45rem; background: #0c1018; font-family: ui-sans-serif, system-ui, sans-serif; overflow-wrap: anywhere; }
-    .dashboard-panel summary { padding: .85rem .95rem; cursor: pointer; font-size: .95rem; }
     .panel-body { padding: .95rem; }
     #ecosystem { padding: .9rem; }
     .ecosystem-grid { display: grid; grid-template-columns: 1fr 1fr; gap: .75rem; }
@@ -323,10 +322,6 @@
     .metric.warning strong { color: var(--err); }
     .metric.stale strong { color: var(--muted); }
     #overview-note { margin-top: .65rem; font-size: .8rem; }
-    .request-card { border-top: 1px solid var(--line); padding: .8rem 0; }
-    .request-card summary { padding: .2rem 0; font-size: .9rem; }
-    .request-card p { margin: .4rem 0; font-size: .85rem; }
-    .request-card .request-phase { color: var(--fg); font-size: .8rem; margin-left: .4rem; }
     .native-link, .dashboard-panel button { display: inline-block; padding: .4rem .65rem; margin: .4rem .4rem 0 0; border: 1px solid var(--line); border-radius: .35rem; background: #1a2230; color: var(--fg); font: inherit; font-size: .8rem; text-decoration: none; cursor: pointer; }
     .dashboard-panel table { width: 100%; border-collapse: collapse; font-size: .8rem; overflow-wrap: anywhere; }
     .dashboard-panel td { padding: .5rem 0; border-bottom: 1px solid var(--line); }
@@ -336,6 +331,45 @@
     .dashboard-panel :focus-visible, .metric:focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; }
     .check-warning { color: var(--err); }
     #setup-note, #support-note { margin-top: .8rem; font-size: .8rem; }
+    .section-heading { display: flex; align-items: center; justify-content: space-between; gap: .75rem; margin-bottom: .7rem; }
+    .dashboard-panel .section-heading .panel-title { margin: 0; }
+    .section-heading a { color: var(--muted); font-size: .75rem; text-decoration: none; }
+    #diagnostic-panel .section-heading button { margin: 0; font-size: .75rem; padding: .3rem .55rem; }
+    .dashboard-panel .intro { font-size: .8rem; margin-bottom: 1rem; }
+    .dashboard-panel .fine-print { font-size: .75rem; margin-top: .75rem; }
+    .version-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: .8rem; }
+    .version-grid strong, .version-grid small { display: block; font-size: .8rem; font-weight: 400; }
+    .version-grid small { color: var(--muted); margin-top: .2rem; font-size: .75rem; }
+    .version-grid .service-down { color: var(--err); }
+    .dashboard-panel .workflow-table { table-layout: fixed; }
+    .workflow-table th { font-weight: 400; text-align: left; padding: 0 0 .6rem; color: var(--muted); font-size: .7rem; text-transform: uppercase; letter-spacing: .06em; }
+    .workflow-table th:first-child { width: 43%; }
+    .dashboard-panel .workflow-table td { padding: .85rem .6rem .85rem 0; vertical-align: top; text-align: left; }
+    .dashboard-panel .workflow-table td:last-child { padding-left: .7rem; }
+    #diagnostic-panel .title-button { background: none; border: 0; padding: 0; margin: 0; color: var(--fg); font-size: .85rem; }
+    #diagnostic-panel .title-button:hover { color: var(--focus); }
+    .workflow-table small { display: block; font-size: .7rem; color: var(--muted); line-height: 1.5; margin-top: .25rem; }
+    .workflow-table tr.selected td { background: #151923; }
+    .workflow-table tr.selected .title-button { color: var(--focus); }
+    .phase { font-size: .8rem; }
+    .phase.warning { color: var(--err); }
+    .workflow-detail { margin-top: 1.1rem; border-left: 2px solid var(--focus); padding: .05rem 0 .05rem .85rem; }
+    .workflow-detail h3 { font-size: .9rem; font-weight: 500; margin: .2rem 0 .6rem; }
+    .workflow-detail p { font-size: .8rem; }
+    .workflow-detail .evidence { color: var(--muted); font-size: .7rem; }
+    .workflow-detail ul { margin: .6rem 0; padding-left: 1rem; }
+    .workflow-detail li { font-size: .8rem; color: var(--err); }
+    .workflow-detail progress { display: block; width: 100%; height: .3rem; accent-color: var(--focus); margin: .6rem 0; }
+    .release-results { margin-top: .75rem; }
+    .release-results p { font-size: .75rem; }
+    #preferences label { display: block; margin: 1.15rem 0 .4rem; color: var(--fg); font-size: .85rem; }
+    #preferences select, #download-slots { width: 100%; border: 1px solid var(--line); border-radius: .3rem; background: #111722; color: var(--fg); padding: .65rem; font: inherit; font-size: .85rem; }
+    #download-slots { width: 5rem; }
+    #preferences .checkbox-label { display: flex; align-items: center; gap: .5rem; }
+    #preferences input[type=checkbox] { width: 1rem; height: 1rem; accent-color: var(--focus); }
+    .dashboard-panel .field-help { font-size: .75rem; margin: .45rem 0 .75rem; }
+    #save-preferences { margin-top: .35rem; }
+    #save-preferences:disabled { opacity: .5; cursor: default; }
     @media (max-width: 390px) { body { padding: 1rem; } .ecosystem-grid { gap: .65rem .25rem; } }
   </style>
 </head>
@@ -353,7 +387,6 @@
     <div id="open-search" hidden>
       <a id="open-search-btn" href="#" target="_blank" rel="noopener">Search and requests</a>
       <a id="open-sources-btn" href="#" target="_blank" rel="noopener">Manage indexers</a>
-      <p class="hint" id="open-search-url"></p>
     </div>
     <p id="file-hint" hidden>Open Pompey from the Home Assistant sidebar.</p>
     <p class="error" id="err" hidden></p>
@@ -361,10 +394,10 @@
       <nav id="dashboard-tabs" class="dashboard-tabs" role="tablist" aria-label="Pompey sections">
         <button id="overview-tab" type="button" role="tab" aria-selected="true" aria-controls="overview-panel">Overview</button>
         <button id="requests-tab" type="button" role="tab" aria-selected="false" aria-controls="diagnostic-panel" tabindex="-1">Requests</button>
-        <button id="setup-tab" type="button" role="tab" aria-selected="false" aria-controls="setup-panel" tabindex="-1">Setup</button>
-        <button id="status-tab" type="button" role="tab" aria-selected="false" aria-controls="status-panel" tabindex="-1">Status</button>
+        <button id="config-tab" type="button" role="tab" aria-selected="false" aria-controls="config-panel" tabindex="-1">Config</button>
       </nav>
       <aside id="storage-alert" class="dashboard-panel" hidden aria-label="Storage needs attention" role="status"><div class="panel-body"><h2 class="panel-title">Storage needs attention</h2><p id="storage-reason"></p><p id="storage-action"></p></div></aside>
+      <aside id="setup-panel" class="dashboard-panel" hidden aria-label="Setup needs attention"><div class="panel-body"><h2 class="panel-title" id="setup-title">Finish setup</h2><table id="setup-checks" aria-label="Connection checks"></table><p id="setup-note"></p><button id="setup-recheck">Check again</button></div></aside>
       <section id="overview-panel" class="dashboard-view" role="tabpanel" aria-labelledby="overview-tab" tabindex="0">
         <section id="ecosystem" class="dashboard-panel" hidden aria-label="Application overview">
           <div id="ecosystem-counts" class="ecosystem-grid"></div>
@@ -402,19 +435,35 @@
           </svg>
           <p class="vpn-axis" id="vpn-axis">Last two minutes</p>
         </section>
+        <section class="dashboard-panel" aria-label="Bundled applications"><div class="panel-body"><div class="section-heading"><h2 class="panel-title" id="bundle-version">Pompey</h2><a href="https://github.com/esper256/ha-pompey/releases" target="_blank" rel="noopener">Release notes ↗</a></div><div id="application-versions" class="version-grid"></div><p class="fine-print">Application updates arrive together through tested Pompey releases.</p></div></section>
       </section>
       <section id="diagnostic-panel" class="dashboard-panel dashboard-view" role="tabpanel" aria-labelledby="requests-tab" tabindex="0" hidden>
         <div class="diagnostic-body">
-          <h2 class="panel-title">Requests and downloads</h2>
-          <button id="inspect">Refresh diagnostics</button>
+          <div class="section-heading"><h2 class="panel-title">Request workflow</h2><button id="inspect">Refresh</button></div>
+          <p class="intro">Follow missing media through search, download and import. Manage requests in Seerr.</p>
           <div id="diagnostics" aria-live="polite"></div>
         </div>
       </section>
-      <section id="setup-panel" class="dashboard-panel dashboard-view" role="tabpanel" aria-labelledby="setup-tab" tabindex="0" hidden>
-        <div class="panel-body"><h2 class="panel-title">Setup and connections</h2><table id="setup-checks" aria-label="Connection checks"></table><p id="setup-note"></p><button id="setup-recheck">Check again</button></div>
-      </section>
-      <section id="status-panel" class="dashboard-panel dashboard-view" role="tabpanel" aria-labelledby="status-tab" tabindex="0" hidden>
-        <div class="panel-body"><h2 class="panel-title">Application status</h2><p id="bundle-version"></p><table id="application-versions" aria-label="Bundled applications"></table><h2>Last successful maintenance</h2><table id="maintenance-status" aria-label="Maintenance status"></table><details><summary>Quality resources</summary><p id="quality-resources"></p></details><p id="support-note">Home Assistant Logs include Pompey and application output. Review logs for private information before sharing them.</p></div>
+      <section id="config-panel" class="dashboard-panel dashboard-view" role="tabpanel" aria-labelledby="config-tab" tabindex="0" hidden>
+        <div class="panel-body">
+          <h2 class="panel-title">Download preferences</h2>
+          <form id="preferences">
+            <label for="seeding-policy">After downloading</label>
+            <select id="seeding-policy" name="after_download"><option value="stop_sharing">Stop seeding when complete</option><option value="share_to_ratio">Seed to a 1:1 ratio</option><option value="share_one_day">Seed for one day</option></select>
+            <p class="field-help">Arr imports the media before completed download files are removed. Seeding can retain an additional copy.</p>
+            <label for="download-slots">Simultaneous downloads</label>
+            <input id="download-slots" name="simultaneous_downloads" type="number" min="1" max="20" required value="8">
+            <p class="field-help">Between 1 and 20. Slow or stalled torrents do not occupy a slot.</p>
+            <label class="checkbox-label"><input id="dual-audio" name="prefer_dual_audio" type="checkbox">Prefer dual audio for anime</label>
+            <p class="field-help">Adds a preference in Anime profiles for releases with original and dubbed audio. It does not guarantee a particular language or subtitles.</p>
+            <button type="submit" id="save-preferences" disabled>Save changes</button>
+            <p id="preferences-result" role="status" class="field-help"></p>
+          </form>
+          <h2>Quality and storage</h2><p class="fine-print">Choose Default, Max, Anime or Anything per request in Seerr. Arr handles imports and upgrades; Pompey retains files it cannot safely identify or import.</p>
+          <p class="fine-print">Media folders, network access and advanced interfaces remain in Home Assistant’s app configuration.</p>
+          <h2>Maintenance</h2><table id="maintenance-status" aria-label="Maintenance status"></table>
+          <p id="support-note">Home Assistant Logs include Pompey and application output. Review logs for private information before sharing them.</p>
+        </div>
       </section>
     </div>
   </main>
@@ -430,7 +479,6 @@
     const openSearch = document.getElementById("open-search");
     const openSearchBtn = document.getElementById("open-search-btn");
     const openSourcesBtn = document.getElementById("open-sources-btn");
-    const openSearchUrl = document.getElementById("open-search-url");
     const debugConsoles = document.getElementById("debug-consoles");
     const debugRadarrBtn = document.getElementById("debug-radarr-btn");
     const debugSonarrBtn = document.getElementById("debug-sonarr-btn");
@@ -623,7 +671,6 @@
         openSearch.hidden = false;
         openSearchBtn.href = url;
         openSourcesBtn.href = sourcesUrl;
-        openSearchUrl.textContent = "Opens on your local network.";
       } else {
         openSearch.hidden = true;
       }

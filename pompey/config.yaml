@@ -1,6 +1,6 @@
 # https://developers.home-assistant.io/docs/apps/configuration
 name: Pompey
-version: "0.5.0-beta.1"
+version: "0.5.0-beta.2"
 slug: pompey
 description: >-
   Request and organize movies and TV series, with downloads
@@ -56,8 +56,6 @@ options:
   movies_kid_folder: Movies/Kid Friendly
   tv_folder: TV/Not Kid Friendly
   tv_kid_folder: TV/Kid Friendly
-  after_download: stop_sharing
-  simultaneous_downloads: 8
   debug: false
   nat_pmp_gateway: ""
   lan_networks: ""
@@ -67,8 +65,9 @@ schema:
   movies_kid_folder: str
   tv_folder: str
   tv_kid_folder: str
-  after_download: list(stop_sharing|share_to_ratio|share_one_day)
-  simultaneous_downloads: int(1,20)
+  # Legacy values are read until preferences are saved in Ingress.
+  after_download: list(stop_sharing|share_to_ratio|share_one_day)?
+  simultaneous_downloads: int(1,20)?
   debug: bool
   nat_pmp_gateway: str
   lan_networks: str

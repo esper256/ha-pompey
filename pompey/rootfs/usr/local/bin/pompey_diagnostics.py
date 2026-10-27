@@ -24,12 +24,18 @@ def request_progress(request, title, queue, torrents):
     if not title:
         return "Waiting for Arr", "Check the Seerr application connections.", messages
     if messages and any(row.get("trackedDownloadStatus") in {"warning", "error"} for row in queue):
-        return "Import needs attention", "Review the native queue messages below.", messages
+        return "Import needs attention", "Resolve the reported import problem; Arr will retry automatically.", messages
     for row in queue:
         torrent = torrents.get(str(row.get("downloadId", "")).lower(), {})
         native = torrent.get("state", "")
         if native in {"stalledDL", "metaDL", "forcedMetaDL"}:
-            return "Waiting for peers" if native == "stalledDL" else "Retrieving torrent metadata", "Review the downloader if this persists.", messages
+            return "Waiting for peers" if native == "stalledDL" else "Retrieving torrent metadata", "Wait for a source to connect, or inspect releases to check alternatives. Inspection does not start a download.", messages
+        if native in {"error", "missingFiles"}:
+            return "Download error", "Check storage access and the downloader error before retrying.", messages
+        if native in {"checkingDL", "checkingResumeData"}:
+            return "Checking downloaded data", "qBittorrent is verifying the files before continuing.", messages
+        if native == "queuedDL":
+            return "Waiting for a download slot", "Other downloads have priority under the configured queue limit.", messages
         if native in {"stoppedDL", "pausedDL"}:
             return "Download stopped", "Review the downloader and any skipped files.", messages
         if row.get("sizeleft", 0) > 0:
@@ -55,6 +61,74 @@ def request_progress(request, title, queue, torrents):
         if all(row.get("rejections") for row in releases):
             return "All releases rejected at last search", "Review the release rejection reasons.", messages
     return "Waiting for a suitable release", "Search releases to inspect availability and rejection reasons.", messages
+
+
+def download_evidence(torrent):
+    """Native counts are observations, not proof that a peer can supply the file."""
+    return {key: torrent.get(native) for key, native in {
+        "state": "state", "progress": "progress", "speed": "dlspeed",
+        "connectedSeeds": "num_seeds", "connectedPeers": "num_leechs",
+        "reportedSeeds": "num_complete", "availability": "availability",
+        "remainingBytes": "amount_left", "eta": "eta", "added": "added_on",
+    }.items()}
+
+
+def workflow(sources, titles, queues, torrents, requested=()):
+    """Explain Arr queues and missing monitored media, including non-Seerr work."""
+    rows = []
+    linked_hashes = set()
+    for kind in ("radarr", "sonarr"):
+        source = sources.get(kind, {})
+        native_titles = {row["id"]: row for row in source.get("data", {}).get("titles", [])}
+        by_id = {row["id"]: row for row in titles if row["kind"] == kind}
+        queue_by_title = {}
+        for queued in queues.get(kind, []):
+            ident = queued.get("movieId" if kind == "radarr" else "seriesId")
+            queue_by_title.setdefault(ident, []).append(queued)
+        for ident in dict.fromkeys([*by_id, *queue_by_title]):
+            title = by_id.get(ident)
+            native = native_titles.get(ident, {})
+            owned = queue_by_title.get(ident, [])
+            if not owned and title:
+                if not title.get("monitored") and (kind, ident) not in requested:
+                    continue
+                if kind == "radarr" and title.get("hasFile"):
+                    continue
+                stats = native.get("statistics") or {}
+                if kind == "sonarr" and (kind, ident) not in requested and stats.get("episodeCount", 0) <= stats.get("episodeFileCount", 0):
+                    continue  # No missing aired monitored episodes reported by Sonarr.
+            for queued in owned or [None]:
+                token = str((queued or {}).get("downloadId", "")).lower()
+                torrent = torrents.get(token)
+                if torrent:
+                    linked_hashes.add(token)
+                phase, action, messages = request_progress({"status": 2}, title, [queued] if queued else [], torrents)
+                if not queued and kind == "radarr" and native.get("isAvailable") is False:
+                    phase, action = "Not available yet", "Radarr is waiting for the configured release availability."
+                elif not queued and kind == "sonarr" and phase in {"Waiting for a suitable release", "Waiting for requested episodes"}:
+                    phase = "Missing episodes"
+                if not title:
+                    phase, action = "Unmatched download", "Arr has not matched this download to a library title."
+                observed = [source] + ([sources.get("qbittorrent", {})] if queued else [])
+                available = all(item.get("available") for item in observed)
+                rows.append({"kind": kind, "id": ident if title else None,
+                    "title": (title or {}).get("title") or (queued or {}).get("title", "Unmatched download"),
+                    "release": (queued or {}).get("title"),
+                    "phase": phase if available else "Current progress unavailable", "lastKnownPhase": phase,
+                    "nextAction": action if available else "Restore the application connection before taking action.",
+                    "messages": messages, "download": download_evidence(torrent) if torrent else None,
+                    "available": available, "updated": min((item.get("updated") or 0 for item in observed), default=0),
+                    "attention": bool(messages) or phase in {"Download stopped", "Download error", "Waiting for peers", "Unmatched download"}})
+    for token, torrent in torrents.items():
+        if token in linked_hashes:
+            continue
+        source = sources.get("qbittorrent", {})
+        rows.append({"kind": "qbittorrent", "id": None, "title": torrent.get("name", "Download"),
+            "phase": "Outside Arr queue" if source.get("available") else "Current progress unavailable",
+            "nextAction": "This may be a manual grab, seeding, or awaiting queue synchronization. Files are retained.",
+            "messages": [], "download": download_evidence(torrent), "available": source.get("available", False),
+            "updated": source.get("updated"), "attention": False})
+    return sorted(rows, key=lambda row: (not row["attention"], not bool(row["download"]), row["title"].lower()))
 
 
 def snapshot():
@@ -117,6 +191,13 @@ def snapshot():
             "updated": observed, "available": available, "observedIn": ["Seerr"] + (["Radarr" if kind == "radarr" else "Sonarr"] if kind else []) + (["qBittorrent"] if owned_queue else [])})
     if seerr.get("total", 0) > len(result["requests"]):
         result["attention"].append("Showing the 100 most recent requests. Open Seerr for the full history.")
+    requested = {(row["kind"], row["arrId"]) for row in result["requests"]
+                 if row["state"] == "Approved" and row["arrLinked"]
+                 and row["phase"] not in {"Available according to Seerr", "Imported to library"}}
+    result["workflow"] = workflow(sources, result["titles"], queues, torrents, requested)
+    for request in result["requests"]:
+        if request["state"] == "Approved" and not request["arrLinked"]:
+            result["workflow"].append({**request, "kind": "seerr", "id": None, "attention": True})
     result["requestReview"] = state.load("requests").get("reviewRequired", "")
     return result
 

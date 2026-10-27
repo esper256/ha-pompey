@@ -7,9 +7,5 @@ set -euo pipefail
 # shellcheck source=/dev/null
 source "$(command -v pompey-env)"
 pompey-secrets >/dev/null
-export AFTER_DOWNLOAD="${AFTER_DOWNLOAD:-stop_sharing}"
-export SIMULTANEOUS_DOWNLOADS="${SIMULTANEOUS_DOWNLOADS:-8}"
-bashio::log.info "After a title is in the library: ${AFTER_DOWNLOAD}"
-bashio::log.info "Simultaneous downloads: ${SIMULTANEOUS_DOWNLOADS} (stalled do not occupy a slot)"
 
 exec python3 "$(command -v write_engine_configs.py)" "${POMPEY_SECRETS}" "${MEDIA_ROOT}"

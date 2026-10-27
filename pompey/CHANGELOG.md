@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.5.0-beta.2
+
+- Refine Ingress to Overview, Requests and Config tabs; show connection checks only when they need attention. Keep VPN connection state beside its label.
+- Replace request-history cards with a native workflow table for missing media, downloads and imports, including connected seeds/peers and explicit release inspection.
+- Save seeding policy, download concurrency and anime dual-audio preference in Ingress. Apply them through normal locked configuration reconciliation without restarting Pompey.
+- Show bundled application versions on Overview and remove runtime implementation versions from the interface.
+
 ## 0.5.0-beta.1
 
 - Add a compact application overview, request progress with native rejection explanations, optional media-server checks and bundled-version/maintenance details. Preserve last known values when an application is unavailable.

@@ -1,51 +1,53 @@
-# 0.5.0 implementation review
+# 0.5.0 interface review
 
-**Development preview; stable-release approval is pending.** These are browser screenshots of the current product HTML, CSS and JavaScript, captured on October 27, 2026. They are not the earlier design mockups. All titles, counts, health responses, timestamps and failure messages are synthetic examples; application versions come from the current bundle manifest. No personal installation or production diagnostics are included.
+**Current implementation, with illustrative data.** These screenshots were captured on October 27, 2026 from the product HTML, CSS and JavaScript for 0.5.0-beta.2. Titles, counts, failures, timestamps and API responses are synthetic; bundled app versions come from the manifest. They demonstrate the interface, not production connectivity or release acceptance.
 
-**Home Assistant delivery:** the app store reads `main`, not GitHub release tags. Merging the beta version can offer that beta as an HA update. The beta merge is authorized after required CI. Stable 0.5.0 remains on hold for visual/release review; no stable 0.5.0 tag or release has been published.
-
-The same screen code is shipped by Pompey. The preview supplies read-only status/diagnostic responses so failure states can be inspected without disrupting a real installation. Screenshots demonstrate presentation, not live application connectivity, recovery success or release acceptance.
+Home Assistant reads `main`, so a merged beta can be offered as an update. Beta delivery after required CI is authorized. **Stable 0.5.0 remains on hold for visual and release review.**
 
 ## Overview
 
-Overview is the default tab. Primary application links remain above the tab switcher. Counts open the matching detail tab; normal service totals stay out of the headline.
+The three tabs are Overview, Requests and Config. VPN connection state sits next to its label. Bundled application versions appear below current activity; runtime implementation versions are omitted. These are installed versions, not a claim that the latest upstream release has been checked. Release notes link to Pompey's releases, which deliver the tested bundle.
 
-![Current Overview with sample data](images/current-overview.jpg)
+![Overview with illustrative activity](images/refined-overview.jpg)
 
-## Requests
+## Workflow inspection
 
-The import-blocked request is expanded. Waiting, downloading, approval and completed/history states use the existing native-observation explanation rather than a separate controller state machine. Searches remain explicit. Advanced native-interface links are absent here because that option is disabled in the preview.
+Requests focuses on missing media and native Arr download/import queues rather than repeating Seerr's approvals and completed history. Each row selects an inspection area beneath the table. Progress, transfer speed and connected seeds/peers distinguish activity from stalled downloads. Work outside an Arr queue remains visible. This is an explicitly refreshed observation, not a historical trace or live peer connectivity test.
 
-![Current Requests with an illustrative blocked import](images/current-requests.jpg)
+![Workflow table with a stalled torrent selected](images/refined-requests.jpg)
 
-## Setup
+Native import messages remain visible. The interface explains that resolving the reported problem allows Arr's normal retries to continue; it does not add a second import controller.
 
-This example shows two indexers in native backoff and an unreachable optional Plex connection. Configured Arr connections describe configuration; they are not proof that every downstream operation works. Other media servers remain optional supported choices.
+![Blocked import selected](images/refined-import.jpg)
 
-![Current Setup with illustrative source and media-server failures](images/current-setup.jpg)
+Inspect releases performs an explicit search and shows native rejection reasons. It does not grab a replacement, remove a torrent or alter quality settings. Advanced native interfaces remain optional for operations such as inspecting or resuming a stopped torrent.
 
-## Status
+![Explicit release inspection with illustrative rejection reasons](images/refined-releases.jpg)
 
-Bundled versions, maintenance freshness and manual log-sharing guidance are visible. Pinned resource identities remain in the expandable Quality resources detail.
+## Config
 
-![Current Status with manifest versions and sample maintenance times](images/current-status.jpg)
+Seeding, concurrency and the existing Anime dual-audio preference are actual persisted controls. Config distinguishes saved preferences from a successful controller application; unavailable services can leave them pending. Normal reconciliation applies qBittorrent preferences and resynchronizes quality profiles when the audio preference changes. Media paths, network access and advanced interfaces stay in Home Assistant. Legacy HA behavior options are accepted until the first Ingress save.
 
-## Storage interruption
+The capture shows saved feedback using the preview's simulated response. The real handler's validation, persistence and invalid-write behavior were checked separately; this image does not prove an Arr/Recyclarr integration run with changed preferences.
 
-The contextual warning keeps Overview visible. Cached library/downloader counts retain their age and are labelled Last known. The production service hold and recovery have dedicated acceptance coverage, but periodic detection is not an atomic barrier against every fallback write. Interrupted native cleanup can still leave files for review.
+![Config after saving an illustrative seeding preference](images/refined-config.jpg)
 
-![Current storage interruption with illustrative retained counts](images/current-storage.jpg)
+## Contextual connection checks
 
-## VPN interruption
+There is no permanent Setup tab. Incomplete setup or connection problems reveal a contextual panel; successful checks are omitted. Optional media-server discovery failures do not imply that imports cannot work. Storage interruption retains its separate cross-tab warning and existing service hold behavior.
 
-The local application links remain available. This is the current, fairly basic outage presentation: it repeats the unavailable VPN in the status/error lines and does not implement the original mockup's detailed recovery timeline. The transfer-resumption guarantee is tested separately; a screenshot cannot prove it.
+![Illustrative source backoff and optional Plex discovery failure](images/refined-connections.jpg)
 
-![Current VPN interruption with illustrative downloader state](images/current-vpn-outage.jpg)
+## Narrow layout
 
-## Before calling the first stable 0.5.0 ready
+The same table works in a 390-pixel preview frame without turning rows into collapsible cards.
 
-- Review the implemented screens and decide whether the visible wording/layout needs another polish pass. These captures are supplied for that review; merging the beta development PR does not approve a stable release.
-- Run full release acceptance, including the actual released-image upgrade, for the final release candidate. Fast local checks and submitted-PR core journeys serve different purposes.
-- Complete or explicitly defer remaining issue criteria. Native blocked/setup/outage/history/direct-grab scenarios are not all implemented; per-request explanations and setup checks are useful increments, not every detail from the mockups. Targeted recovery mutations (#92) remain deferred to 0.6.0.
-- Exercise the complete dependency discovery → PR → acceptance → merge → publication cycle. Repository permissions and protected CI are configured, but the beta intentionally keeps discovery inactive.
-- Keep real Supervisor/HAOS, SMB/NAS behavior and media-server playback listed as unautomated boundaries. Required automated acceptance remains the release gate; this visual approval request does not restore a manual approval gate for every later dependency patch.
+![Workflow on a narrow screen](images/refined-mobile.jpg)
+
+## Validation and remaining product gaps
+
+- Fast local syntax, safety logic, harness and CI policy checks took 1.7–2.4 seconds including tool startup in this iteration. A direct loopback exercise of the real preferences HTTP handler verified persistence and rejection of invalid writes. Browser inspection covered desktop/narrow layouts, row selection, explicit searches and save feedback. PR core journeys and packet isolation run in CI; full release acceptance was not run for this visual iteration.
+- The UI exposes native blockers and peer activity, not a durable history of all pipeline transitions. Diagnostics warn when the first 100 Arr queue entries or most recent Seerr requests are truncated. Request history remains in Seerr.
+- Redownload-loop detection and a read-only inventory of orphaned files remain gaps. Maintenance success, retained-file policies and existing cleanup acceptance are not proof that no junk or repeated work exists on an installation. Avoid a misleading green “all clean” claim.
+- Targeted recovery mutations (#92) remain deferred. Explicit release inspection, native automatic retries and optional advanced interfaces are the available tools; an inspected acceptable release is not automatically grabbed.
+- Before stable approval, run full release acceptance with the actual released-image forward upgrade and resolve or explicitly defer remaining issue criteria. Real Supervisor installation, SMB/NAS behavior and media-player playback remain unautomated boundaries. The first dependency discovery → acceptance → publication cycle also remains outstanding; discovery intentionally stays inactive on beta versions.

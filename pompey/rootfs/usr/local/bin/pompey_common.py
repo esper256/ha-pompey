@@ -34,26 +34,13 @@ def env(name: str, default: str = "") -> str:
 
 
 def after_download() -> str:
-    raw = (
-        env("AFTER_DOWNLOAD", "stop_sharing")
-        .lower()
-        .replace("-", "_")
-        .replace(" ", "_")
-    )
-    if raw in {"share_to_ratio", "ratio"}:
-        return "share_to_ratio"
-    if raw in {"share_one_day", "one_day"}:
-        return "share_one_day"
-    return "stop_sharing"
+    from pompey_preferences import current
+    return current()["after_download"]
 
 
 def simultaneous_downloads() -> int:
-    raw = env("SIMULTANEOUS_DOWNLOADS", "8")
-    try:
-        number = int(raw)
-    except ValueError:
-        number = 8
-    return max(1, min(number, 20))
+    from pompey_preferences import current
+    return current()["simultaneous_downloads"]
 
 
 def qbit_queue_preferences(active: int | None = None) -> dict:

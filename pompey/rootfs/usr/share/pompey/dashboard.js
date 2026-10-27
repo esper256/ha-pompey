@@ -1,4 +1,4 @@
-/* Read-only dashboard. Native applications continue to own requests and imports. */
+/* Native observations, explicit release inspection and validated app preferences. */
 (() => {
   const element = id => document.getElementById(id);
   let overview = null;
@@ -34,7 +34,7 @@
       element(tab.getAttribute("aria-controls")).hidden = !selected;
     }
     if (changed && id === "diagnostic-panel") refreshRequests();
-    if (id === "setup-panel") renderSetup();
+    if (id === "config-panel") refreshPreferences();
   }
   function openPanel(id) {
     selectPanel(id);
@@ -60,7 +60,7 @@
     metric("Torrents", torrents ? torrents.downloading + " downloading" : "—", torrents ? ["seeding", "stalled", "paused", "checking", "other"].filter(k => torrents[k]).map(k => torrents[k] + " " + k).join(" · ") : "", data.torrents, "diagnostic-panel");
     metric("Monitored", (data.shows.value ?? "—") + " shows", (data.movies.value ?? "—") + " movies", {available:data.shows.available && data.movies.available, updated:Math.min(data.shows.updated || 0, data.movies.updated || 0)}, "diagnostic-panel");
     const indexers = data.indexers.value;
-    metric("Indexers", indexers ? indexers.healthy + " / " + indexers.enabled + " available" : "—", "Enabled sources", data.indexers, "setup-panel", indexers && indexers.healthy < indexers.enabled);
+    metric("Indexers", indexers ? indexers.healthy + " / " + indexers.enabled + " available" : "—", "Enabled sources", data.indexers, "overview-panel", indexers && indexers.healthy < indexers.enabled);
     const requests = data.requests.value;
     metric("Requests", requests ? requests.open + " open" : "—", requests ? [requests.approval && requests.approval + " awaiting approval", requests.processing && requests.processing + " in progress", requests.failed && requests.failed + " failed"].filter(Boolean).join(" · ") || "No outstanding requests" : "", data.requests, "diagnostic-panel", requests?.failed > 0);
     element("overview-note").hidden = !overviewFailed;
@@ -81,44 +81,101 @@
     const table = element("setup-checks");
     table.replaceChildren();
     const setup = overview.setup;
-    row(table, "Storage", overview.storage?.ok === true ? "Writable" : overview.storage?.ok === false ? "Needs attention" : "Unavailable", overview.storage?.ok === false);
-    row(table, "Request setup", !setup.seerrAvailable ? "Unavailable" : setup.initialized ? "Complete" : "Not configured");
-    if (setup.initialized) for (const name of ["radarr", "sonarr"]) row(table, "Seerr → " + labels[name], !setup.seerrAvailable ? "Unavailable" : setup.requestConnections?.[name] ? "Configured" : "Check Seerr connections", setup.seerrAvailable && !setup.requestConnections?.[name]);
-    for (const name of ["radarr", "sonarr"]) row(table, labels[name] + " sources", setup.sources[name] === null ? "Unavailable" : setup.sources[name] ? "Configured" : "No synchronized sources", setup.sources[name] === false);
-    const indexers = overview.summary.indexers;
-    row(table, "Enabled indexers", indexers.available && indexers.value ? indexers.value.healthy + " / " + indexers.value.enabled + " available" : "Unavailable", indexers.available && indexers.value?.healthy < indexers.value?.enabled);
-    for (const source of setup.indexerIssues || []) row(table, source.name, "Retry after " + new Date(source.retryAfter).toLocaleTimeString(), true);
-    const server = setup.mediaServer;
-    const name = server?.type === 1 ? "Plex" : server?.type === 3 ? "Emby" : "Jellyfin";
-    if (!setup.seerrAvailable) row(table, "Media-server discovery", "Status unavailable");
-    else if (server?.configured) {
-      row(table, name + " discovery (optional)", server.reachable === false ? "Connection unavailable" : server.selectedLibraries ? server.selectedLibraries + " libraries selected" : "No libraries selected", server.reachable === false);
-    } else row(table, "Media-server discovery", "Not configured · optional");
-    element("setup-note").textContent = "Seerr and Prowlarr open on separate local-network ports. Additional networks can be allowed in Pompey's Local network access setting.";
-    if (setup.indexerIssues?.length) {
-      const link = text("a", "Manage indexers", "native-link");
-      link.href = "http://" + location.hostname + ":" + lastPorts.sources + "/";
-      link.target = "_blank"; link.rel = "noopener";
-      element("setup-note").append(document.createElement("br"), link);
+    if (!setup.seerrAvailable) row(table, "Seerr", "Connection unavailable", true);
+    else if (!setup.initialized) row(table, "Seerr", "Open Search and requests to finish setup", true);
+    if (setup.initialized && setup.seerrAvailable) for (const name of ["radarr", "sonarr"]) {
+      if (!setup.requestConnections?.[name]) row(table, "Seerr → " + labels[name], "Check Seerr connections", true);
     }
+    for (const name of ["radarr", "sonarr"]) {
+      if (!setup.sources[name]) row(table, labels[name] + " sources", setup.sources[name] === null ? "Connection unavailable" : "No synchronized sources", true);
+    }
+    for (const source of setup.indexerIssues || []) row(table, source.name, "Indexer retry after " + new Date(source.retryAfter).toLocaleTimeString(), true);
+    if (overview.summary.indexers.value?.enabled === 0) row(table, "Indexers", "Add a source in Manage indexers", true);
+    const server = setup.mediaServer;
+    if (server?.configured && server.reachable === false) row(table, server.type === 1 ? "Plex" : server.type === 3 ? "Emby" : "Jellyfin", "Library discovery unavailable", true);
+    element("setup-panel").hidden = !table.children.length;
+    element("setup-title").textContent = setup.seerrAvailable && !setup.initialized ? "Finish setup" : "Connections need attention";
+    element("setup-note").textContent = server?.configured && server.reachable === false
+      ? "Media-server discovery is unavailable. Imports can still complete; check the server connection in Seerr if media is missing from your player."
+      : "Review request connections in Seerr and sources in Manage indexers. Automatic retries continue in the background.";
   }
   function renderStatus() {
     if (!overview) return;
-    element("bundle-version").textContent = "Pompey " + overview.versions.pompey + (overview.versions.build ? " · " + overview.versions.build.slice(0, 12) : "");
-    const table = element("application-versions");
-    table.replaceChildren();
+    element("bundle-version").textContent = "Pompey " + overview.versions.pompey;
+    const versions = element("application-versions");
+    versions.replaceChildren();
     for (const [name, version] of Object.entries(overview.versions.applications)) {
+      if (!["radarr", "sonarr", "prowlarr", "qbittorrent-nox", "seerr"].includes(name.toLowerCase())) continue;
       const service = name === "qbittorrent-nox" ? "qbittorrent" : name.toLowerCase();
       const down = latestHealth?.services?.[service] === false;
-      row(table, name, version + (down ? " · unavailable" : ""), down);
+      const item = document.createElement("div");
+      item.append(text("strong", labels[service] || name, down ? "service-down" : ""), text("small", version.replace(/^release-/, "").split("_v")[0] + (down ? " · unavailable" : "")));
+      versions.append(item);
     }
-    element("quality-resources").textContent = Object.entries(overview.versions.resources).map(([name, commit]) => name + ": " + commit).join(" · ");
     const jobs = element("maintenance-status");
     jobs.replaceChildren();
     for (const [name, job] of Object.entries(latestHealth?.jobs || {})) {
       row(jobs, labels[name] || name, job.failures ? "Retrying · " + age(job.lastSuccess) : job.overdue ? "Delayed · " + age(job.lastSuccess) : age(job.lastSuccess), job.failures > 0 || job.overdue);
     }
   }
+  let preferencesLoaded = false;
+  let preferencesDirty = false;
+  let preferencesBusy = false;
+  const preferencesForm = element("preferences");
+  const preferencesResult = element("preferences-result");
+  const preferenceFields = [...preferencesForm.querySelectorAll("input, select")];
+  preferenceFields.forEach(field => { field.disabled = true; });
+  async function refreshPreferences() {
+    if (preferencesBusy || preferencesDirty) return;
+    preferencesBusy = true;
+    try {
+      const data = await diagnosticRequest("/preferences");
+      if (!preferencesDirty) {
+        element("seeding-policy").value = data.values.after_download;
+        element("download-slots").value = data.values.simultaneous_downloads;
+        element("dual-audio").checked = data.values.prefer_dual_audio;
+        preferencesResult.textContent = data.pending ? "Saved. Waiting for configuration to apply; this normally takes about a minute." : "Preferences applied.";
+        preferencesResult.classList.remove("check-warning");
+      }
+      preferencesLoaded = true;
+      preferenceFields.forEach(field => { field.disabled = false; });
+    } catch (error) {
+      preferencesResult.textContent = error.message;
+      preferencesResult.classList.add("check-warning");
+    } finally {
+      preferencesBusy = false;
+      element("save-preferences").disabled = !preferencesLoaded || !preferencesDirty;
+    }
+  }
+  preferencesForm.addEventListener("input", () => {
+    preferencesDirty = true;
+    element("save-preferences").disabled = !preferencesLoaded || preferencesBusy;
+    preferencesResult.textContent = "Unsaved changes";
+  });
+  preferencesForm.addEventListener("submit", async event => {
+    event.preventDefault();
+    if (!preferencesLoaded || preferencesBusy) return;
+    preferencesBusy = true;
+    element("save-preferences").disabled = true;
+    preferenceFields.forEach(field => { field.disabled = true; });
+    try {
+      const data = await diagnosticRequest("/preferences", {
+        after_download: element("seeding-policy").value,
+        simultaneous_downloads: Number(element("download-slots").value),
+        prefer_dual_audio: element("dual-audio").checked
+      });
+      preferencesDirty = false;
+      preferencesResult.textContent = data.pending ? "Saved. Waiting for configuration to apply; this normally takes about a minute." : "Preferences applied.";
+      preferencesResult.classList.remove("check-warning");
+    } catch (error) {
+      preferencesResult.textContent = error.message;
+      preferencesResult.classList.add("check-warning");
+      element("save-preferences").disabled = false;
+    } finally {
+      preferenceFields.forEach(field => { field.disabled = false; });
+      preferencesBusy = false;
+    }
+  });
   function nativeLink(service, container) {
     if (!debugConsoles.hidden && ["radarr", "sonarr", "qbittorrent"].includes(service)) {
       const a = text("a", "Open " + (labels[service] || service), "native-link");
@@ -128,10 +185,12 @@
     }
   }
   function searchButton(kind, id, container) {
-    const button = text("button", "Search releases");
+    const button = text("button", "Inspect releases");
     button.addEventListener("click", async () => {
       button.disabled = true;
+      container.querySelector(".release-results")?.remove();
       const results = document.createElement("div");
+      results.className = "release-results";
       container.append(results);
       try {
         const result = await diagnosticRequest("/search", {kind, id});
@@ -143,46 +202,90 @@
     });
     container.append(button);
   }
+  function transfer(download) {
+    if (!download) return "";
+    const parts = [];
+    if (Number.isFinite(download.progress)) parts.push(Math.round(download.progress * 100) + "%");
+    if (download.speed > 0) parts.push(fmtBytes(download.speed) + "/s");
+    if (Number.isFinite(download.connectedSeeds)) parts.push(download.connectedSeeds + " seeds");
+    if (Number.isFinite(download.connectedPeers)) parts.push(download.connectedPeers + " peers");
+    return parts.join(" · ");
+  }
+  let selectedWorkflow = null;
   async function refreshRequests() {
     const button = element("inspect");
     if (button.disabled) return;
     button.disabled = true;
-    diagnosis.replaceChildren(text("p", "Loading requests…"));
     try {
       const data = await diagnosticRequest("");
       diagnosis.replaceChildren();
       for (const notice of data.attention || []) diagnosis.append(text("p", notice, "check-warning"));
-      const linked = new Set();
-      const history = document.createElement("details");
-      history.append(text("summary", "Completed and declined requests"));
-      for (const request of data.requests || []) {
-        const card = document.createElement("details"); card.className = "request-card";
-        const summary = text("summary", request.title);
-        summary.setAttribute("aria-label", request.title + ": " + request.phase);
-        summary.append(text("span", request.phase, "request-phase"));
-        card.append(summary);
-        if (request.available) card.append(text("p", (request.observedIn || ["Seerr"]).join(" · ") + " · " + age(request.updated)));
-        if (request.nextAction) card.append(text("p", request.nextAction));
-        for (const message of request.messages || []) card.append(text("p", message, "check-warning"));
-        if (!request.available && request.updated) card.append(text("p", "Last known: " + request.lastKnownPhase + " · " + age(request.updated)));
-        if (request.arrLinked) {
-          linked.add(request.kind + ":" + request.arrId);
-          searchButton(request.kind, request.arrId, card);
-          nativeLink(request.kind, card);
+      const items = data.workflow || [];
+      if (!items.length) diagnosis.append(text("p", "No active downloads or missing monitored media reported. Open Seerr for request history."));
+      if (items.length) {
+        const table = document.createElement("table");
+        table.className = "workflow-table";
+        table.setAttribute("aria-label", "Downstream request workflow");
+        const head = document.createElement("thead");
+        const headings = document.createElement("tr");
+        for (const name of ["Title / application", "Current activity"]) {
+          const th = text("th", name); th.scope = "col"; headings.append(th);
         }
-        if (["Completed", "Declined"].includes(request.state) || ["Available according to Seerr", "Imported to library"].includes(request.phase)) history.append(card);
-        else diagnosis.append(card);
+        head.append(headings); table.append(head);
+        const body = document.createElement("tbody"); table.append(body);
+        const detail = document.createElement("section"); detail.className = "workflow-detail";
+        detail.setAttribute("aria-label", "Workflow inspection");
+        const select = (item, tr, control) => {
+          selectedWorkflow = [item.kind, item.id, item.title].join(":");
+          for (const row of body.children) {
+            row.classList.toggle("selected", row === tr);
+            row.querySelector("button").setAttribute("aria-pressed", String(row === tr));
+          }
+          control.setAttribute("aria-controls", "workflow-inspection");
+          detail.id = "workflow-inspection";
+          detail.replaceChildren(text("h3", item.title), text("p", (labels[item.kind] || item.kind) + " · " + (item.available ? "Observed at " : "Last observation at ") + (item.updated ? new Date(item.updated * 1000).toLocaleTimeString() : "unknown time"), "evidence"));
+          if (!item.available) detail.append(text("p", "Last known: " + (item.lastKnownPhase || "Unavailable"), "check-warning"));
+          for (const message of item.messages || []) detail.append(text("p", message, "check-warning"));
+          const download = item.download;
+          if (download) {
+            if (item.available && Number.isFinite(download.progress)) {
+              const meter = document.createElement("progress"); meter.max = 1; meter.value = download.progress;
+              meter.setAttribute("aria-label", "Download progress"); detail.append(meter);
+            }
+            detail.append(text("p", transfer(download)));
+            const noConnections = download.connectedSeeds === 0 && download.connectedPeers === 0;
+            if (item.available && ["stalledDL", "metaDL", "forcedMetaDL"].includes(download.state)) detail.append(text("p", noConnections
+              ? "No seeds or peers are connected. The tracker may list sources that cannot currently be reached."
+              : "Peers are connected, but no data is arriving. They may not have the remaining pieces."));
+            if (item.available && download.state === "stoppedDL") detail.append(text("p", "The download is stopped. Check for excluded files, an error, or a manual stop before resuming it."));
+          }
+          if (item.release) detail.append(text("p", item.release, "evidence"));
+          if (download) detail.append(text("p", "qBittorrent: " + (download.state || "state unavailable"), "evidence"));
+          if (item.nextAction) detail.append(text("p", item.nextAction));
+          if (debugConsoles.hidden && download && ["stoppedDL", "pausedDL", "error", "missingFiles"].includes(download.state)) detail.append(text("p", "Enable advanced interfaces in Home Assistant’s app configuration to inspect or resume this torrent."));
+          if (item.available && ["radarr", "sonarr"].includes(item.kind) && item.id && !item.messages?.length) searchButton(item.kind, item.id, detail);
+          nativeLink(item.kind, detail);
+        };
+        const controls = [];
+        for (const item of items) {
+          const tr = document.createElement("tr");
+          const title = document.createElement("td");
+          const control = text("button", item.title, "title-button");
+          control.setAttribute("aria-label", "Inspect " + item.title);
+          title.append(control, text("small", labels[item.kind] || item.kind));
+          const activity = document.createElement("td");
+          activity.append(text("span", item.phase, "phase" + (item.attention || !item.available ? " warning" : "")));
+          if (item.download) activity.append(text("small", transfer(item.download)));
+          else if (item.messages?.length) activity.append(text("small", item.messages[0]));
+          if (!item.available) activity.append(text("small", "Last known · " + age(item.updated)));
+          tr.append(title, activity); body.append(tr);
+          control.addEventListener("click", () => select(item, tr, control));
+          controls.push({item, tr, control});
+        }
+        diagnosis.append(table, detail);
+        const selected = controls.find(({item}) => [item.kind, item.id, item.title].join(":") === selectedWorkflow) || controls[0];
+        select(selected.item, selected.tr, selected.control);
       }
-      if (history.children.length > 1) diagnosis.append(history);
-      const extra = document.createElement("details"); extra.append(text("summary", "Other titles and downloads"));
-      for (const title of data.titles || []) if (!linked.has(title.kind + ":" + title.id)) {
-        const card = document.createElement("div"); card.className = "request-card";
-        card.append(text("p", title.title + (title.monitored ? " · monitored" : " · monitoring disabled")));
-        searchButton(title.kind, title.id, card); nativeLink(title.kind, card); extra.append(card);
-      }
-      for (const download of (data.downloads || []).filter(row => row.service === "downloader")) extra.append(text("p", download.title + " · " + download.state));
-      if (extra.children.length > 1) diagnosis.append(extra);
-      if (!(data.requests || []).length && extra.children.length === 1) diagnosis.append(text("p", "No requests or downloads to show."));
       if (data.requestReview) {
         diagnosis.append(text("p", data.requestReview, "check-warning"));
         const accept = text("button", "Accept current request history");
@@ -207,6 +310,7 @@
       const healthResponse = await timedFetch(ingressBase() + "health.json", {cache:"no-store"});
       latestHealth = healthResponse.ok ? await healthResponse.json() : null;
       renderOverview();
+      if (activePanel === "config-panel") refreshPreferences();
     } catch (_) {
       overviewFailed = true;
       if (overview) renderOverview();
