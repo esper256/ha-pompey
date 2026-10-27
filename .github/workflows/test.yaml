@@ -2,6 +2,7 @@ name: Validation
 on:
   pull_request:
     branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review, converted_to_draft]
   push:
     branches: [main]
   workflow_dispatch:
@@ -10,8 +11,6 @@ on:
         description: 'Actions-bot dependency PR to accept and publish after release checks'
         type: string
         required: false
-  schedule:
-    - cron: '17 4 * * 1'
 permissions:
   contents: read
 concurrency:
@@ -24,6 +23,9 @@ jobs:
     timeout-minutes: 3
     outputs:
       code: ${{ steps.scope.outputs.code }}
+      suite: ${{ steps.scope.outputs.suite }}
+      draft: ${{ steps.scope.outputs.draft }}
+      context: ${{ steps.scope.outputs.context }}
     steps:
       - uses: actions/checkout@v7.0.1
         with:
@@ -33,12 +35,23 @@ jobs:
           EVENT: ${{ github.event_name }}
           BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
           HEAD: ${{ github.sha }}
+          DRAFT: ${{ github.event.pull_request.draft || false }}
         run: python3 tools/ci_scope.py
+
+  fast:
+    name: Fast development checks
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - run: python3 tests/fast.py --host
 
   acceptance:
     name: Application integration and network isolation
-    needs: changes
-    if: needs.changes.outputs.code == 'true'
+    needs: [changes, fast]
+    if: needs.changes.outputs.suite != 'none'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -62,7 +75,7 @@ jobs:
           rm -rf /tmp/pompey-build-cache
           mv /tmp/pompey-build-cache-new /tmp/pompey-build-cache
       - name: Build the released upgrade baseline
-        if: github.event_name != 'pull_request'
+        if: needs.changes.outputs.suite == 'release'
         run: |
           ref="$(python3 tools/release_baseline.py)"
           git fetch --tags origin "$ref"
@@ -77,11 +90,13 @@ jobs:
         run: |
           args=()
           if [[ "$POMPEY_SUITE" == release ]]; then
-            args+=(--upgrade-from localhost/pompey:upgrade-baseline)
+            args+=(--release --upgrade-from localhost/pompey:upgrade-baseline)
+          else
+            args+=(--pr)
           fi
-          bash tests/run.sh --skip-build --layout ci --suite "$POMPEY_SUITE" "${args[@]}"
+          bash tests/run.sh "${args[@]}" --skip-build
         env:
-          POMPEY_SUITE: ${{ github.event_name == 'pull_request' && 'pr' || 'release' }}
+          POMPEY_SUITE: ${{ needs.changes.outputs.suite }}
           POMPEY_CONTAINER_COMMAND: docker
       - name: Preserve required acceptance summary
         run: cp .test-results/timing-summary.json .test-results/required-timing-summary.json
@@ -93,25 +108,18 @@ jobs:
           path: .test-results/
 
   required:
-    name: CI required
+    # Draft fast checks may be green without creating a green merge gate.
+    name: ${{ needs.changes.outputs.context || 'CI required' }}
     if: always()
-    needs: [changes, acceptance]
+    needs: [changes, fast, acceptance]
     runs-on: ubuntu-24.04
     timeout-minutes: 2
     steps:
+      - uses: actions/checkout@v7.0.1
       - name: Require every selected check
         env:
           NEEDS: ${{ toJSON(needs) }}
-        run: |
-          python3 - <<'PYTHON'
-          import json, os
-          jobs = json.loads(os.environ['NEEDS'])
-          assert jobs['changes']['result'] == 'success', jobs
-          code = jobs['changes']['outputs']['code']
-          assert code in {'true', 'false'}, jobs
-          expected = 'success' if code == 'true' else 'skipped'
-          assert jobs['acceptance']['result'] == expected, jobs
-          PYTHON
+        run: python3 tools/ci_scope.py --require
 
   promote:
     name: Publish accepted dependency update
