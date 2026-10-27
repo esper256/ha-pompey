@@ -46,7 +46,7 @@ def require_results(jobs):
         raise ValueError("Invalid check selection")
     if suite != "none" and code != "true":
         raise ValueError("Integration selection requires code checks")
-    expected_context = "Draft checks" if draft == "true" else "CI required"
+    expected_context = "Draft checks" if draft == "true" else "Release acceptance" if outputs["context"] == "Release acceptance" and suite == "release" else "CI required"
     if outputs["context"] != expected_context or (draft == "true" and suite != "none"):
         raise ValueError("Draft work cannot report successful submission acceptance")
     expected = {"fast": "success" if code == "true" else "skipped",
@@ -78,8 +78,13 @@ def main():
         )
         paths = [p for p in result.stdout.decode().split("\0") if p]
         code = needs_code_checks(paths)
+    values = selection(event, code, draft)
+    if os.environ.get("RELEASE_REVISION"):
+        values.update(context="Release acceptance", revision=os.environ["RELEASE_REVISION"])
+    else:
+        values["revision"] = os.environ.get("HEAD", "")
     with open(os.environ["GITHUB_OUTPUT"], "a") as output:
-        for name, value in selection(event, code, draft).items():
+        for name, value in values.items():
             output.write(f"{name}={value}\n")
 
 

@@ -29,6 +29,12 @@ The integration runner uses `--network none`, verifies loopback and no external 
 
 Release acceptance builds the actual previous stable image, seeds completed media, Prowlarr configuration, waiting requests and a partial transfer, cleanly stops it, then starts the candidate with that state. Native IDs/bytes and fulfilment must survive, including a fresh metadata lookup. The immutable shipped 0.4.2 revision is the fallback while public tags predate that installation. This selected forward-upgrade test does not establish every historic migration, backup restore or downgrade. Strict VPN resumption is required in the release tier without a timeout exception.
 
+### One-command release orchestration
+
+Dispatch Validation from **main**, supplying `release_pr` for a feature release or `candidate_pr` for an Actions-owned pinned dependency update. The PR must advance the stable version and be current with main. Planning holds it as draft, then read-only jobs test its immutable merge commit. Trusted publication verifies the accepted tree and required protection, reports the full-suite result to `CI required` on the merge candidate, marks ready using the workflow token, merges and publishes. The smaller PR suite is not rerun after a successful full acceptance. Source changes or a changed base require fresh acceptance. Never manually manufacture a successful check to bypass this process.
+
+The Actions job summary exposes shared checks, startup, each scenario, snapshot/lifecycle costs and the previous-release upgrade result, including partial evidence on failure. `integration-results` retains full reports and logs. Docker's native containerd image store avoids the separate export/import used by the earlier container-backed builder; no container images are published. Dependency updates are serialized and discovery resumes after each successful release, while unchanged failed candidates are left for review.
+
 ## The first integration scenario
 
 Focused storage checks run real filesystem operations as root against root-owned `0755` directories containing files left by an earlier UID 1000 installation, reject read-only storage, and verify that diagnostics omit mount credentials. Startup probes listing, creation, rename and removal without changing existing files. Integration batches also require qBittorrent file-log output in the container stream shown by Home Assistant. These checks do not reproduce a real Supervisor-managed SMB mount or establish NAS compatibility.

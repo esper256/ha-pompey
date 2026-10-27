@@ -34,6 +34,12 @@ class CheckPolicy(unittest.TestCase):
     def test_successful_selected_checks_authorize_the_gate(self):
         for suite, code in [("pr", "true"), ("release", "true"), ("none", "true"), ("none", "false")]:
             require_results(self.result(suite, code))
+        release = self.result("release")
+        release["changes"]["outputs"]["context"] = "Release acceptance"
+        require_results(release)
+        release["changes"]["outputs"]["suite"] = "pr"
+        with self.assertRaises(ValueError):
+            require_results(release)
 
     def test_drafts_cannot_leave_a_green_gate_before_submission(self):
         require_results(self.result("none", draft="true"))

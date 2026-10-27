@@ -14,13 +14,13 @@ ALLOWED = {"pompey/rootfs/usr/share/pompey/engines.json", "pompey/config.yaml", 
 MANIFEST = "pompey/rootfs/usr/share/pompey/engines.json"
 
 
-def validate_acceptance(run, jobs, sha, attempt):
+def validate_acceptance(run, jobs, sha, attempt, context="CI required"):
     """Only successful release acceptance for this exact workflow run may publish."""
     if (run.get("event") != "workflow_dispatch" or run.get("head_sha") != sha
             or run.get("path") != ".github/workflows/test.yaml"
             or run.get("run_attempt") != attempt):
         raise ValueError("Release acceptance must match the exact candidate workflow attempt")
-    for name in ["Application integration and network isolation", "CI required"]:
+    for name in ["Application integration and network isolation", context]:
         matches = [job for job in jobs if job.get("name") == name]
         if (len(matches) != 1 or matches[0].get("status") != "completed"
                 or matches[0].get("conclusion") != "success"):
@@ -86,71 +86,104 @@ def validate(pr, files, sha, comparison, protection):
         raise ValueError("Strict required GitHub Actions CI protection must be enabled")
 
 
+def validate_plan(plan, pr, main_sha, merge):
+    if (plan["kind"] not in {"dependency", "release"} or pr["head"]["sha"] != plan["head"]
+            or pr["head"]["repo"]["full_name"] != "esper256/ha-pompey" or pr["base"]["ref"] != "main"):
+        raise ValueError("Release PR identity changed after acceptance")
+    if not pr.get("merged"):
+        if main_sha != plan["base"] or pr["state"] != "open":
+            raise ValueError("Main or PR changed after acceptance; regenerate the candidate")
+        if [p["sha"] for p in merge["parents"]] != [plan["base"], plan["head"]]:
+            raise ValueError("Tested merge candidate no longer matches the PR")
+    if merge["tree"]["sha"] != plan["tree"]:
+        raise ValueError("Tested merge content changed")
+
+
 def main():
-    number = os.environ.get("CANDIDATE_PR", "")
-    if not re.fullmatch(r"[1-9][0-9]*", number):
-        raise ValueError("Invalid candidate PR")
     repo = "esper256/ha-pompey"
-    if os.environ.get("GITHUB_REPOSITORY") != repo:
-        raise ValueError("Promotion is disabled for this repository")
+    if os.environ.get("GITHUB_REPOSITORY") != repo or os.environ.get("GITHUB_REF") != "refs/heads/main":
+        raise ValueError("Publication must execute trusted main")
+    plan = json.loads(os.environ["RELEASE_PLAN"])
+    number = plan["pr"]
+    if not re.fullmatch(r"[1-9][0-9]*", number):
+        raise ValueError("Invalid release PR")
     base = "repos/" + repo
-    sha = os.environ["GITHUB_SHA"]
-    run_id = os.environ.get("GITHUB_RUN_ID", "")
-    attempt = os.environ.get("GITHUB_RUN_ATTEMPT", "")
-    if not re.fullmatch(r"[1-9][0-9]*", run_id) or not re.fullmatch(r"[1-9][0-9]*", attempt):
-        raise ValueError("Promotion requires an identified GitHub Actions workflow attempt")
-    run_path = base + "/actions/runs/" + run_id
-    run = api(run_path)
-    jobs = api(run_path + "/attempts/" + attempt + "/jobs?per_page=100")["jobs"]
-    validate_acceptance(run, jobs, sha, int(attempt))
+    run_id = os.environ["GITHUB_RUN_ID"]
+    attempt = int(os.environ["GITHUB_RUN_ATTEMPT"])
+    if int(plan["attempt"]) != attempt:
+        raise ValueError("Rerun the complete release workflow to obtain current acceptance evidence")
+    run = api(base + "/actions/runs/" + run_id)
+    jobs = api(base + "/actions/runs/" + run_id + "/attempts/" + str(attempt) + "/jobs?per_page=100")["jobs"]
+    # The workflow runs on trusted main; its read-only test jobs check out the
+    # exact synthetic merge SHA resolved by the trusted planning job.
+    expected_run = {**run, "head_sha": plan["revision"]}
+    if run.get("head_sha") != plan["base"]:
+        raise ValueError("Release workflow did not start from the planned trusted main")
+    validate_acceptance(expected_run, jobs, plan["revision"], attempt, context="Release acceptance")
     pr = api(base + "/pulls/" + number)
-    files = api(base + "/pulls/" + number + "/files?per_page=100")
-    comparison = api(base + "/compare/main..." + sha)
-    # REST protection details require Administration:read, which GITHUB_TOKEN
-    # cannot request. Read the public rule through GraphQL instead of adding a
-    # privileged PAT to the release workflow.
+    main_sha = api(base + "/git/ref/heads/main")["object"]["sha"]
+    merge = api(base + "/git/commits/" + plan["revision"])
+    validate_plan(plan, pr, main_sha, merge)
     query = 'query { repository(owner:"esper256",name:"ha-pompey") { ref(qualifiedName:"refs/heads/main") { branchProtectionRule { requiresStrictStatusChecks requiredStatusChecks { context app { databaseId } } } } } }'
     rule = api("graphql", "POST", {"query": query})["data"]["repository"]["ref"]["branchProtectionRule"]
     protection = {"strict": bool(rule and rule["requiresStrictStatusChecks"]),
-                  "checks": [{"context": check["context"], "app_id": (check.get("app") or {}).get("databaseId")}
-                             for check in (rule or {}).get("requiredStatusChecks", [])]}
-    validate(pr, files, sha, comparison, protection)
-    raw = api(base + "/contents/pompey/config.yaml?ref=" + sha)
-    config = base64.b64decode(raw["content"]).decode()
-    match = re.search(r'^version: "([0-9]+\.[0-9]+\.[0-9]+)"$', config, re.M)
-    if not match:
-        raise ValueError("Only stable versions may be automatically released")
-    version = match[1]
-    ancestor = comparison["merge_base_commit"]["sha"]
-    def contents(ref):
-        return {path: base64.b64decode(api(base + "/contents/" + path + "?ref=" + ref)["content"]).decode() for path in ALLOWED}
-    validate_contents(pr["head"]["ref"].removeprefix("codex/upstream-"), contents(ancestor), contents(sha), version)
-    if not pr.get("merged") and version != next_patch(current()):
-        raise ValueError("Candidate release number must follow current main")
-    if pr.get("merged"):
-        merged = pr["merge_commit_sha"]
-    else:
-        result = api(base + "/pulls/" + number + "/merge", "PUT", {"sha": sha, "merge_method": "squash"})
+                  "checks": [{"context": c["context"], "app_id": (c.get("app") or {}).get("databaseId")} for c in (rule or {}).get("requiredStatusChecks", [])]}
+    if not protection["strict"] or {"context": "CI required", "app_id": 15368} not in protection["checks"]:
+        raise ValueError("Strict GitHub Actions CI protection must remain enabled")
+    if plan["kind"] == "dependency":
+        files = api(base + "/pulls/" + number + "/files?per_page=100")
+        validate({**pr, "draft": False}, files, plan["head"], {"behind_by": 0}, protection)
+        def contents(ref):
+            return {path: base64.b64decode(api(base + "/contents/" + path + "?ref=" + ref)["content"]).decode() for path in ALLOWED}
+        validate_contents(pr["head"]["ref"].removeprefix("codex/upstream-"), contents(plan["base"]), contents(plan["head"]), plan["version"])
+    if not pr.get("merged"):
+        # This is the real full-suite result on the exact tested merge commit,
+        # under the Actions app required by branch protection. No admin bypass.
+        if pr["draft"]:
+            api("graphql", "POST", {"query": "mutation($id:ID!){markPullRequestReadyForReview(input:{pullRequestId:$id}){pullRequest{id}}}", "variables": {"id": pr["node_id"]}})
+        current_merge_sha = api(base + "/git/ref/pull/" + number + "/merge")["object"]["sha"]
+        current_merge = api(base + "/git/commits/" + current_merge_sha)
+        validate_plan(plan, pr, api(base + "/git/ref/heads/main")["object"]["sha"], current_merge)
+        api(base + "/check-runs", "POST", {"name": "CI required", "head_sha": current_merge_sha,
+            "status": "completed", "conclusion": "success", "details_url": run["html_url"],
+            "output": {"title": "Full release and upgrade acceptance passed",
+                       "summary": "Accepted merge tree: `" + plan["tree"] + "`. " + run["html_url"]}})
+        result = api(base + "/pulls/" + number + "/merge", "PUT", {"sha": plan["head"], "merge_method": "squash"})
         if result.get("merged") is not True:
-            raise RuntimeError("GitHub did not merge the protected candidate")
+            raise RuntimeError("GitHub did not merge the protected release PR")
         merged = result["sha"]
-    head_tree = api(base + "/git/commits/" + sha)["tree"]["sha"]
-    merged_tree = api(base + "/git/commits/" + merged)["tree"]["sha"]
-    if head_tree != merged_tree:
-        raise RuntimeError("Merged content differs from the accepted candidate; release withheld")
-    existing = subprocess.run(["gh", "release", "view", "v" + version, "--repo", repo], capture_output=True)
-    if existing.returncode == 0:
-        ref = api(base + "/git/ref/tags/v" + version)["object"]
+    else:
+        merged = pr["merge_commit_sha"]
+    if api(base + "/git/commits/" + merged)["tree"]["sha"] != plan["tree"]:
+        raise ValueError("Merged content differs from accepted content; publication withheld")
+    version = plan["version"]
+    tag = "v" + version
+    releases = api(base + "/releases?per_page=100")
+    existing = next((r for r in releases if r["tag_name"] == tag), None)
+    if existing:
+        ref = api(base + "/git/ref/tags/" + tag)["object"]
         if ref["type"] == "tag":
             ref = api(base + "/git/tags/" + ref["sha"])["object"]
-        if ref["sha"] != merged:
-            raise RuntimeError("Release tag already points to another revision")
-        print("Accepted release already exists")
-        return
-    notes = Path("/tmp/pompey-release-notes.md")
-    notes.write_text(pr["body"] + "\n\nValidation: required fresh-install, release and forward-upgrade acceptance passed for `" + sha + "`.\n")
-    subprocess.run(["gh", "release", "create", "v" + version, "--repo", repo, "--target", merged,
-                    "--title", "Pompey " + version, "--notes-file", str(notes)], check=True)
+        if ref["sha"] != merged or existing["draft"] or existing["prerelease"]:
+            raise ValueError("Existing release does not match the accepted stable revision")
+    else:
+        # Create the tag atomically; never publish against an unrelated existing tag.
+        refs = api(base + "/git/matching-refs/tags/" + tag)
+        existing_ref = next((r for r in refs if r["ref"] == "refs/tags/" + tag), None)
+        if existing_ref:
+            obj = existing_ref["object"]
+            if obj["type"] == "tag":
+                obj = api(base + "/git/tags/" + obj["sha"])["object"]
+            if obj["sha"] != merged:
+                raise ValueError("Existing tag points to another revision")
+        else:
+            api(base + "/git/refs", "POST", {"ref": "refs/tags/" + tag, "sha": merged})
+        notes = Path("/tmp/pompey-release-notes.md")
+        changelog = base64.b64decode(api(base + "/contents/pompey/CHANGELOG.md?ref=" + merged)["content"]).decode()
+        section = changelog.split("## " + version + "\n", 1)[1].split("\n## ", 1)[0].strip()
+        notes.write_text(section + "\n\nValidation: full integration and previous-release upgrade passed for tree `" + plan["tree"] + "`. " + run["html_url"] + "\n")
+        subprocess.run(["gh", "release", "create", tag, "--repo", repo, "--verify-tag", "--title", "Pompey " + version, "--notes-file", str(notes), "--latest"], check=True)
+    print("Published " + tag + " from accepted merge " + merged)
 
 
 if __name__ == "__main__":
