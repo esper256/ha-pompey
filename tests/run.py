@@ -321,6 +321,9 @@ def journey(
             )
         assert report["success"], report
         engine.assert_clean_stop(destination)
+        assert "[qBittorrent]" in (destination / "container.log").read_text(), (
+            "qBittorrent's file log was not forwarded to Home Assistant output"
+        )
         if export_seed:
             seed, snapshot_seconds = engine.snapshot(name, destination)
             sample["configuredSeed"] = seed

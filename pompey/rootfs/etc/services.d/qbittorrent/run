@@ -12,7 +12,7 @@ if [[ ! -x "${QBIT}" ]]; then
 fi
 
 LOG_DIR="${POMPEY_CONFIG}/qBittorrent/logs"
-mkdir -p "${LOG_DIR}"
+s6-setuidgid pompey mkdir -p "${LOG_DIR}"
 pompey-log start "qBittorrent"
 
 exec s6-setuidgid pompey "${QBIT}" --profile="${POMPEY_CONFIG}" --webui-port=8080 --confirm-legal-notice
