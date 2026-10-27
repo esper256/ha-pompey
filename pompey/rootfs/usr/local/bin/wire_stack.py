@@ -990,8 +990,6 @@ def main() -> int:
     sonarr = arr_api_root(sonarr_url(), sk)
     radarr = arr_api_root(radarr_url(), rk)
     prowlarr = prowlarr_url()
-    from pompey_hosts import apply_hosts
-    apply_hosts(pk)
 
     complete = downloads_complete()
     manual = downloads_manual()
@@ -1026,6 +1024,8 @@ def main() -> int:
     sl = language_profile_id(sonarr, sk)
     configure_seerr(secrets, rp, sp, sap, sl)
     wait_http(prowlarr_url() + "/ping")
+    from pompey_hosts import apply_hosts
+    apply_hosts(pk)
     ensure_prowlarr_download_client(prowlarr, pk, secrets)
     ensure_prowlarr_app(prowlarr, pk, "Sonarr", "Sonarr", sonarr_url(), sk)
     ensure_prowlarr_app(prowlarr, pk, "Radarr", "Radarr", radarr_url(), rk)
