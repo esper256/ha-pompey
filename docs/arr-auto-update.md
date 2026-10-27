@@ -10,10 +10,10 @@ The controller has bounded, serialized configuration, download, request and rout
 
 Arr owns ordinary imports, upgrades and library moves. Prowlarr direct grabs retain a separate category. Pompey submits only Arr-accepted manual imports and records intent before commands. Unknown or ambiguous files and commands remain reviewable. One bad receipt must not authorize duplicate submission or deletion. Downloads are not assumed to originate from Seerr.
 
-Request closeout uses complete stable snapshots and observed ownership. Unknown seasons are preserved. Search identity changes and large history disappearances pause cancellation until the household explicitly re-baselines while keeping current monitoring. Files and in-flight transfers are retained.
+Request closeout uses complete stable snapshots and observed ownership. Unknown seasons are preserved. Search identity changes and large history disappearances pause cancellation until an administrator explicitly resets the baseline while keeping current monitoring. Files and in-flight transfers are retained.
 
 ## Updates and recovery
 
-`tools/build_engine_manifest.py` resolves stable releases and resource commits into a candidate manifest. Candidates are built and exercised with the same real-application test. Discovery never changes a running installation. The foundation currently proves one fresh movie journey; automatic merge/release promotion stays disabled until household acceptance coverage expands.
+`tools/build_engine_manifest.py` resolves stable releases and resource commits into a candidate manifest. Candidates are built and exercised with the same real-application test. Discovery never changes a running installation. Integration scenarios cover fresh installation, movie and TV imports, request closeout, restart and network behavior. Automatic dependency promotion remains disabled pending broader coverage and forward-upgrade validation.
 
 Home Assistant cold backups provide recovery. Pompey deliberately has no runtime package manager, old binary copies, transaction journal, database rollback, downgrade compatibility or legacy-layout migration. Restoring a backup restores the locally built image and app state through HA; ordinary image updates may migrate upstream databases. This foundation does not prove all historical-database upgrades.

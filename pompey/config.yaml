@@ -3,9 +3,8 @@ name: Pompey
 version: "0.4.0"
 slug: pompey
 description: >-
-  Search for a movie or TV show. Confirm if we need you. It lands in the
-  right library and Plex notices. All internet from this app uses VPN
-  WireGuard; if the tunnel is down, internet is dropped.
+  Request and organize movies and TV series for Plex, with downloads
+  and internet access protected by a WireGuard VPN.
 url: https://github.com/esper256/ha-pompey/tree/main/pompey
 arch:
   - amd64
@@ -34,8 +33,8 @@ ports:
   5055/tcp: 5055
   9696/tcp: 9696
 ports_description:
-  5055/tcp: Search (Seerr). Not Plex.
-  9696/tcp: Sources (Prowlarr). Not Radarr/Sonarr.
+  5055/tcp: Search and requests (Seerr)
+  9696/tcp: Indexer management (Prowlarr)
 apparmor: true
 privileged:
   - NET_ADMIN
@@ -48,14 +47,9 @@ map:
     read_only: false
   - type: media
     read_only: false
-# Media parent is the Home Assistant media share (or a Media network
-# storage folder under it). Library fields are relative to that parent.
-# Defaults match this house: share name dlna, sibling kid/not-kid folders.
-# Plex must already scan those same folders. VPN is wait-screen paste.
-# Sources are Prowlarr on :9696. After a title is in the library, stop
-# sharing is the default so qBittorrent does not keep every torrent in RAM.
-# Simultaneous downloads is how many titles with peers can run at once;
-# stalled / seedless torrents do not occupy a slot.
+# Library paths are relative to media_folder. Existing directory names are
+# retained as defaults for configuration compatibility. Plex scans the final
+# library directories; downloads remain outside the Plex libraries.
 options:
   media_folder: /media/dlna
   movies_folder: Movies/Not Kid Friendly

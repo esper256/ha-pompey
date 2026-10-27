@@ -9,7 +9,7 @@ import pompey_state as state
 def requests_snapshot():
     key = api.seerr_api_key_from_disk()
     if not key:
-        raise RuntimeError("Seerr setup is not complete")
+        raise RuntimeError("Seerr setup is incomplete")
     rows, seen, total = [], set(), None
     for skip in range(0, 100000, 50):
         payload = api.http(
@@ -85,7 +85,7 @@ def requested_seasons(rows, external_id):
 def closeout_guard(previous, active, old_instance, new_instance):
     """Treat a replaced history or a large disappearance as uncertain evidence."""
     if old_instance and old_instance != new_instance:
-        return "Search history changed identity. Review it before removing monitoring."
+        return "The Seerr instance has changed. Review request history before applying monitoring changes."
     missing = sum(
         ("movie" if token.startswith("movie:") else "tv", str(row.get("externalId")))
         not in active

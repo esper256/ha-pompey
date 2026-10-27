@@ -23,7 +23,7 @@ def default_status(*, search=False):
     return {
         "updated": time.time(),
         "step": "start",
-        "label": "Starting apps",
+        "label": "Starting applications",
         "percent": 20,
         "error": "",
         "need_vpn": False,
@@ -34,8 +34,8 @@ def default_status(*, search=False):
         "steps": [
             {"id": name, "label": label, "state": "pending"}
             for name, label in [
-                ("start", "Start apps"),
-                ("wire", "Connect search to your library"),
+                ("start", "Start applications"),
+                ("wire", "Configure library connections"),
                 ("ready", "Ready"),
             ]
         ],

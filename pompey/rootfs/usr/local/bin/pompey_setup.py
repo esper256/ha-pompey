@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Accept a VPN WireGuard .conf from the wait screen. Do not log secrets."""
+"""Accept a WireGuard configuration from the setup interface. Do not log secrets."""
 
 from __future__ import annotations
 
@@ -109,7 +109,7 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(400, {"error": str(exc)})
             return
         if path not in {"/setup/vpn", "/vpn"}:
-            self._send(404, {"ok": False, "error": "not found"})
+            self._send(404, {"ok": False, "error": "Not found"})
             return
         try:
             length = int(self.headers.get("Content-Length") or "0")
@@ -120,7 +120,7 @@ class Handler(BaseHTTPRequestHandler):
                 400,
                 {
                     "ok": False,
-                    "error": "That file is too large. Paste only the VPN .conf.",
+                    "error": "Request exceeds the 64 KiB limit. Submit only the WireGuard configuration.",
                 },
             )
             return
@@ -131,7 +131,7 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 payload = json.loads(text or "{}")
             except json.JSONDecodeError:
-                self._send(400, {"ok": False, "error": "Could not read that paste."})
+                self._send(400, {"ok": False, "error": "The request does not contain valid JSON."})
                 return
             if not isinstance(payload, dict):
                 self._send(

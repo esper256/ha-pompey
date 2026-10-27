@@ -341,7 +341,7 @@ def main() -> int:
     binary = recyclarr_bin()
     if not os.path.isfile(binary) or not os.access(binary, os.X_OK):
         log(
-            "Recyclarr binary not on disk; Default/Max/Anime are unavailable until Recyclarr can sync"
+            "Recyclarr executable is missing; Default, Max and Anime profiles cannot be synchronized"
         )
         return 2
     secrets = load_secrets()

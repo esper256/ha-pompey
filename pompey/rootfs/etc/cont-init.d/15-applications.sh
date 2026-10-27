@@ -5,7 +5,7 @@ set -euo pipefail
 source "$(command -v pompey-env)"
 write-engine-configs
 # Own mutable configuration, policy state and generated media directories only.
-# Never chown the household's media tree recursively.
+# Never chown the existing media tree recursively.
 chown -R pompey:pompey \
   "${POMPEY_CONFIG}/radarr" "${POMPEY_CONFIG}/sonarr" \
   "${POMPEY_CONFIG}/prowlarr" "${POMPEY_CONFIG}/seerr" \

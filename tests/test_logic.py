@@ -1,4 +1,4 @@
-"""Focused edge cases for safety logic; application contracts belong in the journey."""
+"""Focused edge cases for safety logic; application contracts are verified by integration scenarios."""
 
 import os
 import json

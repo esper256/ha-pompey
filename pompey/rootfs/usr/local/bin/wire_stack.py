@@ -46,7 +46,7 @@ from pompey_common import (
     http_timeout,
     wait_http,
     arr_headers,
-    SEERR_HOUSEHOLD_PERMS,
+    SEERR_USER_PERMISSIONS,
 )
 import pompey_state as persist
 
@@ -67,7 +67,7 @@ def ensure_root_folder(base: str, api_key: str, path: str) -> None:
 
 
 def wanted_arr_roots(kind: str) -> tuple[str, str, str]:
-    """auto, general, kid. Same three names for movies and TV."""
+    """Automatic, general and rating-specific library paths for movies and TV."""
     if kind == "sonarr":
         return tv_auto_dir(), tv_dir(), tv_kid_dir()
     return movies_auto_dir(), movies_dir(), movies_kid_dir()
@@ -257,7 +257,7 @@ def ensure_prowlarr_download_client(prowlarr: str, pkey: str, secrets: dict) -> 
             updated,
             headers=arr_headers(pkey),
         )
-        log(f"prowlarr download client category={cat} removeCompleted={remove}")
+        log(f"Prowlarr download client category={cat} removeCompleted={remove}")
         return
     schema = http(
         "GET", f"{prowlarr}/api/v1/downloadclient/schema", headers=arr_headers(pkey)
@@ -266,21 +266,18 @@ def ensure_prowlarr_download_client(prowlarr: str, pkey: str, secrets: dict) -> 
     client["name"] = "qBittorrent"
     client["priority"] = 1
     http("POST", f"{prowlarr}/api/v1/downloadclient", client, headers=arr_headers(pkey))
-    log(f"prowlarr download client category={cat} removeCompleted={remove}")
+    log(f"Prowlarr download client category={cat} removeCompleted={remove}")
 
 
 MIN_IMPORT_FREE_SPACE = 100
 
 
 def ensure_media_management(base: str, api_key: str, kind: str) -> None:
-    """Import completed torrents into the library folder Seerr asked for.
+    """Configure native imports, free-space checks and replacement-file recovery.
 
-    Network media shares (this house: /media/dlna) often report 0 free space, so
-    Radarr/Sonarr skip import and the file sits in downloads/complete. Auto
-    completed-download handling must stay on. Hardlinks do not work on CIFS, and
-    the copy fallback is a slow second write — same-share rename (Move) is the
-    household path. Do not fail the wait screen if this PUT 400s — quality
-    profiles and Seerr still need to wire.
+    Network shares can report unavailable free-space information. Stop-sharing
+    imports use moves; continued seeding enables hardlinks with copy fallback.
+    Required configuration failures propagate to the controller.
     """
     try:
         cfg = http(
@@ -372,7 +369,7 @@ def ensure_download_client_handling(base: str, api_key: str, kind: str) -> None:
         )
     except RuntimeError as exc:
         raise RuntimeError(f"{kind} download-client configuration failed") from exc
-    log(f"{kind} completed-download handling on (no auto re-download)")
+    log(f"{kind} completed-download handling enabled; completed torrents are not re-downloaded")
 
 
 def recyclarr_is_fresh() -> bool:
@@ -417,7 +414,7 @@ def run_recyclarr(*, force: bool = False) -> bool:
     if not os.path.isfile(binary) or not os.access(binary, os.X_OK):
         log_if_new(
             "recyclarr-missing",
-            "Recyclarr binary not on disk; Default/Max/Anime are unavailable until Recyclarr can sync",
+            "Recyclarr executable is missing; Default, Max and Anime profiles cannot be synchronized",
         )
         return False
     script = recyclarr_sync_script()
@@ -462,7 +459,7 @@ def profile_id_of(item: dict) -> int | None:
     return None
 
 
-def household_quality_profile(base: str, api_key: str, kind: str):
+def default_quality_profile(base: str, api_key: str, kind: str):
     """Recyclarr owns Default/Max. Never advertise unconfigured placeholders."""
     profiles = as_list(
         http("GET", f"{base}/qualityprofile", headers=arr_headers(api_key))
@@ -593,7 +590,7 @@ def ensure_prowlarr_app(
             updated,
             headers=arr_headers(pkey),
         )
-        log(f"prowlarr app {name} Arr URL {want} cats {want_cats[0]}s")
+        log(f"Prowlarr application {name} Arr URL {want} cats {want_cats[0]}s")
         return
     schema = http(
         "GET", f"{prowlarr}/api/v1/applications/schema", headers=arr_headers(pkey)
@@ -604,7 +601,7 @@ def ensure_prowlarr_app(
     app["syncLevel"] = "fullSync"
     app["tags"] = []
     http("POST", f"{prowlarr}/api/v1/applications", app, headers=arr_headers(pkey))
-    log(f"prowlarr app {name}")
+    log(f"Prowlarr application {name}")
 
 
 def ensure_indexer(prowlarr: str, pkey: str) -> None:
@@ -619,7 +616,7 @@ def qbit_category(name: str, save_path: str) -> None:
     data = urllib.parse.urlencode({"category": name, "savePath": save_path}).encode()
     try:
         http("POST", f"{qbit_url()}/api/v2/torrents/createCategory", data)
-        log(f"qbit category {name} -> {save_path}")
+        log(f"qBittorrent category {name}: {save_path}")
     except RuntimeError as exc:
         # 409 = category already exists. Point it at the requested save path.
         if "409" in str(exc) or "already" in str(exc).lower():
@@ -715,14 +712,14 @@ def configure_seerr(
     s.api_key = seerr_api_key_from_disk()
     have_plex = bool(plex_url() and plex_token())
     if not have_plex:
-        log("Plex URL/token missing; Seerr setup wizard will be used for Plex")
+        log("Plex settings are incomplete; complete the Seerr setup wizard")
 
     if have_plex:
         try:
             s.call("POST", "/api/v1/auth/plex", {"authToken": plex_token()})
-            log("seerr signed in with Plex token")
+            log("Seerr authenticated with Plex")
         except RuntimeError as exc:
-            log(f"seerr plex login: {exc}", "WARNING")
+            log(f"Seerr Plex authentication: {exc}", "WARNING")
             have_plex = False
 
     email = secrets.get("seerr_email") or "pompey@local"
@@ -736,10 +733,10 @@ def configure_seerr(
                 "/api/v1/auth/local",
                 {"email": email, "password": password, "name": "Pompey"},
             )
-            log("seerr signed in with local account")
+            log("Seerr authenticated with a local account")
         except RuntimeError as exc:
             # Real Seerr: no local user until the wizard (or a later password). 403 is expected.
-            log(f"seerr local login: {exc}", "WARNING")
+            log(f"Seerr local authentication: {exc}", "WARNING")
 
     if not s.api_key:
         try:
@@ -747,7 +744,7 @@ def configure_seerr(
             if isinstance(main, dict) and main.get("apiKey"):
                 s.api_key = main["apiKey"]
         except RuntimeError as exc:
-            log(f"seerr api key: {exc}", "WARNING")
+            log(f"Seerr API key: {exc}", "WARNING")
         if not s.api_key:
             s.api_key = seerr_api_key_from_disk()
 
@@ -775,9 +772,9 @@ def configure_seerr(
                 payload["name"] = "Plex"
                 payload["machineId"] = "unknown"
             s.call("POST", "/api/v1/settings/plex", payload)
-            log("plex settings")
+            log("Plex server configuration")
         except RuntimeError as exc:
-            log(f"plex settings: {exc}", "WARNING")
+            log(f"Plex server configuration: {exc}", "WARNING")
 
         try:
             s.call("POST", "/api/v1/settings/plex/library/sync")
@@ -793,10 +790,10 @@ def configure_seerr(
                         {"enabled": True},
                     )
                 except RuntimeError as exc:
-                    log(f"plex library {lib_id}: {exc}", "WARNING")
-            log("plex libraries enabled")
+                    log(f"Plex library {lib_id}: {exc}", "WARNING")
+            log("Plex libraries enabled")
         except RuntimeError as exc:
-            log(f"plex libraries: {exc}", "WARNING")
+            log(f"Plex libraries: {exc}", "WARNING")
 
     radarr_id, radarr_name = radarr_profile
     sonarr_id, sonarr_name = sonarr_profile
@@ -881,20 +878,20 @@ def configure_seerr(
                     update.pop("id", None)
                     s.call("PUT", f"{path}/{server_id}", update)
                     if dir_changed:
-                        log(f"seerr {kind} directory {want}")
+                        log(f"Seerr {kind} directory {want}")
                     if profile_changed:
-                        log(f"seerr {kind} profile {payload.get('activeProfileName')}")
+                        log(f"Seerr {kind} profile {payload.get('activeProfileName')}")
                     if sync_changed:
-                        log(f"seerr {kind} library scan off")
+                        log(f"Seerr {kind} library scanning disabled")
                 return True
             s.call("POST", path, payload)
-            log(f"seerr {kind}")
+            log(f"Seerr {kind}")
             return True
         except RuntimeError as exc:
             # API key impersonates user id 1. That row does not exist until the
             # wizard creates the first admin, so settings 403. Hand off anyway.
             if "403" in str(exc) and not initialized:
-                log(f"seerr {kind} waits until the Plex wizard creates the first admin")
+                log(f"Seerr {kind} configuration is pending initial setup")
                 return False
             if "403" in str(exc):
                 raise RuntimeError(
@@ -927,14 +924,14 @@ def configure_seerr(
             {
                 "applicationTitle": "Pompey",
                 "applicationUrl": "",
-                "defaultPermissions": SEERR_HOUSEHOLD_PERMS,
+                "defaultPermissions": SEERR_USER_PERMISSIONS,
                 "hideAvailable": False,
                 "localLogin": True,
                 "newPlexLogin": True,
             },
         )
     except RuntimeError as exc:
-        log(f"seerr main settings: {exc}", "WARNING")
+        log(f"Seerr settings: {exc}", "WARNING")
 
     try:
         users = s.call("GET", "/api/v1/user") or {}
@@ -951,14 +948,14 @@ def configure_seerr(
             try:
                 s.call("PUT", f"/api/v1/user/{uid}", update)
             except RuntimeError as exc:
-                log(f"seerr user {uid} permissions: {exc}", "WARNING")
+                log(f"Seerr user {uid} permissions: {exc}", "WARNING")
     except RuntimeError as exc:
-        log(f"seerr users: {exc}", "WARNING")
+        log(f"Seerr users: {exc}", "WARNING")
 
     try:
         ensure_settings("/api/v1/settings/network", {"trustProxy": False})
     except RuntimeError as exc:
-        log(f"seerr network: {exc}", "WARNING")
+        log(f"Seerr network settings: {exc}", "WARNING")
 
     public = s.call("GET", "/api/v1/settings/public") or {}
     already = isinstance(public, dict) and public.get("initialized")
@@ -966,9 +963,9 @@ def configure_seerr(
         return
     if have_plex:
         s.call("POST", "/api/v1/settings/initialize")
-        log("seerr initialized")
+        log("Seerr initialization complete")
     else:
-        log("seerr left uninitialized so the Plex setup wizard can run")
+        log("Seerr setup is pending; complete the setup wizard")
 
 
 def main() -> int:
@@ -1013,8 +1010,8 @@ def main() -> int:
     # Required profiles come from the bundled Recyclarr resources.
     if not run_recyclarr():
         raise RuntimeError("Recyclarr has not successfully configured quality profiles")
-    sp = household_quality_profile(sonarr, sk, "sonarr")
-    rp = household_quality_profile(radarr, rk, "radarr")
+    sp = default_quality_profile(sonarr, sk, "sonarr")
+    rp = default_quality_profile(radarr, rk, "radarr")
     sap = anime_quality_profile(sonarr, sk, "sonarr")
     anime_quality_profile(radarr, rk, "radarr")
     for kind, base, key in each_arr(radarr, rk, sonarr, sk):
@@ -1056,7 +1053,7 @@ def main() -> int:
         {"ok": True, "updated": time.time(), "error": ""},
     )
     mark_status("ready", "Ready", 100)
-    log("done")
+    log("Application connections configured")
     return 0
 
 
@@ -1099,7 +1096,7 @@ if __name__ == "__main__":
                 pass
             mark_status(
                 "wire",
-                "Could not connect search",
+                "Unable to configure Seerr connections",
                 80,
                 "Retrying. Check the app log for details.",
             )

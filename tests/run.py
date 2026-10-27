@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build once and run logic, required isolated packets and real household batches."""
+"""Build once and run logic, required isolated packets and real integration batches."""
 
 import argparse
 import json
@@ -32,9 +32,11 @@ def main():
     parser.add_argument("--skip-build", action="store_true")
     parser.add_argument("--image", default="localhost/pompey:foundation")
     parser.add_argument(
+        "--integration-only",
         "--journey-only",
+        dest="journey_only",
         action="store_true",
-        help="Focused journey timing; does not run logic or packet checks",
+        help="Focused integration timing; does not run logic or packet checks",
     )
     parser.add_argument(
         "--runs",
@@ -46,13 +48,13 @@ def main():
         "--scenarios",
         type=int,
         default=12,
-        help="Distinct household journeys per batch",
+        help="Distinct integration scenarios per batch",
     )
     parser.add_argument(
         "--layout",
         choices=["shared", "cloned", "fresh", "ci"],
         default="shared",
-        help="Reuse a running household, clone cold configured state, or start fresh per scenario",
+        help="Reuse a running application stack, clone cold configured state, or start fresh per scenario",
     )
     selection = parser.add_mutually_exclusive_group()
     selection.add_argument(
@@ -144,7 +146,7 @@ def execute(args, engine, results, summary, checkpoint):
             names = {Case(i, "", "").scenario: i for i in range(args.scenarios)}
             missing = set(args.only or args.exclude) - names.keys()
             if missing:
-                raise ValueError("Unknown selected scenarios: " + str(missing))
+                raise ValueError("Unknown scenario names: " + ", ".join(sorted(missing)))
             sample["selectedCases"] = (
                 sorted(names[name] for name in args.only)
                 if args.only
@@ -355,7 +357,10 @@ def journey(
             print("Acceptance artifacts:", destination, flush=True)
     elapsed = round(time.monotonic() - started, 3)
     print(
-        "Startup:", report["timings"]["household-setup-complete"], "seconds", flush=True
+        "Startup:",
+        report["timings"]["application-setup-complete"],
+        "seconds",
+        flush=True,
     )
     for case in report["cases"]:
         print(
@@ -388,7 +393,7 @@ def journey(
         flush=True,
     )
     sample.update(
-        startupSeconds=report["timings"]["household-setup-complete"],
+        startupSeconds=report["timings"]["application-setup-complete"],
         lifecycleOverheadSeconds=overhead,
     )
     save_json(destination / "timing.json", sample)

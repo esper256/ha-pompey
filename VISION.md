@@ -1,11 +1,11 @@
-# Pompey product direction
+# Product direction
 
-The household should request a movie or show in Seerr and watch it through a separate Plex installation. Pompey manages the VPN and localhost services around that journey, inside one Home Assistant OS add-on.
+Pompey provides a request-to-library workflow for movies and TV series using Seerr and a separate Plex installation. It manages the VPN, application configuration, storage policies and service status within one Home Assistant OS app.
 
-Keep the integration smaller than the programs it coordinates. Arr owns release matching, upgrades, imports and library moves. Prowlarr owns source synchronization. Recyclarr owns quality profiles. Pompey adds household folder/sharing policy, conservative request closure, live status and tested pinned releases.
+Keep the integration smaller than the applications it coordinates. Arr manages release matching, upgrades, imports and library moves. Prowlarr synchronizes indexers. Recyclarr manages quality profiles. Pompey provides storage and seeding policies, conservative request closeout, diagnostics and tested application bundles.
 
-The default is automatic routing by rating, with unknown ratings going to general libraries. A household member can choose a specific library or quality profile. Ports 5055 and 9696 serve search and sources on the LAN; hidden consoles are available only through Debug in authenticated Ingress.
+Automatic routing uses age ratings, with unavailable ratings sent to general libraries. Users can select a specific library or quality profile. Search and indexer management are available on local network ports 5055 and 9696. Advanced application interfaces use authenticated Home Assistant Ingress.
 
-Reliability means preserving media, honoring sharing choices, blocking internet when the tunnel is unavailable, continuing retries after upstream outages, and making recovery through Home Assistant cold backups straightforward. Unknown files or ambiguous imports should remain reviewable rather than trigger speculative cleanup.
+Reliability requires preserving media, honoring seeding choices, blocking internet traffic outside the VPN, recovering from upstream outages and supporting recovery through Home Assistant cold backups. Unknown files and ambiguous imports remain available for review.
 
-Release confidence comes from focused tests of difficult safety logic, isolated packet tests and household outcomes through the actual shipped applications. External metadata, one source, one tracker and a synthetic peer provide a deterministic world. Short synthetic media obeys the production quality profiles. The automated suite is the release authority; it does not reproduce Supervisor, real NAS semantics or Plex playback. Dependency promotion and automatic release are enabled only after the foundational journey is expanded to cover the household promises.
+Release validation uses focused tests for complex safety logic, isolated packet tests and integration scenarios through the shipped applications. Metadata replay, one indexer, one tracker and a synthetic peer provide controlled external services. Synthetic media uses accurate durations, sizes and hashes with production quality profiles. Automated acceptance is the release gate; actual Supervisor installation, NAS behavior and Plex playback remain unautomated boundaries. Automatic dependency promotion requires broader integration and forward-upgrade coverage.

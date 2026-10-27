@@ -33,4 +33,4 @@ for index, script in enumerate(re.findall(r"<script>(.*?)</script>", html, re.S)
         ["/opt/pompey/engines/seerr/usr/local/bin/node", "--check", str(path)],
         check=True,
     )
-print("Household UI syntax passed")
+print("Application UI syntax passed")

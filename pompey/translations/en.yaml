@@ -1,65 +1,70 @@
 configuration:
   media_folder:
-    name: Media folder
+    name: Media directory
     description: >-
-      Folder this app can write, from Home Assistant’s point of view.
-      Default /media/dlna (a network share added under Settings →
-      System → Storage as Media named dlna). In-progress downloads go
-      in downloads/ under this folder. Point Plex at the library
-      folders below, not at downloads.
+      Writable base directory for downloads and media libraries, as mounted
+      in Home Assistant. The default is /media/dlna. Configure network storage
+      under Settings → System → Storage before using it here. Add only the
+      library directories to Plex; exclude the downloads subdirectory.
   movies_folder:
-    name: Movies
+    name: "Movies: general"
     description: >-
-      General movies, relative to the media folder. Default
-      Movies/Not Kid Friendly. Do not nest this inside the kid movies
-      folder (Radarr cannot use a root folder that contains another).
+      General movie library, relative to the media directory. Automatic
+      routing sends movies with other or unavailable age ratings here.
+      The default is Movies/Not Kid Friendly. Library directories must not
+      overlap or contain one another.
   movies_kid_folder:
-    name: Kid movies
+    name: "Movies: lower age ratings"
     description: >-
-      Kid movies, relative to the media folder. Default Movies/Kid
-      Friendly. Adults who should also see kid titles can add this
-      folder to the adult Plex movie library as a second location.
+      Movie library for G, PG and PG-13 titles when automatic rating-based
+      routing is selected. The path is relative to the media directory;
+      the default is Movies/Kid Friendly. Add this directory as a separate
+      Plex library or as an additional location in an existing movie library.
   tv_folder:
-    name: TV
+    name: "TV: general"
     description: >-
-      General TV, relative to the media folder. Default
-      TV/Not Kid Friendly.
+      General TV library, relative to the media directory. Automatic
+      routing sends series with other or unavailable age ratings here.
+      The default is TV/Not Kid Friendly. Library directories must not
+      overlap or contain one another.
   tv_kid_folder:
-    name: Kid TV
+    name: "TV: lower age ratings"
     description: >-
-      Kid TV, relative to the media folder. Default TV/Kid Friendly.
+      TV library for TV-Y, TV-Y7, TV-G and TV-PG series when automatic
+      rating-based routing is selected. The path is relative to the media
+      directory; the default is TV/Kid Friendly. Add this directory as a
+      separate Plex library or as an additional location in an existing TV library.
   after_download:
-    name: After a title is in the library
+    name: Torrent seeding policy
     description: >-
-      Sharing finished torrents uses RAM and CPU in this app. Stop sharing
-      (the default) stops the torrent as soon as the download finishes.
-      Arr moves the file into the library and then removes the torrent.
-      Share to 1.0 ratio or for one day if you want to give a little back.
-      The library file is kept either way.
+      Choose whether completed torrents stop seeding immediately, seed to
+      a 1.0 upload/download ratio, or seed for 24 hours. Stop sharing is
+      the default. Radarr or Sonarr imports the media and removes the torrent after
+      import and the selected seeding target. Imported library files are
+      retained. Continued seeding requires hardlinks or an additional file copy.
   simultaneous_downloads:
-    name: Simultaneous downloads
+    name: Active download limit
     description: >-
-      How many titles can download at once when they actually have peers.
-      Default 8. A torrent that is stalled or has no seeds does not use
-      up this number, so one dead grab cannot block the rest of the queue.
-      Raise it if several titles are moving slowly on purpose. Restart
-      after changing.
+      Maximum number of active downloads, from 1 to 20. The default is 8.
+      Slow and stalled torrents are excluded according to qBittorrent activity thresholds. Increase the limit to allow more
+      transfers to run concurrently. Restart Pompey after changing this setting.
   debug:
-    name: Debug
+    name: Advanced application interfaces
     description: >-
-      Off by default. When on, the Pompey sidebar offers the hidden
-      qBittorrent, Radarr, and Sonarr Web UIs (still inside Ingress, not
-      on the LAN). Use this to see a stuck download, or to run
-      Interactive Search on a title you already requested. Turn it off
-      when you are done. Restart the app after changing this.
+      Show links to the Radarr, Sonarr and qBittorrent web interfaces in
+      the Pompey sidebar. Access uses authenticated Home Assistant Ingress;
+      these interfaces are not published on the local network. Disabled by
+      default. Restart Pompey after changing this setting.
   nat_pmp_gateway:
-    name: VPN port forwarding gateway
+    name: NAT-PMP gateway
     description: >-
-      Optional numeric gateway address from a VPN provider that supports
-      NAT-PMP. Leave empty to disable port forwarding. This is separate
-      from the DNS servers in your WireGuard file.
+      Optional numeric gateway address supplied by a VPN provider that
+      supports NAT-PMP port forwarding. Leave empty to disable port
+      forwarding. Use the provider's gateway address, not a DNS server address.
   lan_networks:
-    name: Local networks
+    name: Local network access
     description: >-
-      Optional comma-separated network ranges for local Plex servers or sources,
-      for example 192.168.1.0/24. Internet and DNS continue to require the VPN.
+      Comma-separated network ranges that Pompey may access directly,
+      such as 192.168.1.0/24 for a local Plex server or indexer. Leave empty
+      if direct local network access is not required. Internet access and
+      application DNS continue to use the VPN.

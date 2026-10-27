@@ -1,4 +1,4 @@
-"""Household evidence from real service APIs; explicit searches never run on page load."""
+"""Diagnostic information from real service APIs; explicit searches never run on page load."""
 
 import time
 from urllib.parse import urlencode
@@ -70,7 +70,7 @@ def snapshot():
                     kind + ": more downloads are available in the native queue."
                 )
         except (RuntimeError, OSError, ValueError) as exc:
-            result["attention"].append(kind + ": evidence unavailable: " + str(exc))
+            result["attention"].append(kind + ": diagnostic information unavailable: " + str(exc))
     try:
         torrents = api.http("GET", api.qbit_url() + "/api/v2/torrents/info")
         for item in api.object_list(torrents, "Downloads", ("hash",)):
@@ -83,11 +83,11 @@ def snapshot():
                     "progress": item.get("progress"),
                     "connectedSeeds": item.get("num_seeds"),
                     "path": item.get("content_path"),
-                    "note": "A download need not be linked to a search request. Files are preserved.",
+                    "note": "Downloads can originate outside Seerr. Unmatched files are retained for review.",
                 }
             )
     except (RuntimeError, OSError, ValueError) as exc:
-        result["attention"].append("Downloader evidence unavailable: " + str(exc))
+        result["attention"].append("Download information unavailable: " + str(exc))
     try:
         from request_policy import requests_snapshot, identity
 
@@ -112,7 +112,7 @@ def snapshot():
             for r in requests_snapshot()
         ]
     except (RuntimeError, OSError, ValueError) as exc:
-        result["attention"].append("Search request evidence unavailable: " + str(exc))
+        result["attention"].append("Request information unavailable: " + str(exc))
     result["requestReview"] = state.load("requests").get("reviewRequired", "")
     return result
 
@@ -131,7 +131,7 @@ def explain_search(kind, ident):
     name = "search-" + kind + "-" + str(ident)
     previous = state.load(name)
     if time.time() - previous.get("updated", 0) < 60:
-        raise ValueError("Please wait one minute before searching this title again")
+        raise ValueError("Wait one minute before searching this title again")
     # Persist intent to bound repeated requests even if the upstream search times out.
     state.save(
         name,
@@ -163,7 +163,7 @@ def explain_search(kind, ident):
             name,
             {
                 "updated": time.time(),
-                "status": "Search failed or timed out. This does not mean no releases exist.",
+                "status": "Search failed or timed out. Release availability could not be determined.",
             },
         )
         raise
@@ -181,7 +181,7 @@ def rebaseline():
             (Path(api.seerr_config_dir()) / "settings.json").read_text()
         ).get("clientId")
         if not instance:
-            raise ValueError("Search setup is not complete")
+            raise ValueError("Seerr setup is incomplete")
         state.save("requests", {"version": 3, "owned": {}, "instanceId": instance})
     return {
         "ok": True,

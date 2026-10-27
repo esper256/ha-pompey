@@ -1,4 +1,4 @@
-name: Test
+name: Validation
 on:
   pull_request:
     branches: [main]
@@ -31,7 +31,7 @@ jobs:
         run: python3 tools/ci_scope.py
 
   acceptance:
-    name: Real household journey and isolated packets
+    name: Application integration and network isolation
     needs: changes
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-24.04
@@ -43,7 +43,7 @@ jobs:
         with:
           path: /tmp/pompey-build-cache
           key: pompey-build-${{ runner.os }}-${{ hashFiles('pompey/Dockerfile', 'pompey/vendor_bundle.py', 'pompey/rootfs/usr/share/pompey/engines.json', 'tests/journey/Dockerfile') }}
-      - name: Build the shipped amd64 image once
+      - name: Build the amd64 application image
         run: |
           docker buildx create --use --driver docker-container
           docker buildx build --load --platform linux/amd64 \
@@ -53,7 +53,7 @@ jobs:
             -t localhost/pompey:foundation pompey/
           rm -rf /tmp/pompey-build-cache
           mv /tmp/pompey-build-cache-new /tmp/pompey-build-cache
-      - name: Focused logic, required packets and the real request-to-library journey
+      - name: Validate logic, network isolation and application workflows
         run: bash tests/run.sh --skip-build --layout ci --exclude vpn-download-loss
         env:
           POMPEY_CONTAINER_COMMAND: docker
@@ -66,7 +66,7 @@ jobs:
       - uses: actions/upload-artifact@v7
         if: always()
         with:
-          name: household-journey
+          name: integration-results
           include-hidden-files: true
           path: .test-results/
 
@@ -92,7 +92,7 @@ jobs:
           PYTHON
 
   candidate:
-    name: Current stable upstream candidate (no promotion during foundation)
+    name: Upstream candidate validation (automatic promotion disabled)
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
@@ -100,14 +100,14 @@ jobs:
       - uses: actions/checkout@v7.0.1
       - name: Resolve stable releases and pinned resources
         run: python3 tools/build_engine_manifest.py pompey/rootfs/usr/share/pompey/engines.json
-      - name: Build and exercise the candidate's actual applications
+      - name: Validate candidate application versions
         run: bash tests/run.sh --layout ci
         env:
           POMPEY_CONTAINER_COMMAND: docker
       - uses: actions/upload-artifact@v7
         if: always()
         with:
-          name: candidate-journey
+          name: candidate-results
           include-hidden-files: true
           path: |
             .test-results/

@@ -15,4 +15,4 @@ printf 'nameserver 127.0.0.1\n' > "${POMPEY_RESOLV}"
 chmod 755 "${POMPEY_READY}"
 pompey-secrets >/dev/null
 bashio::log.info "Pompey ${BUILD_VERSION:-0.4.0}: starting bundled applications"
-pompey_status.py start "Starting apps" 20 || true
+pompey_status.py start "Starting applications" 20 || true

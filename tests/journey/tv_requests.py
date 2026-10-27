@@ -1,10 +1,10 @@
-"""Household TV outcomes through real Seerr, Sonarr, source and downloader."""
+"""TV integration scenarios through real Seerr, Sonarr, source and downloader."""
 
 from pathlib import Path
 import time
 import urllib.parse
 from catalogue import offers
-from household import tunnel_bytes
+from applications import tunnel_bytes
 from support import digest, save_json
 
 

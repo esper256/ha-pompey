@@ -5,7 +5,7 @@ set -euo pipefail
 source "$(command -v pompey-env)"
 
 need_vpn() {
-  POMPEY_STATUS_NEED_VPN=1 pompey_status.py vpn "Add your VPN configuration" 8 || true
+  POMPEY_STATUS_NEED_VPN=1 pompey_status.py vpn "Add a WireGuard configuration" 8 || true
 }
 
 # Stamp every wg-quick line. Home Assistant's app log otherwise shows a wall
@@ -33,12 +33,12 @@ wg_quick_up() {
 
 bring_up_wg0() {
   wg-quick down wg0 >/dev/null 2>&1 || true
-  bashio::log.info "Bringing up wg0"
-  POMPEY_STATUS_NEED_VPN=0 pompey_status.py vpn "Connecting VPN" 10 || true
+  bashio::log.info "Starting the WireGuard interface"
+  POMPEY_STATUS_NEED_VPN=0 pompey_status.py vpn "Connecting to the VPN" 10 || true
   if wg_quick_up; then
     return 0
   fi
-  bashio::log.warning "Kernel WireGuard failed; trying wireguard-go"
+  bashio::log.warning "Kernel WireGuard initialization failed; attempting the userspace implementation"
   export WG_QUICK_USERSPACE_IMPLEMENTATION=wireguard-go
   wg_quick_up
 }
@@ -57,8 +57,8 @@ until apply-vpn-config; do
 done
 
 until bring_up_wg0; do
-  bashio::log.error "wg-quick could not bring up wg0; Ingress stays up. Retrying. Open the app log (do not send the VPN key)."
-  POMPEY_STATUS_NEED_VPN=0 pompey_status.py vpn "VPN tunnel could not start" 10 "VPN connection failed. Check the app log." || true
+  bashio::log.error "WireGuard initialization failed. Reconnection will be retried; the Pompey interface remains accessible. Check the log without sharing private keys."
+  POMPEY_STATUS_NEED_VPN=0 pompey_status.py vpn "Unable to start the VPN tunnel" 10 "VPN connection failed. Check the Pompey log." || true
   sleep 5
   exit 1 # Re-read a corrected configuration on the next supervised attempt.
 done

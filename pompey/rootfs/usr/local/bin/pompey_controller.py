@@ -131,13 +131,13 @@ def current_status(ready, services):
         search=services.get("seerr", False),
         step="ready" if complete else "wire",
         percent=100 if complete else 80,
-        label="Ready" if complete else "Services need attention",
+        label="Ready" if complete else "Services require attention",
         error="",
     )
     if not services.get("vpn"):
         data["label"] = "VPN unavailable; local services remain accessible"
     if need_vpn:
-        data["label"] = "Add your VPN configuration"
+        data["label"] = "Add a WireGuard configuration"
     if configuration.get("error"):
         data["error"] = configuration["error"]
     elif not initialized:

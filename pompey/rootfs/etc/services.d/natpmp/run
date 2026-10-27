@@ -13,7 +13,7 @@ fi
 until [[ -f "${POMPEY_READY}/vpn-up" ]]; do
   sleep 2
 done
-bashio::log.info "NAT-PMP renew loop against ${gateway}"
+bashio::log.info "Renewing NAT-PMP port mappings through ${gateway}"
 mkdir -p "${POMPEY_VPN_TMP}"
 
 fail=0

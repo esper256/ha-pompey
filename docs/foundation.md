@@ -1,25 +1,23 @@
-# Integration foundation campaign
+# Integration architecture
 
-## Decisions
+## Runtime
 
-Supervisor builds one amd64 image locally. It contains every checksum-pinned engine and pinned Recyclarr resource. Runtime does not download or replace applications. Fresh installations are the target; no legacy migration, downgrade compatibility or binary/database rollback manager is required. Home Assistant cold backups provide recovery.
+Home Assistant Supervisor builds one amd64 image containing checksum-pinned applications and Recyclarr resources. Startup does not download or replace applications. The supported installation target is a fresh amd64 setup. Home Assistant cold backups provide recovery; legacy-layout migration, downgrade compatibility and automatic binary/database rollback are outside the supported scope.
 
-All engines and controller jobs use one unprivileged `pompey` identity. Executables stay root owned. Privileged network setup installs a fail-closed firewall before engines start; local applications can run without a working tunnel. All internet, including DNS and metadata, requires the VPN. Bootstrap DNS is restricted to privileged endpoint resolution. VPN support is provider neutral.
+Applications and controller jobs use the unprivileged `pompey` identity. Executables remain owned by root. Privileged initialization installs the fail-closed firewall before applications start. Local application access does not require an active tunnel. Application internet traffic, including DNS and metadata requests, requires the VPN. Privileged bootstrap DNS is limited to resolving VPN endpoints. WireGuard configuration is provider neutral.
 
-Keep automatic imports for Prowlarr direct grabs, durable intent and ambiguous-command review. Preserve unexpected files and continue unrelated jobs. Add household diagnostics for request, search, download, import and routing failures. Request closeout remains conservative and must brake on suspected history resets or bulk disappearance.
+Arr manages normal imports and upgrades. Prowlarr direct downloads use a separate category, with persisted import intent and review of ambiguous results. Unknown files remain available for review, and unrelated maintenance jobs continue independently. Request closeout preserves files and monitoring when request history is incomplete or appears to have been reset.
 
-## Acceptance boundary
+## Integration testing
 
-The basic journey uses the shipped image, real Seerr, Arr, Prowlarr, qBittorrent and Recyclarr, and production orchestration. Only external services are fixtures: metadata HTTP replay, one Torznab indexer, one tracker and a synthetic BitTorrent peer. Short synthetic media has honest durations, sizes and piece hashes; production quality profiles are unchanged.
+Tests run the shipped applications and orchestration. External services are controlled fixtures: metadata replay, one Torznab indexer, one tracker and a synthetic BitTorrent peer. Synthetic media has accurate durations, file sizes and piece hashes. Production quality profiles remain active.
 
-The runner proves a new isolated network namespace has no external interface or route before launching a downloader or peer. Local WireGuard fixtures may then be created inside that namespace. No external torrent traffic, discovery or host firewall/default-route changes are permitted.
+Before starting a downloader or peer, the harness verifies a fresh isolated network namespace with no external interface or route. It then creates a local WireGuard fixture inside that environment. Application startup waits for fixture HTTP, DNS and peer services to be listening. Tests do not contact public torrent peers or change host firewall rules or routes.
 
-Keep one empty fresh-install movie journey, then reuse the running household for namespaced PG/R/unknown-rating variants, retaining and verifying earlier requests and media as background noise. Cold configured clones from the same candidate support scenarios that need separate global state. Measure preparation, startup, search, transfer and import separately. Preserve diagnostics and explicitly distinguish fixture failure, timeout and application failure. Do not use whole-suite retries. Keep focused logic tests for difficult boundaries and required isolated packet tests; remove tests that restate implementation.
+One scenario verifies an empty installation. Additional scenarios use unique content identifiers on the same application stack and verify that previously imported media, requests and monitoring remain intact. Cold configured clones support independent startup checks. Reports separate setup, search, transfer, import and lifecycle costs and retain failures without scenario retries. Focused safety-logic tests and isolated packet tests remain required.
 
-## Delivery
+## Release validation
 
-1. Vendor the immutable runtime, simplify startup/maintenance and drop engine privileges.
-2. Replace disconnected integration suites with one measured request-to-library journey.
-3. Expand household outcomes using that foundation before enabling unattended dependency promotion and releases. Required CI remains the release authority; manual HAOS acceptance is no longer a release gate. Document the actual boundary: this suite does not reproduce Supervisor or prove real Plex playback/NAS behavior.
+Required CI is the release gate. Version 0.4.0 permits only the documented VPN download-resumption timeout, subject to successful network recovery and complete safety evidence. Other failures remain fatal. See [testing](testing.md) for the exact exception and coverage boundaries.
 
-Upstream updates must test the candidate's actual binaries and configuration. Passing a fresh-start test does not establish every existing-database upgrade or every household journey; promotion remains disabled while the acceptance foundation is being established.
+Upstream candidates must be built and tested using their actual binaries and configuration. Automatic dependency promotion remains disabled pending broader integration and forward-upgrade coverage. Actual Supervisor installation, Home Assistant Ingress authorization, NAS behavior and Plex playback remain unautomated boundaries.

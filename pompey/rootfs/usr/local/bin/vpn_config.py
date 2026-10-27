@@ -31,22 +31,22 @@ def parse(text):
     interfaces = [fields for name, fields in sections if name == "interface"]
     peers = [fields for name, fields in sections if name == "peer"]
     if len(interfaces) != 1 or not peers or sections[0][0] != "interface":
-        raise ValueError("Use one [Interface] followed by at least one [Peer]")
+        raise ValueError("Specify one [Interface] section followed by at least one [Peer] section")
     iface = {k.lower(): v for k, v in interfaces[0]}
     if not iface.get("privatekey") or not iface.get("address"):
-        raise ValueError("The VPN file needs PrivateKey and Address")
+        raise ValueError("The WireGuard configuration must include PrivateKey and Address")
     for addr in iface["address"].split(","):
         ipaddress.ip_interface(addr.strip())
     addresses = [
         ipaddress.ip_interface(addr.strip()) for addr in iface["address"].split(",")
     ]
     if not any(addr.version == 4 for addr in addresses):
-        raise ValueError("The VPN file needs an IPv4 tunnel address")
+        raise ValueError("The WireGuard configuration must include an IPv4 tunnel address")
     networks = []
     for fields in peers:
         peer = {k.lower(): v for k, v in fields}
         if not peer.get("publickey") or not peer.get("endpoint"):
-            raise ValueError("Each VPN peer needs PublicKey and Endpoint")
+            raise ValueError("Each WireGuard peer must include PublicKey and Endpoint")
         endpoint(peer["endpoint"])
         networks.extend(
             ipaddress.ip_network(n.strip())
@@ -81,7 +81,7 @@ def bootstrap_servers():
 
 
 def resolve_endpoint(host):
-    # The shared resolver never switches back to the household resolver.
+    # The shared resolver never switches back to the host resolver.
     for server in bootstrap_servers():
         for kind in ["A", "AAAA"]:
             result = subprocess.run(

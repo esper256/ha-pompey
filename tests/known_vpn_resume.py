@@ -49,7 +49,7 @@ def main():
             sys.executable,
             str(ROOT / "tests/run.py"),
             "--skip-build",
-            "--journey-only",
+            "--integration-only",
             "--only",
             "vpn-download-loss",
         ],
