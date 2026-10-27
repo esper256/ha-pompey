@@ -4,7 +4,8 @@ on:
     - cron: '41 5 * * *'
   workflow_dispatch:
   workflow_run:
-    workflows: [Validation]
+    workflows: [Validation, 'Release PR #*']
+    branches: [main]
     types: [completed]
 permissions:
   contents: read
