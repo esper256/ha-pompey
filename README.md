@@ -63,11 +63,11 @@ Configuration, requests, download policies and library routing run as separate j
 
 Application versions, artifact checksums, Seerr's image digest and quality-resource commits are pinned in the [bundle manifest](pompey/rootfs/usr/share/pompey/engines.json). Updates are delivered through tested Pompey releases. Runtime startup does not download or replace applications.
 
-Application executables are owned by root. Applications and maintenance jobs run as the unprivileged `pompey` user, UID/GID 1000. Media storage must permit that identity to create, rename and hardlink files.
+Applications and maintenance jobs run as root inside the Home Assistant app container so they can write to Supervisor-managed SMB/CIFS media mounts. Container isolation and the Home Assistant AppArmor profile provide containment; shipped applications share a trust boundary. Pompey does not request privileged-container mode or additional capabilities for this storage access.
 
 Startup checks directory listing and file creation, rename and removal as that user. A failure logs numeric ownership and permissions for the directory and its parents, the filesystem type and relevant mount permission settings. The share account also needs write access on the server.
 
-**Storage compatibility limitation:** Home Assistant SMB/CIFS mounts that present fixed root ownership and mode `0755` are incompatible with Pompey's UID/GID 1000 applications. Home Assistant's standard network-storage form does not expose custom UID/GID or file/directory mode options. Changing NAS ownership or recreating `downloads` may have no effect, and Pompey's startup `chown` cannot repair fixed mount permissions. This requires a storage compatibility change in Pompey or storage accessible to UID/GID 1000; it is not necessarily a NAS configuration error. Keep existing downloads while resolving access.
+Pompey preserves existing directory ownership and does not recursively change media or application configuration ownership. Root-owned SMB directories with mode `0755` are supported. The SMB account still needs server-side write access, and a read-only, unavailable or full share will fail the storage check. Deleting `downloads` is not a permissions repair and can discard active downloads, manual grabs and recycled media.
 
 Home Assistant's **Logs** view combines Pompey and application output, including qBittorrent's file log. Review copied logs for private information before sharing them in an issue; filtering does not guarantee that every sensitive value has been removed. Pompey does not upload diagnostics automatically.
 

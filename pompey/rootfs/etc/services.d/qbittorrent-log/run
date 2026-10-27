@@ -3,4 +3,4 @@
 set -euo pipefail
 # shellcheck source=/dev/null
 source "$(command -v pompey-env)"
-exec s6-setuidgid pompey pompey-log tail "qBittorrent" "${POMPEY_CONFIG}/qBittorrent/logs/qbittorrent.log"
+exec pompey-log tail "qBittorrent" "${POMPEY_CONFIG}/qBittorrent/logs/qbittorrent.log"

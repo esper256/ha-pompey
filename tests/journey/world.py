@@ -60,8 +60,8 @@ def main():
     Path("/tmp/world/services-ready").touch()
     # Sockets are bound; the synthetic peer itself has no root capabilities.
     os.setgroups([])
-    os.setgid(1000)
-    os.setuid(1000)
+    os.setgid(65534)
+    os.setuid(65534)
     while True:
         time.sleep(1)
 

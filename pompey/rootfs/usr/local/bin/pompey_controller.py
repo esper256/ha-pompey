@@ -120,8 +120,7 @@ def current_status(ready, services):
         configuration = json.loads((ready / "configuration.json").read_text())
     except (OSError, ValueError):
         configuration = {}
-    # The unprivileged controller cannot inspect the root-private key directory.
-    # Root networking publishes this non-secret marker after accepting a config.
+    # Networking publishes this marker only after accepting a configuration.
     need_vpn = not (ready / "vpn-applied").exists()
     initialized = (ready / "seerr-arr").exists()
     complete = all(services.values()) and configuration.get("ok") and initialized

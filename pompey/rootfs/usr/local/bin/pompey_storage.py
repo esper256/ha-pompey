@@ -27,7 +27,7 @@ def unescape_mount(value):
 
 def describe(folder):
     path = Path(folder).absolute()
-    print("Application identity: UID=1000 GID=1000")
+    print(f"Application identity: UID={os.getuid()} GID={os.getgid()}")
     for parent in reversed([path, *path.parents]):
         try:
             info = parent.stat()
@@ -64,13 +64,14 @@ def describe(folder):
         if filesystem == "cifs":
             print(
                 "SMB/CIFS ownership and modes may be supplied by the client mount; "
-                "chown/chmod can succeed without changing them. Check client UID/GID "
-                "mapping and modes, and the server permissions for the account used "
-                "by Home Assistant. Recreating downloads does not change mount permissions."
+                "chown/chmod can succeed without changing them. Check whether the "
+                "mount is read-only and whether the account used by Home Assistant "
+                "has write access on the server. Recreating downloads does not change "
+                "mount permissions."
             )
     print(
-        "UID/GID 1000 needs read, write and directory traversal access. "
-        "Check the parent directories, mount permissions and share ACLs. "
+        "Applications need read, write and directory traversal access. "
+        "Check the mount state, available space and server permissions. "
         "Do not delete downloads to repair permissions."
     )
 

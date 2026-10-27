@@ -10,6 +10,8 @@ import sys
 
 
 WIREGUARD_MARK = 0x504F
+# Alpine's existing nobody identity; reserved here for endpoint DNS only.
+BOOTSTRAP_DNS_UID = 65534
 
 
 def parse(text):
@@ -85,11 +87,14 @@ def resolve_endpoint(host):
     for server in bootstrap_servers():
         for kind in ["A", "AAAA"]:
             result = subprocess.run(
-                ["dig", "@" + server, host, kind, "+short", "+time=2", "+tries=1"],
+                ["dig", "-r", "@" + server, host, kind, "+short", "+time=2", "+tries=1"],
                 capture_output=True,
                 text=True,
                 timeout=4,
                 check=False,
+                user=BOOTSTRAP_DNS_UID,
+                group=BOOTSTRAP_DNS_UID,
+                extra_groups=[],
             )
             for line in result.stdout.splitlines():
                 try:

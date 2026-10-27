@@ -22,8 +22,6 @@ def probe(host, port, kind):
     return json.loads(
         subprocess.check_output(
             [
-                "s6-setuidgid",
-                "pompey",
                 sys.executable,
                 "/tests/journey/fixture_network.py",
                 "probe",

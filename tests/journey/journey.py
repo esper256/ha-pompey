@@ -96,8 +96,6 @@ def collect_failure(client, root):
     try:
         dns = subprocess.run(
             [
-                "s6-setuidgid",
-                "pompey",
                 sys.executable,
                 "-c",
                 "import socket; print(socket.getaddrinfo('plex.tv', 443, type=socket.SOCK_STREAM))",
