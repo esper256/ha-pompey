@@ -19,22 +19,22 @@
     * { box-sizing: border-box; }
 
     html, body {
-      height: 100%;
+      min-height: 100%;
       margin: 0;
     }
+    html { scrollbar-gutter: stable; }
 
     body {
       font-family: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
       background: var(--bg);
       color: var(--fg);
-      display: flex;
-      align-items: center;
-      justify-content: center;
+      min-height: 100vh;
       padding: 2rem 1.25rem;
     }
 
     main {
       width: min(36rem, 100%);
+      margin: 0 auto;
     }
 
     h1 {
@@ -157,6 +157,7 @@
     #open-search {
       margin-top: 1.25rem;
     }
+    #open-search:not([hidden]) { display: flex; flex-wrap: wrap; gap: 0.5rem; }
 
     #open-search a {
       display: inline-block;
@@ -169,12 +170,9 @@
       text-decoration: none;
     }
 
-    #open-search a + a {
-      margin-left: 0.5rem;
-    }
-
     #open-search .hint {
-      margin-top: 0.6rem;
+      flex-basis: 100%;
+      margin-top: 0.1rem;
     }
 
     #debug-consoles {
@@ -285,6 +283,41 @@
       font-size: 0.72rem;
       color: var(--muted);
     }
+
+    #diagnostic-panel {
+      margin-top: 1.35rem;
+      border: 1px solid var(--line);
+      border-radius: 0.45rem;
+      background: #0c1018;
+      overflow-wrap: anywhere;
+      font-family: ui-sans-serif, system-ui, sans-serif;
+    }
+
+    #diagnostic-panel summary {
+      padding: 0.85rem 0.95rem;
+      cursor: pointer;
+      font-size: 0.95rem;
+    }
+
+    .diagnostic-body { padding: 0 0.95rem 0.95rem; }
+    .diagnostic-body p { margin-bottom: 0.65rem; }
+    #diagnostics { max-height: 24rem; overflow: auto; }
+    #diagnostic-panel button {
+      max-width: 100%;
+      padding: 0.45rem 0.8rem;
+      margin: 0.25rem 0 0.65rem;
+      border: 1px solid var(--line);
+      border-radius: 0.35rem;
+      background: #1a2230;
+      color: var(--fg);
+      font: inherit;
+      font-size: 0.9rem;
+      text-align: left;
+      overflow-wrap: anywhere;
+      cursor: pointer;
+    }
+    #diagnostic-panel button:disabled { opacity: 0.6; cursor: wait; }
+    #diagnostic-panel :focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; }
   </style>
 </head>
 <body>
@@ -337,13 +370,15 @@
     </section>
     <p id="file-hint" hidden>Open Pompey from the Home Assistant sidebar.</p>
     <p class="error" id="err" hidden></p>
+    <details id="diagnostic-panel">
+      <summary>Request and download diagnostics</summary>
+      <div class="diagnostic-body">
+        <p>Review requests, downloads and import messages. Use Search releases to query your indexers and view release rejection reasons.</p>
+        <button id="inspect">Refresh diagnostics</button>
+        <div id="diagnostics" aria-live="polite"></div>
+      </div>
+    </details>
   </main>
-  <details style="max-width:48rem;margin:1.5rem auto;padding:1rem">
-    <summary>Request and download diagnostics</summary>
-    <p>Review requests, downloads and import messages. Use Search releases to query your indexers and view release rejection reasons.</p>
-    <button id="inspect">Refresh diagnostics</button>
-    <div id="diagnostics" aria-live="polite"></div>
-  </details>
   <script>
     const fileHint = document.getElementById("file-hint");
     const fill = document.getElementById("fill");

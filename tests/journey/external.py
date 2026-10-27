@@ -269,7 +269,8 @@ class World:
 
         if host != PEER_IP and (
             path.startswith(("/control/", "/download/"))
-            or path in {"/announce", "/api", "/api/", "/library/sections"}
+            or path in {"/announce", "/api", "/api/"}
+            or (path == "/library/sections" and host != "198.18.0.2")
         ):
             self.unexpected(f"{host}{path}")
             return js({"error": "Wrong fixture host"}, 404)
@@ -448,7 +449,7 @@ class World:
             return "application/xml", b'<MediaContainer size="0"/>', 200
         if path == "/library/sections":
             return js({"MediaContainer": {"Directory": []}})
-        if path == "/" and host == PEER_IP:
+        if path == "/" and host in {PEER_IP, "198.18.0.2"}:
             return js(
                 {
                     "MediaContainer": {

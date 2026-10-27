@@ -64,7 +64,8 @@ configuration:
   lan_networks:
     name: Local network access
     description: >-
-      Comma-separated network ranges that Pompey may access directly,
-      such as 192.168.1.0/24 for a local Plex server or indexer. Leave empty
-      if direct local network access is not required. Internet access and
-      application DNS continue to use the VPN.
+      Additional network ranges that Pompey may access directly, separated
+      by commas, such as 192.168.1.0/24 for a Plex server on another device.
+      Private networks directly connected to the app container are detected
+      automatically, including services on the same Home Assistant host.
+      Application DNS and other internet traffic continue to use the VPN.

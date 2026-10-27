@@ -31,6 +31,8 @@ def main():
     else:
         raise RuntimeError("Local fixture underlay missing")
     run("ip", "link", "set", "lo", "up")
+    run("ip", "addr", "add", "198.19.0.2/32", "dev", "lo")
+    run("ip", "addr", "add", "198.19.0.3/32", "dev", "lo")
     run("ip", "addr", "add", "198.18.0.2/30", "dev", "fixture-peer")
     run("ip", "link", "set", "fixture-peer", "up")
     run("ip", "link", "add", "wg-fixture", "type", "wireguard")

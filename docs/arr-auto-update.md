@@ -2,7 +2,7 @@
 
 Supervisor builds one immutable amd64 image from `pompey/Dockerfile`. `pompey/vendor_bundle.py` runs only during that build: it verifies artifact checksums, extracts safe archive members, exports the digest-pinned Seerr image and checks out the pinned Recyclarr resource commits. Runtime contains neither this installer nor its download tools. `/opt/pompey` is root owned.
 
-`write_engine_configs.py` writes managed settings before s6 starts applications. Engine binaries run as the shared `pompey` identity. Arr self-updates are disabled; updates arrive through the add-on image. `recyclarr_sync.py` reads bundled local resources without GitHub access and configures real Default, Max and Anime profiles. A durable image-identity record is accepted only when the profiles still exist in both Arr services.
+`write_engine_configs.py` writes managed settings before s6 starts applications. Engine binaries and controller jobs run as container root for HAOS SMB compatibility. Arr self-updates are disabled; updates arrive through the add-on image. `recyclarr_sync.py` reads bundled local resources without GitHub access and configures real Default, Max and Anime profiles. A durable image-identity record is accepted only when the profiles still exist in both Arr services.
 
 The controller has bounded, serialized configuration, download, request and routing jobs. Health probes continue independently. Startup uses the real cont-init-before-services ordering rather than engine-download barriers. Configuration failure clears current prerequisite markers and remains visible; initialized Seerr connections and source synchronization are required.
 

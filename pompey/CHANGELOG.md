@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.2
+
+- Discover private directly connected container networks automatically so same-host Plex and other local services work without internal HAOS addresses in the network-access setting. Keep application DNS restricted to the VPN.
+- Stop reporting Plex setup as incomplete when Seerr is already initialized, and log successful VPN connection explicitly.
+- Keep diagnostics within the Ingress dashboard column and make expanded content scroll without shifting other panels.
+- Preserve the original return route for published Seerr, Prowlarr and Ingress TCP interfaces while the VPN is active, including when Local network access is empty. Additional LAN access remains explicitly configured and the fail-closed firewall remains required.
+
 ## 0.4.1
 
 - Revert UID/GID 1000 application execution for compatibility with Home Assistant SMB media mounts. Run the stack as container root without changing existing directory ownership; retain VPN-only application DNS with a separate endpoint resolver identity.

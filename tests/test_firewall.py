@@ -214,7 +214,7 @@ class FirewallPackets(unittest.TestCase):
         self.install()
         server = self.process(
             self.client,
-            "import socket;s=socket.socket();s.bind(('0.0.0.0',5055));s.listen();print('ready');c,_=s.accept();c.sendall(b'UI');c.close()",
+            "import socket;s=socket.socket();s.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1);s.bind(('0.0.0.0',5055));s.listen();print('ready');c,_=s.accept();c.sendall(b'UI');c.close()",
         )
         self.assertEqual(server.stdout.readline().strip(), "ready")
         result = self.command(
@@ -336,6 +336,120 @@ while True:
             "-c",
             "import socket;s=socket.create_connection(('127.0.0.1',8097),1);assert s.recv(5)==b'setup'",
         )
+
+    def test_i_published_ui_replies_bypass_vpn_routes_without_outbound_access(self):
+        self.install()
+        self.command(self.client, "ip", "link", "add", "wg0", "type", "dummy")
+        self.command(self.client, "ip", "link", "set", "wg0", "up")
+        self.addCleanup(lambda: self.command(self.client, "ip", "link", "del", "wg0"))
+        for family, router, local, remote, tunnel_net in [
+            (4, "198.18.0.2", "198.18.0.1", "198.19.0.2", "198.19.0.0/16"),
+            (6, "2001:db8:1::2", "2001:db8:1::1", "2001:db8:2::2", "2001:db8:2::/64"),
+        ]:
+            with self.subTest(family=family):
+                flag = f"-{family}"
+                self.command(self.client, "ip", flag, "addr", "replace", local + ("/24" if family == 4 else "/64"), "dev", "eth0", *([] if family == 4 else ["nodad"]))
+                self.command(self.server, "ip", flag, "addr", "add", remote + ("/32" if family == 4 else "/128"), "dev", "lo")
+                self.command(self.client, "ip", flag, "route", "replace", "default", "via", router, "dev", "eth0")
+                self.command(self.client, "ip", flag, "route", "replace", tunnel_net, "dev", "wg0")
+                server = self.process(self.client, f"""import socket,threading
+def serve(port):
+ s=socket.socket(socket.AF_INET if {family}==4 else socket.AF_INET6)
+ s.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1)
+ s.bind(('{local}',port));s.listen()
+ def accept():
+  while True:
+   c,_=s.accept();c.sendall(b'UI');c.close()
+ threading.Thread(target=accept,daemon=True).start()
+for port in [5055,9696,8099]:serve(port)
+print('ready',flush=True)
+threading.Event().wait()
+""")
+                ready = server.stdout.readline().strip()
+                if ready != "ready":
+                    self.fail(server.stderr.read())
+                connect = f"""import socket
+s=socket.socket(socket.AF_INET if {family}==4 else socket.AF_INET6)
+s.settimeout(.4);s.bind(('{remote}',0))
+"""
+                self.command(self.server, sys.executable, "-c", connect + f"""
+try:s.connect(('{local}',5055))
+except OSError:pass
+else:raise AssertionError('Expected UI return traffic to be lost in wg0')
+finally:s.close()
+""")
+                self.command(self.client, sys.executable, "-c", f"""
+import sys
+sys.path.insert(0,'/usr/local/bin')
+from vpn_routes import preserve_ui_replies
+preserve_ui_replies({family},{{'gateway':'{router}','dev':'eth0'}})
+preserve_ui_replies({family},{{'gateway':'{router}','dev':'eth0'}})
+""")
+                for port in [5055, 9696, 8099]:
+                    self.command(self.server, sys.executable, "-c", connect + f"s.connect(('{local}',{port}));assert s.recv(2)==b'UI';s.close()")
+                server.terminate()
+                server.wait(3)
+                listener = self.process(self.server, f"""import socket
+s=socket.socket(socket.AF_INET if {family}==4 else socket.AF_INET6)
+s.bind(('{router}',18080));s.listen();print('ready',flush=True)
+while True:
+ c,_=s.accept();c.sendall(b'escaped');c.close()
+""")
+                self.assertEqual(listener.stdout.readline().strip(), "ready")
+                self.command(self.client, sys.executable, "-c", f"""import socket
+s=socket.socket(socket.AF_INET if {family}==4 else socket.AF_INET6)
+s.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1)
+s.settimeout(.4);s.bind(('{local}',5055))
+try:s.connect(('{router}',18080))
+except OSError:pass
+else:raise AssertionError('New outbound connection escaped using a UI source port')
+finally:s.close()
+""")
+
+    def test_j_connected_container_services_work_but_dns_stays_blocked(self):
+        # Earlier interface-down coverage can remove its IPv6 address.
+        self.command(self.client, "ip", "-6", "addr", "replace", "2001:db8:1::1/64", "dev", "eth0", "nodad")
+        result = self.command(self.client, sys.executable, "-c", """
+import sys
+sys.path.insert(0,'/usr/local/bin')
+from vpn_firewall import rules,container_networks
+print(rules('', '', container_networks()))
+""")
+        self.command(self.client, "nft", "-f", "-", input=result.stdout)
+        for family, address in [(4, "198.18.0.2"), (6, "2001:db8:1::2")]:
+            with self.subTest(family=family):
+                server = self.process(self.server, f"""import socket,threading
+kind=socket.AF_INET if {family}==4 else socket.AF_INET6
+def tcp(port,reply):
+ s=socket.socket(kind);s.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1);s.bind(('{address}',port));s.listen()
+ def accept():
+  while True:
+   c,_=s.accept();c.sendall(reply);c.close()
+ threading.Thread(target=accept,daemon=True).start()
+tcp(32400,b'Plex');tcp(53,b'DNS')
+u=socket.socket(kind,socket.SOCK_DGRAM);u.bind(('{address}',53))
+def dns():
+ while True:
+  data,peer=u.recvfrom(100);u.sendto(data,peer)
+threading.Thread(target=dns,daemon=True).start()
+print('ready',flush=True)
+threading.Event().wait()
+""")
+                self.assertEqual(server.stdout.readline().strip(), "ready")
+                self.command(self.client, sys.executable, "-c", f"""import socket
+kind=socket.AF_INET if {family}==4 else socket.AF_INET6
+s=socket.create_connection(('{address}',32400),1)
+assert s.recv(4)==b'Plex';s.close()
+for protocol in [socket.SOCK_DGRAM,socket.SOCK_STREAM]:
+ s=socket.socket(kind,protocol);s.settimeout(.4)
+ try:
+  if protocol==socket.SOCK_DGRAM:s.sendto(b'DNS',('{address}',53))
+  else:s.connect(('{address}',53))
+  s.recv(3)
+ except OSError:pass
+ else:raise AssertionError('Container-network access allowed cleartext DNS')
+ finally:s.close()
+""")
 
 
 if __name__ == "__main__":
