@@ -9,6 +9,7 @@ import copy
 import json
 from dependency_updates import api
 from release_metadata import current, next_patch, split_unreleased
+from release_protection import required_protection
 
 ALLOWED = {"pompey/rootfs/usr/share/pompey/engines.json", "pompey/config.yaml", "pompey/Dockerfile", "pompey/CHANGELOG.md"}
 MANIFEST = "pompey/rootfs/usr/share/pompey/engines.json"
@@ -125,12 +126,7 @@ def main():
     main_sha = api(base + "/git/ref/heads/main")["object"]["sha"]
     merge = api(base + "/git/commits/" + plan["revision"])
     validate_plan(plan, pr, main_sha, merge)
-    query = 'query { repository(owner:"esper256",name:"ha-pompey") { ref(qualifiedName:"refs/heads/main") { branchProtectionRule { requiresStrictStatusChecks requiredStatusChecks { context app { databaseId } } } } } }'
-    rule = api("graphql", "POST", {"query": query})["data"]["repository"]["ref"]["branchProtectionRule"]
-    protection = {"strict": bool(rule and rule["requiresStrictStatusChecks"]),
-                  "checks": [{"context": c["context"], "app_id": (c.get("app") or {}).get("databaseId")} for c in (rule or {}).get("requiredStatusChecks", [])]}
-    if not protection["strict"] or {"context": "CI required", "app_id": 15368} not in protection["checks"]:
-        raise ValueError("Strict GitHub Actions CI protection must remain enabled")
+    protection = required_protection(repo)
     if plan["kind"] == "dependency":
         files = api(base + "/pulls/" + number + "/files?per_page=100")
         validate({**pr, "draft": False}, files, plan["head"], {"behind_by": 0}, protection)

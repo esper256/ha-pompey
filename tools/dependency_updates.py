@@ -21,7 +21,10 @@ def api(path, method="GET", body=None):
     if body is not None:
         args += ["--input", "-"]
     result = subprocess.run(args, input=json.dumps(body) if body is not None else None,
-                            capture_output=True, text=True, check=True)
+                            capture_output=True, text=True)
+    if result.returncode:
+        # Keep the actionable HTTP/permission error, without logging token or body.
+        raise RuntimeError("GitHub API " + method + " " + path + ": " + result.stderr.strip()[:500])
     return json.loads(result.stdout) if result.stdout.strip() else None
 
 

@@ -6,6 +6,7 @@ import os
 import re
 import time
 from dependency_updates import api
+from release_protection import required_protection
 
 REPO = "esper256/ha-pompey"
 BASE = "repos/" + REPO
@@ -45,6 +46,8 @@ def main():
     bot, manual = os.environ.get("CANDIDATE_PR", ""), os.environ.get("RELEASE_PR", "")
     if bool(bot) == bool(manual) or not re.fullmatch(r"[1-9][0-9]*", bot or manual):
         raise ValueError("Choose exactly one dependency candidate or release PR")
+    # Catch an unreadable/missing gate before spending time building two images.
+    required_protection(REPO)
     number = int(bot or manual)
     pr = api(BASE + "/pulls/" + str(number))
     main_sha = api(BASE + "/git/ref/heads/main")["object"]["sha"]
