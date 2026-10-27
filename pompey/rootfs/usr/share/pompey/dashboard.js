@@ -46,7 +46,7 @@
     element("recollect-report").hidden = true;
     reportDialog.setAttribute("aria-busy", "true");
     reportStatus.classList.remove("check-warning");
-    reportStatus.textContent = "Collecting application state, request history and logs…";
+    reportStatus.textContent = "Collecting release sequences…";
     try {
       const response = await timedFetch(ingressBase() + "diagnostics/report", {
         method: "POST", headers: {"Content-Type": "application/json"}, body: "{}", cache: "no-store"
@@ -57,7 +57,6 @@
       }
       reportText.value = await response.text();
       reportText.hidden = false;
-      element("view-report").hidden = false;
       reportStatus.textContent = "Report ready · " + new Date().toLocaleTimeString();
     } catch (error) {
       reportStatus.textContent = error.message + (reportText.value ? " The previous report is still available." : " Try collecting again.");
@@ -68,12 +67,10 @@
       element("collect-report").disabled = false;
       element("recollect-report").hidden = false;
       element("copy-report").disabled = element("save-report").disabled = !reportText.value;
-      element("view-report").hidden = false;
     }
   }
   element("collect-report").addEventListener("click", event => collectReport(event.currentTarget));
   element("recollect-report").addEventListener("click", () => collectReport(reportOpener));
-  element("view-report").addEventListener("click", event => openReport(event.currentTarget));
   element("copy-report").addEventListener("click", async () => {
     try {
       await navigator.clipboard.writeText(reportText.value);
@@ -92,6 +89,137 @@
     document.body.append(link); link.click(); link.remove();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   });
+
+  const recoveryDialog = element("recovery-dialog");
+  let recoveryTarget = null;
+  let recoveryItem = null;
+  let recoveryOpener = null;
+  let recoveryBusy = false;
+  let recoveryGeneration = 0;
+  let recoveryDownloadId = null;
+  function closeRecovery() { if (!recoveryBusy) recoveryDialog.close(); }
+  for (const id of ["close-recovery", "cancel-recovery"]) element(id).addEventListener("click", closeRecovery);
+  recoveryDialog.addEventListener("cancel", event => { if (recoveryBusy) event.preventDefault(); });
+  recoveryDialog.addEventListener("close", () => { recoveryGeneration++; recoveryOpener?.focus({preventScroll:true}); });
+  async function prepareRecovery(downloadId) {
+    const generation = ++recoveryGeneration;
+    const item = recoveryItem;
+    recoveryDownloadId = downloadId;
+    recoveryTarget = null;
+    element("confirm-recovery").disabled = true;
+    element("refresh-recovery").hidden = true;
+    element("recovery-target").replaceChildren();
+    element("recovery-status").textContent = "Checking this release and its files…";
+    try {
+      const plan = await diagnosticRequest("/recovery/preview", {kind:item.kind, id:item.id, downloadId});
+      if (generation !== recoveryGeneration || !recoveryDialog.open) return;
+      recoveryTarget = plan;
+      const container = element("recovery-target");
+      container.append(text("strong", plan.release));
+      for (const [label, files, field] of [["Download files",plan.downloadFiles,"name"],["Library files",plan.libraryFiles,"path"]]) {
+        if (!files.length) continue;
+        container.append(text("h3",label + " · " + files.length));
+        const list = document.createElement("ul");
+        for (const file of files) list.append(text("li",file[field]));
+        container.append(list);
+      }
+      if (!plan.downloadFiles.length && !plan.libraryFiles.length) container.append(text("p","No files remain. This will blocklist the recorded release and search again."));
+      element("recovery-status").textContent = "Review the affected files before continuing.";
+      element("confirm-recovery").disabled = false;
+    } catch (error) {
+      if (generation !== recoveryGeneration || !recoveryDialog.open) return;
+      element("recovery-status").textContent = error.message;
+      element("refresh-recovery").hidden = false;
+    }
+  }
+  async function openRecovery(item, opener) {
+    const generation = ++recoveryGeneration;
+    recoveryItem = item; recoveryOpener = opener; recoveryTarget = null; recoveryDownloadId = null;
+    element("recovery-target").replaceChildren();
+    element("recovery-choice").hidden = element("recovery-choice-label").hidden = true;
+    element("recovery-note").value = "";
+    element("recovery-reason").value = item.phase === "Waiting for peers" ? "stalled" : "other";
+    element("confirm-recovery").disabled = true;
+    element("refresh-recovery").hidden = true;
+    recoveryDialog.showModal(); element("recovery-title").focus();
+    if (item.downloadId) return prepareRecovery(item.downloadId);
+    element("recovery-status").textContent = "Finding the imported releases…";
+    try {
+      const data = await diagnosticRequest("/recovery/releases", {kind:item.kind,id:item.id});
+      if (generation !== recoveryGeneration || !recoveryDialog.open) return;
+      if (!data.choices.length) throw new Error("No current library files have identifiable release history. Use the advanced application interface to review them.");
+      if (data.choices.length === 1) return prepareRecovery(data.choices[0].downloadId);
+      const select = element("recovery-choice");
+      const placeholder = text("option","Choose a release…"); placeholder.value = ""; select.replaceChildren(placeholder);
+      for (const choice of data.choices) {
+        const option = text("option",choice.release + " · " + choice.files.length + " file(s)"); option.value = choice.downloadId; select.append(option);
+      }
+      select.hidden = element("recovery-choice-label").hidden = false;
+      element("recovery-status").textContent = "Choose the release to replace. A season pack can contain several episodes.";
+    } catch (error) { if (generation === recoveryGeneration && recoveryDialog.open) element("recovery-status").textContent = error.message; }
+  }
+  element("recovery-choice").addEventListener("change", event => {
+    if(event.target.value) return prepareRecovery(event.target.value);
+    recoveryGeneration++; recoveryTarget = null; recoveryDownloadId = null;
+    element("confirm-recovery").disabled = true; element("recovery-target").replaceChildren();
+    element("recovery-status").textContent = "Choose the release to replace.";
+  });
+  element("refresh-recovery").addEventListener("click", () => prepareRecovery(recoveryDownloadId || recoveryItem.downloadId || element("recovery-choice").value));
+  element("confirm-recovery").addEventListener("click", async () => {
+    if (!recoveryTarget || recoveryBusy) return;
+    recoveryBusy = true;
+    element("confirm-recovery").disabled = true;
+    element("cancel-recovery").disabled = element("close-recovery").disabled = element("recovery-choice").disabled = true;
+    element("recovery-status").textContent = "Saving evidence, removing this release and asking Arr for a replacement…";
+    try {
+      const result = await diagnosticRequest("/recovery/reject", {kind:recoveryTarget.kind,id:recoveryTarget.id,
+        downloadId:recoveryTarget.downloadId, token:recoveryTarget.token, confirmationId:recoveryTarget.confirmationId,
+        confirm:true,reason:element("recovery-reason").value,note:element("recovery-note").value});
+      recoveryDialog.close();
+      await refreshRequests();
+      element("request-status").textContent = result.message;
+    } catch (error) {
+      element("recovery-status").textContent = error.message;
+      element("refresh-recovery").hidden = false;
+    } finally {
+      recoveryBusy = false;
+      element("cancel-recovery").disabled = element("close-recovery").disabled = element("recovery-choice").disabled = false;
+    }
+  });
+  function renderSequences() {
+    const sequences = requestData?.sequences || [];
+    element("sequence-history").hidden = !sequences.length;
+    const container = element("sequence-list");
+    // Preserve an open history disclosure during routine refreshes.
+    const open = new Set([...container.querySelectorAll("details[open]")].map(n=>n.dataset.sequence));
+    container.replaceChildren();
+    for (const sequence of sequences) {
+      const detail = document.createElement("details"); detail.dataset.sequence = sequence.sequenceId;
+      detail.open = open.has(sequence.sequenceId);
+      detail.append(text("summary",sequence.title + " · " + sequence.attempts.length + (sequence.attempts.length === 1 ? " attempt · " : " attempts · ") + sequence.status));
+      const list = document.createElement("ol");
+      const events = sequence.attempts.map(attempt => ({at:attempt.at, label:(attempt.stage === "retry-requested" ? "Rejected: " : "Rejection requested: ") + attempt.release + " — " + attempt.reason.replaceAll("_"," ") + (attempt.note ? ": " + attempt.note : "") + (attempt.error ? " · " + attempt.error : "")}));
+      const labels = {grabbed:"Selected",downloadFolderImported:"Imported"};
+      const seen = new Set();
+      for (const outcome of sequence.outcomes || []) {
+        const label = labels[outcome.eventType];
+        if (!label) continue;
+        const key = outcome.eventType + ":" + outcome.downloadId;
+        if(seen.has(key)) continue; seen.add(key);
+        events.push({at:Date.parse(outcome.date)/1000,label:label + ": " + outcome.sourceTitle});
+      }
+      events.sort((a,b)=>a.at-b.at);
+      for (const event of events) list.append(text("li",event.label));
+      detail.append(list);
+      if (sequence.status === "Needs attention") {
+        const button = text("button","Try another","danger-button");
+        button.addEventListener("click",()=>openRecovery({...sequence,downloadId:sequence.attempts.at(-1).downloadId},button));
+        detail.append(button);
+      }
+      if (sequence.collectionError) detail.append(text("p","Current outcome unavailable. " + sequence.collectionError,"field-help"));
+      container.append(detail);
+    }
+  }
 
   let overview = null;
   let overviewBusy = false;
@@ -116,7 +244,7 @@
     tabs.find(tab => tab.getAttribute("aria-controls") === id).focus({preventScroll: true});
   }
   function showAttention() {
-    attentionOnly = true;
+    attentionOnly = true; importedOnly = false;
     setFilters();
   }
   function metric(title, value, detail, source, action = null, warning = false) {
@@ -299,8 +427,10 @@
   let requestData = null;
   let requestsBusy = false;
   let attentionOnly = false;
+  let importedOnly = false;
+  let requestItems = new Map();
   let requestOrder = [];
-  const table = document.createElement("table"); table.setAttribute("role", "table"); table.className = "workflow-table"; table.setAttribute("aria-label", "Request progress");
+  const table = document.createElement("table"); table.setAttribute("role", "table"); table.className = "workflow-table"; table.setAttribute("aria-label", "Release progress");
   const head = document.createElement("thead"); const headings = document.createElement("tr");
   for (const label of ["Title", "Status"]) { const th = text("th", label); th.scope = "col"; headings.append(th); }
   head.append(headings); table.append(head);
@@ -333,8 +463,10 @@
     const technical = document.createElement("details"); technical.className = "technical-details";
     const summary = text("summary", "Technical details");
     const fields = document.createElement("dl"); fields.className = "evidence-list"; technical.append(summary, fields);
-    detail.append(evidence, actions, results, technical); cell.append(detail);
-    const component = {key, row, button, scope, status, detailRow, evidence, actions, results, fields, actionSignature: null};
+    const primaryActions = document.createElement("div"); primaryActions.className = "actions";
+    technical.append(actions, results);
+    detail.append(evidence, primaryActions, technical); cell.append(detail);
+    const component = {key, row, button, scope, status, detailRow, evidence, actions, primaryActions, results, fields, actionSignature: null};
     row.addEventListener("click", event => {
       if (event.target.closest("a")) return;
       selectedWorkflow = selectedWorkflow === key ? null : key;
@@ -349,7 +481,7 @@
       if (value !== undefined && value !== null && value !== "") fields.append(text("dt", name), text("dd", value));
     };
     const download = item.download;
-    const importing = ["Import needs attention", "Waiting for import", "Imported to library"].includes(item.phase);
+    const importing = ["Import needs attention", "Waiting for import", "Imported to library", "Imported"].includes(item.phase);
     if (download && item.available && Number.isFinite(download.progress) && !importing) {
       const progress = document.createElement("div"); progress.className = "transfer-progress";
       const meter = document.createElement("progress"); meter.max = 1; meter.value = download.progress; meter.setAttribute("aria-label", "Download progress");
@@ -368,7 +500,7 @@
       if (download.speed > 0) parts.push(fmtBytes(download.speed) + "/s");
       if (download.eta > 0 && download.eta < 8640000) parts.push("About " + Math.max(1, Math.round(download.eta / 60)) + " min remaining");
       if (parts.length) evidence.append(text("p", parts.join(" · ")));
-    } else if (item.nextAction) evidence.append(text("p", item.nextAction));
+    } else if (item.nextAction && !item.library) evidence.append(text("p", item.nextAction));
     if (debugConsoles.hidden && ["stoppedDL", "pausedDL", "error", "missingFiles"].includes(download?.state)) evidence.append(text("p", "Enable advanced interfaces in Home Assistant’s app settings to inspect this download."));
     addField("Application", labels[item.kind] || item.kind);
     addField(item.available ? "Observed" : "Last observed", item.updated ? new Date(item.updated * 1000).toLocaleString() : "Unavailable");
@@ -383,9 +515,14 @@
       if (Number.isFinite(download.remainingBytes)) addField("Remaining", fmtBytes(download.remainingBytes));
     }
     const canSearch = item.available && ["radarr", "sonarr"].includes(item.kind) && item.id && !importing;
-    const signature = JSON.stringify([canSearch, item.kind, item.id, !!download, debugConsoles.hidden]);
+    const signature = JSON.stringify([item.available, canSearch, item.kind, item.id, item.library, item.downloadId, item.fileId, !!download, debugConsoles.hidden]);
     if (signature !== component.actionSignature) {
-      component.actionSignature = signature; component.actions.replaceChildren(); component.searchButton = null;
+      component.actionSignature = signature; component.actions.replaceChildren(); component.primaryActions.replaceChildren(); component.searchButton = null;
+      if(item.available && ["radarr","sonarr"].includes(item.kind) && item.id && (item.downloadId || item.library)) {
+        const retry = text("button","Try another","danger-button");
+        retry.addEventListener("click",()=>openRecovery(component.item,retry));
+        component.primaryActions.append(retry);
+      }
       if (canSearch) {
         const inspect = text("button", "Inspect releases");
         component.searchButton = inspect;
@@ -411,28 +548,41 @@
   }
   function renderRequests() {
     if (!requestData) return;
-    const items = requestData.workflow || [];
-    element("count-all").textContent = items.length;
-    element("count-attention").textContent = items.filter(isAttention).length;
+    const active = [...requestItems.values()].filter(r=>!r.library);
+    element("count-all").textContent = active.length;
+    element("count-attention").textContent = active.filter(isAttention).length;
+    element("count-imported").textContent = [...requestItems.values()].filter(r=>r.library).length;
     const query = element("request-filter").value.trim().toLocaleLowerCase();
     let visible = 0;
     for (const key of requestOrder) {
-      const component = components.get(key); const item = component.item;
-      const shown = (!attentionOnly || isAttention(item)) && (!query || [item.title, item.scope, item.release].filter(Boolean).join(" ").toLocaleLowerCase().includes(query));
+      const item = requestItems.get(key);
+      const matches = (!attentionOnly || (!item.library && isAttention(item))) &&
+        (query ? [item.title,item.scope,item.release].filter(Boolean).join(" ").toLocaleLowerCase().includes(query)
+          : importedOnly === !!item.library);
+      const shown = matches && visible < 100;
+      if (matches) visible++;
+      if (shown && !components.has(key)) {
+        const component = makeComponent(key); components.set(key,component); body.append(component.row,component.detailRow);
+        component.item = item; updateSummary(component,item);
+      }
+      const component = components.get(key);
+      if(!component) continue;
       component.row.hidden = !shown;
       const selected = shown && selectedWorkflow === key;
-      component.row.classList.toggle("selected", selected);
-      component.button.setAttribute("aria-expanded", String(selected));
+      component.row.classList.toggle("selected",selected);
+      component.button.setAttribute("aria-expanded",String(selected));
       component.detailRow.hidden = !selected;
-      if (selected) detailEvidence(component, item);
-      visible += Number(shown);
+      if(selected) detailEvidence(component,item);
     }
     table.hidden = !visible; empty.hidden = !!visible;
-    empty.textContent = items.length ? "No items match this filter." : "No active downloads or missing monitored media. Request history is available in Seerr.";
+    empty.textContent = query || attentionOnly ? "No releases match this filter." : importedOnly
+      ? "No imported titles are reported." : "No active downloads or missing monitored media.";
+    if(!element("request-status").classList.contains("check-warning") && visible>100) element("request-status").textContent = "Showing 100 of " + visible + " matches. Search to narrow the list.";
   }
   function setFilters() {
-    element("filter-all").setAttribute("aria-pressed", String(!attentionOnly));
+    element("filter-all").setAttribute("aria-pressed", String(!attentionOnly && !importedOnly));
     element("filter-attention").setAttribute("aria-pressed", String(attentionOnly));
+    element("filter-imported").setAttribute("aria-pressed",String(importedOnly));
     renderRequests();
   }
   function updateSummary(component, item) {
@@ -454,26 +604,27 @@
     element("inspect").disabled = true;
     try {
       const data = await diagnosticRequest("");
-      const items = new Map((data.workflow || []).map(item => [requestKey(item), item]));
+      const library = (data.titles || []).filter(item=>item.hasFile).map(item=>({...item,library:true,
+        key:"library:"+item.kind+":"+item.id, phase:"Imported", attention:false,
+        scope:item.kind === "sonarr" ? item.hasFile + " episode file(s)" : ""}));
+      const items = new Map([...(data.workflow || []),...library].map(item=>[requestKey(item),item]));
+      requestItems = items;
       // Keep existing rows in place. New observations must not shuffle a list
       // while a user is inspecting one of its downloads.
-      requestOrder = [...requestOrder.filter(key => items.has(key)), ...[...items.keys()].filter(key => !components.has(key))];
+      const previousOrder = new Set(requestOrder);
+      requestOrder = [...requestOrder.filter(key => items.has(key)), ...[...items.keys()].filter(key => !previousOrder.has(key))];
       for (const [key, component] of components) if (!items.has(key)) {
         const ownedFocus = component.row.contains(document.activeElement) || component.detailRow.contains(document.activeElement);
         component.row.remove(); component.detailRow.remove(); components.delete(key);
         if (selectedWorkflow === key) selectedWorkflow = null;
         restoreFocus ||= ownedFocus;
       }
-      for (const key of requestOrder) {
-        const item = items.get(key);
-        if (!components.has(key)) {
-          const component = makeComponent(key); components.set(key, component); body.append(component.row, component.detailRow);
-        }
-        const component = components.get(key); component.item = item;
-        updateSummary(component, item);
-        if (!releaseBusy.has(releaseKey(item))) renderReleases(component.results, releaseResults.get(releaseKey(item)));
+      for (const [key, component] of components) {
+        const item = items.get(key); component.item = item; updateSummary(component,item);
+        if(!releaseBusy.has(releaseKey(item))) renderReleases(component.results,releaseResults.get(releaseKey(item)));
       }
       requestData = data;
+      renderSequences();
       const notices = element("request-notices"); notices.replaceChildren();
       for (const message of data.attention || []) notices.append(text("p", message, "notice"));
       if (data.requestReview) {
@@ -493,10 +644,10 @@
     } catch (error) {
       element("request-status").textContent = error.message + (requestData ? " Showing the previous observation." : "");
       element("request-status").classList.add("check-warning");
-      for (const component of components.values()) {
-        component.item = {...component.item, lastKnownPhase: component.item.available ? component.item.phase : component.item.lastKnownPhase,
-          available: false, phase: "Current progress unavailable"};
-        updateSummary(component, component.item);
+      requestItems = new Map([...requestItems].map(([key,item])=>[key,{...item,
+        lastKnownPhase:item.available ? item.phase : item.lastKnownPhase,available:false,phase:"Current progress unavailable"}]));
+      for (const [key,component] of components) {
+        component.item = requestItems.get(key); updateSummary(component,component.item);
       }
       renderRequests();
     } finally {
@@ -524,7 +675,8 @@
   }
   element("inspect").addEventListener("click", refreshRequests);
   element("request-filter").addEventListener("input", renderRequests);
-  element("filter-all").addEventListener("click", () => { attentionOnly = false; setFilters(); });
+  element("filter-all").addEventListener("click", () => { attentionOnly = false; importedOnly = false; setFilters(); });
+  element("filter-imported").addEventListener("click",()=>{importedOnly=true;attentionOnly=false;setFilters();});
   element("filter-attention").addEventListener("click", showAttention);
   tabs.forEach((tab, index) => {
     tab.addEventListener("click", () => selectPanel(tab.getAttribute("aria-controls")));

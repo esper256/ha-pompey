@@ -222,3 +222,23 @@ body.is-ready .bar, body.is-ready #steps { display: none; }
   dialog { padding: 1rem; width: calc(100% - 1rem); max-height: calc(100dvh - 1rem); }
 }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; scroll-behavior: auto !important; } }
+
+button.danger-button { background: #b7483c; color: #fff; border-color: #cc6658; font-weight: 600; }
+button.danger-button:hover { background: #c85548; }
+#recovery-explanation, #recovery-status { color: var(--muted); font-size: .875rem; margin: .6rem 0; }
+#recovery-target { overflow-wrap: anywhere; }
+#recovery-target h3 { margin: 1rem 0 .4rem; }
+#recovery-target ul { max-height: 11rem; overflow-y: auto; padding-left: 1.25rem; font-size: .8rem; color: var(--muted); }
+#recovery-target strong { display: block; margin: 1rem 0; }
+#recovery-choice { width: 100%; margin: .5rem 0; }
+.recovery-feedback { display: grid; grid-template-columns: 6rem 1fr; align-items: start; gap: .6rem; margin: 1rem 0; }
+.recovery-feedback textarea { resize: vertical; }
+#recovery-dialog .dialog-actions { margin-top: 1rem; }
+#sequence-list details { padding: .8rem 0; border-bottom: 1px solid var(--line); }
+#sequence-list summary { color: var(--fg); }
+#sequence-list ol { padding-left: 1.2rem; font-size: .8rem; color: var(--muted); }
+#sequence-list li { margin-top: .5rem; overflow-wrap: anywhere; }
+.workflow-detail .actions:empty { display: none; }
+@media(max-width:640px) { .request-filters { flex-wrap: wrap; } #collect-report { margin-left: auto; } #inspect { margin-left: 0; } }
+
+@media(max-width:480px) { .recovery-feedback { grid-template-columns: 1fr; gap: .4rem; } .recovery-feedback label:not(:first-child) { margin-top: .4rem; } }

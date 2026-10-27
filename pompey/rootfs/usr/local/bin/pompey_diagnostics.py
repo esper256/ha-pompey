@@ -158,6 +158,7 @@ def snapshot():
         for row in data.get("titles", []):
             title = {"kind": kind, "id": row["id"], "title": row.get("title", "Untitled"),
                      "monitored": row.get("monitored"), "path": row.get("path"),
+                     "fileId": (row.get("movieFile") or {}).get("id") if kind == "radarr" else None,
                      "hasFile": row.get("hasFile") if kind == "radarr" else (row.get("statistics") or {}).get("episodeFileCount", 0),
                      "lastSearch": state.load("search-" + kind + "-" + str(row["id"])),
                      "available": sources[kind].get("available", False), "updated": sources[kind].get("updated")}
@@ -205,6 +206,8 @@ def snapshot():
     for request in result["requests"]:
         if request["state"] == "Approved" and not request["arrLinked"]:
             result["workflow"].append({**request, "key": "seerr:request:" + str(request["id"]), "kind": "seerr", "id": None, "attention": True})
+    from pompey_recovery import sequences
+    result["sequences"] = sequences()
     result["requestReview"] = state.load("requests").get("reviewRequired", "")
     return result
 

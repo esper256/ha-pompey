@@ -160,6 +160,8 @@ def offers(case):
         rows = [
             Offer(case, 0, case.release, quality="480p" if case.index == 2 else "1080p")
         ]
+        if case.index == 1:
+            rows.extend(Offer(case, variant, case.release + "-TRY" + str(variant)) for variant in (1, 2, 3))
         if case.index == 0:
             rows.append(
                 Offer(case, 1, case.prefix + ".2024.480p.WEB-DL", quality="480p")
@@ -189,6 +191,8 @@ def offers(case):
                 ),
             ]
         )
+    if case.index == 6:
+        rows.append(Offer(case, 1, case.release + "-TRY1", season, episodes))
     if case.index == 7:
         rows.append(
             Offer(case, 1, case.prefix + ".S01.1080p.WEB-DL.ENGLISH", 1, episodes)

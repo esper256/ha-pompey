@@ -30,7 +30,7 @@
     <div id="dashboard" hidden>
       <nav id="dashboard-tabs" class="dashboard-tabs" role="tablist" aria-label="Pompey sections">
         <button id="overview-tab" type="button" role="tab" aria-selected="true" aria-controls="overview-panel">Overview</button>
-        <button id="requests-tab" type="button" role="tab" aria-selected="false" aria-controls="diagnostic-panel" tabindex="-1">Requests</button>
+        <button id="requests-tab" type="button" role="tab" aria-selected="false" aria-controls="diagnostic-panel" tabindex="-1">Releases</button>
         <button id="config-tab" type="button" role="tab" aria-selected="false" aria-controls="config-panel" tabindex="-1">Config</button>
       </nav>
       <aside id="storage-alert" class="notice danger" hidden role="status"><h2>Storage needs attention</h2><p id="storage-reason"></p><p id="storage-action"></p></aside>
@@ -51,12 +51,14 @@
       <section id="diagnostic-panel" class="dashboard-view" role="tabpanel" aria-labelledby="requests-tab" tabindex="0" hidden>
         <div class="requests-toolbar">
           <label class="search-field"><span class="visually-hidden">Find a title</span><input id="request-filter" type="search" placeholder="Find a title…" autocomplete="off"></label>
-          <div class="request-filters" role="group" aria-label="Show requests"><button id="filter-all" type="button" aria-pressed="true">All <span id="count-all" class="count">0</span></button><button id="filter-attention" type="button" aria-pressed="false">Needs attention <span id="count-attention" class="count">0</span></button></div>
+          <div class="request-filters" role="group" aria-label="Show releases"><button id="filter-all" type="button" aria-pressed="true">In progress <span id="count-all" class="count">0</span></button><button id="filter-attention" type="button" aria-pressed="false">Needs attention <span id="count-attention" class="count">0</span></button><button id="filter-imported" type="button" aria-pressed="false">Imported <span id="count-imported" class="count">0</span></button></div>
+          <button id="collect-report" type="button">Diagnostics</button>
           <button id="inspect" type="button">Refresh</button>
         </div>
         <p id="request-status" class="muted request-status" role="status"></p>
         <div id="request-notices"></div>
         <div id="diagnostics"></div>
+        <section id="sequence-history" class="panel" hidden aria-labelledby="sequence-heading"><h2 id="sequence-heading">Recovery history</h2><div id="sequence-list"></div></section>
       </section>
       <section id="config-panel" class="dashboard-view" role="tabpanel" aria-labelledby="config-tab" tabindex="0" hidden>
         <form id="preferences" class="panel settings-panel" aria-label="Download preferences">
@@ -65,7 +67,7 @@
           <div class="setting"><label for="dual-audio">Prefer dual audio for anime</label><div><input id="dual-audio" name="prefer_dual_audio" type="checkbox" aria-describedby="audio-help"><p id="audio-help" class="field-help">Prefer releases with original and dubbed audio.</p></div></div>
           <div class="form-actions"><button type="submit" id="save-preferences" class="primary" disabled>Save changes</button><p id="preferences-result" role="status"></p></div>
         </form>
-        <section class="panel" aria-labelledby="report-heading"><h2 id="report-heading">Diagnostics</h2><p class="section-description">Collect application state and logs for your development agent.</p><div class="actions"><button id="collect-report" type="button">Collect diagnostics</button><button id="view-report" type="button" hidden>View report</button></div><details class="report-help"><summary>What is included?</summary><p>Request progress, release history, profiles, download details and recent logs. Original data may contain credentials. Nothing is uploaded automatically.</p></details></section>
+
         <section id="debug-consoles" class="panel" hidden aria-labelledby="advanced-heading"><h2 id="advanced-heading">Advanced interfaces</h2><div class="actions"><a id="debug-radarr-btn" class="button" href="#" target="_blank" rel="noopener">Radarr ↗</a><a id="debug-sonarr-btn" class="button" href="#" target="_blank" rel="noopener">Sonarr ↗</a><a id="debug-qbit-btn" class="button" href="#" target="_blank" rel="noopener">qBittorrent ↗</a></div></section>
         <p class="environment-note">Media paths and network settings are configured in Home Assistant’s app settings.</p>
       </section>
@@ -73,11 +75,21 @@
   </main>
   <dialog id="report-dialog" aria-labelledby="report-title" aria-describedby="report-description">
     <div class="section-heading"><h2 id="report-title" tabindex="-1">Diagnostics</h2><button id="close-report" class="icon-button" type="button" aria-label="Close diagnostics">×</button></div>
-    <p id="report-description">Original application data and logs for your development agent.</p>
+    <p id="report-description">Release choices, rejections and replacement outcomes for your development agent.</p>
     <p id="report-status" role="status">Collecting…</p>
     <label for="report-text" class="visually-hidden">Diagnostic report</label><textarea id="report-text" readonly spellcheck="false" wrap="off" hidden></textarea>
-    <p class="report-privacy">Contains original titles, paths and logs. May contain credentials.</p>
+    <p class="report-privacy">Contains original release names, file paths and your feedback. General logs are available in Home Assistant.</p>
     <div class="dialog-actions"><button id="copy-report" class="primary" type="button" disabled>Copy report</button><button id="save-report" type="button" disabled>Save file</button><button id="recollect-report" type="button" hidden>Collect again</button><button id="dismiss-report" class="close-action" type="button">Close</button></div>
+  </dialog>
+  <dialog id="recovery-dialog" aria-labelledby="recovery-title" aria-describedby="recovery-explanation">
+    <div class="section-heading"><h2 id="recovery-title" tabindex="-1">Try another</h2><button id="close-recovery" class="icon-button" type="button" aria-label="Close recovery">×</button></div>
+    <p id="recovery-explanation">Remove the selected release’s files, blocklist it in the managing application, and search for a replacement.</p>
+    <p id="recovery-status" role="status"></p>
+    <label id="recovery-choice-label" for="recovery-choice" hidden>Choose an imported release</label><select id="recovery-choice" hidden></select>
+    <div id="recovery-target"></div>
+    <div class="recovery-feedback"><label for="recovery-reason">Reason</label><select id="recovery-reason"><option value="other">Not satisfied / other</option><option value="stalled">Not making progress</option><option value="wrong_content">Wrong content</option><option value="wrong_language">Wrong language</option><option value="quality">Poor quality</option><option value="files">File or import problem</option></select><label for="recovery-note">Note (optional)</label><textarea id="recovery-note" maxlength="500" rows="2" placeholder="What went wrong?"></textarea></div>
+    <p class="field-help">Arr also removes associated subtitles and sidecars, using its recycle-bin policy for library files. Other releases and unrelated library files are retained.</p>
+    <div class="dialog-actions"><button id="confirm-recovery" class="danger-button" type="button" disabled>Try another</button><button id="refresh-recovery" type="button" hidden>Refresh preview</button><button id="cancel-recovery" class="close-action" type="button">Cancel</button></div>
   </dialog>
   <script>
     const fileHint = document.getElementById("file-hint");

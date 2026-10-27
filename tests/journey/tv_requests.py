@@ -156,6 +156,18 @@ def tv_request(client, case, background, ledger_file):
         return rows if len(rows) == len(selected.episodes) else None
 
     imported = client.wait(routed, "TV files did not reach the intended library")
+    if case.scenario == "season-pack" and os.environ.get("POMPEY_TEST_BASELINE") != "1":
+        from release_recovery import reject_imported_pack
+        selected = reject_imported_pack(client, case, series, files, selected)
+        infohash = client.peer(selected)["infoHash"]
+        active.update(infoHash=infohash,selectedRelease=selected.release,recoveryVerified=True)
+        client.release(selected)
+        client.wait(lambda:(t:=torrent()) and t["progress"]==1,"Replacement pack was not verified")
+        command = api("POST","/command",{"name":"RefreshMonitoredDownloads"})
+        client.wait_command(command["id"],"sonarr")
+        files = client.wait(lambda:(rows:=api("GET","/episodefile?seriesId="+str(series["id"]))) and len(rows)==len(selected.episodes) and rows,
+                            "Replacement season did not import completely")
+        imported = client.wait(routed,"Replacement TV files did not reach the intended library")
     source = Path("/tmp/world") / selected.release
     episodes = api("GET", "/episode?seriesId=" + str(series["id"]))
     assert {
@@ -203,6 +215,9 @@ def tv_request(client, case, background, ledger_file):
     assert tunnel_bytes() - before >= transfer["payloadBytes"], (
         "TV payload bypassed tunnel"
     )
+    if active.get("recoveryVerified"):
+        from release_recovery import assert_pack_sequence
+        assert_pack_sequence(client,series["id"],selected.release)
     save_json(ledger_file, background.ledger)
     active.update(
         payloadBytes=transfer["payloadBytes"],

@@ -60,6 +60,7 @@ def _movie_request(client, case, background, ledger_file, *, resume):
         flush=True,
     )
     before = tunnel_bytes()
+    download = case
     status = client.peer(case)
     assert resume or status["blocks"] == 0, (
         "Unrequested case already downloaded",
@@ -198,6 +199,12 @@ def _movie_request(client, case, background, ledger_file, *, resume):
         ), "Closing a request changed partial files"
         active["requestState"] = state
         active["restartPreservedPartial"] = True
+    if case.scenario == "movie-r" and os.environ.get("POMPEY_TEST_BASELINE") != "1":
+        from release_recovery import reject_three_releases
+        download, infohash = reject_three_releases(client, case, item)
+        active["infoHash"] = infohash
+        active["selectedRelease"] = download.release
+        active["releaseRecoveryVerified"] = True
     received_before_incident = 0
     if case.scenario == "vpn-download-loss":
         from catalogue import cases, offers
@@ -237,7 +244,7 @@ def _movie_request(client, case, background, ledger_file, *, resume):
             unwanted,
         )
         active["unwantedFilesIncluded"] = unwanted
-    client.release(case)
+    client.release(download)
     wait(
         lambda: (t := torrent()) and t["progress"] == 1,
         "Downloader did not verify the payload",
@@ -321,7 +328,7 @@ def _movie_request(client, case, background, ledger_file, *, resume):
             "Staging payload remains"
         )
 
-    source = Path("/tmp/world") / case.release / (case.release + ".mkv")
+    source = Path("/tmp/world") / download.release / (download.release + ".mkv")
     checksum = digest(imported)
     assert checksum == digest(source), "Imported bytes belong to another case"
     wrong = base / (
@@ -334,7 +341,7 @@ def _movie_request(client, case, background, ledger_file, *, resume):
     assert len(subtitles) == 1 and digest(subtitles[0]) == digest(
         source.with_suffix(".en.srt")
     ), "Wrong or missing subtitle"
-    transfer = client.peer(case)
+    transfer = client.peer(download)
     assert (
         transfer["sent"] + active.get("sentBeforeRestart", 0)
         >= transfer["payloadBytes"]
@@ -374,7 +381,7 @@ def _movie_request(client, case, background, ledger_file, *, resume):
         {"kind": "radarr", "id": item["id"]},
     )
     assert explanation["status"] == "Search complete" and any(
-        r["title"] == case.release and "rejections" in r
+        r["title"] == download.release and "rejections" in r
         for r in explanation["releases"]
     ), explanation
     if case.scenario == "movie-pg" and os.environ.get("POMPEY_TEST_BASELINE") != "1":
@@ -394,16 +401,13 @@ def _movie_request(client, case, background, ledger_file, *, resume):
         assert "ha.pompey-test.invalid" in hosts["allowedHosts"] and "*" not in hosts["allowedHosts"], hosts["allowedHosts"]
         exported = client.session.call("POST", "http://127.0.0.1:8099/diagnostics/report", {})
         report = json.loads(exported.split("\n\n", 1)[1])
-        assert report["schema"] == "pompey-development-diagnostics-v1" and report["redacted"] is False
-        own = next(row for row in report["requests"] if row["requestId"] == request["id"])
-        assert own["arrId"] == item["id"] and own["historyIds"] and own["lastExplicitSearch"]["releases"], own
-        assert report["applications"]["seerr"]["requests"]["complete"], report["applications"]["seerr"]
-        assert report["applications"]["radarr"]["history"]["complete"], report["applications"]["radarr"]
-        assert report["applications"]["radarr"]["hostSettings"]["logLevel"].lower() == "debug"
-        assert any(case.release in entry.get("file", {}).get("text", "")
-                   for entry in report["logs"]["radarr"]), "Native release-selection logs missing"
+        assert report["schema"] == "pompey-release-sequences-v1", report
+        assert "logs" not in report and "applications" not in report, "General logs must remain in HA Logs"
         active["developmentReportVerified"] = True
-    assert not client.peer(case)["unknown"], client.peer(case)["unknown"]
+    if active.get("releaseRecoveryVerified"):
+        from release_recovery import assert_sequence
+        assert_sequence(client, item["id"], download.release)
+    assert not client.peer(download)["unknown"], client.peer(download)["unknown"]
     ledger.append(
         {
             "prefix": case.prefix,

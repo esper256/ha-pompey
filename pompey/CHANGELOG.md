@@ -2,13 +2,11 @@
 
 ## 0.6.0
 
-- Rebuild Ingress with a compact header, responsive Overview / Requests / Config tabs, clearer VPN traffic and bundled-version displays, and contextual connection warnings.
-- Expand one request directly beneath its table row, with stable download identity, title search, an attention filter, native import errors, transfer evidence and release comparisons. Retain expanded items and search results across refreshes.
-- Move diagnostic collection to Config and show copyable/downloadable reports in a dismissible dialog. Simplify preference help and show saved versus applying state beside Save changes.
-
-- Add Collect diagnostics in Config, with a copyable report and text-file download for development agents. Correlate requests with native Arr history/queues, profiles, indexer settings, torrent files/trackers and recent logs. Preserve original names, paths and application data without anonymization; report incomplete evidence explicitly.
-- Retain bounded native Arr debug logs and raw application/controller log windows while keeping Home Assistant console output filtered. Include recorded release acceptance/rejection evidence without performing fresh searches or changing downloads.
-- Configure Prowlarr Allowed Hosts from access names observed through authenticated Ingress and local interface addresses. Preserve explicit user entries and avoid a wildcard or hardcoded Supervisor addresses.
+- Rebuild Ingress with responsive Overview / Releases / Config tabs, compact navigation, clearer VPN traffic and bundled-version displays, and contextual connection warnings.
+- Expand release details directly beneath their table row, preserving selection and search results across refreshes. Add imported-title browsing alongside active work and attention filters.
+- Add Try another for active downloads and imported releases. Preview affected files before native Arr deletion, blocklisting and replacement search; retain unrelated media and durable partial-operation receipts.
+- Record release selections, user rejection reasons, candidate observations and replacement imports as exportable sequences in Releases. Keep general application output in Home Assistant Logs.
+- Configure Prowlarr Allowed Hosts from authenticated Ingress access names and local interfaces, preserving explicit entries. Apply settings only after Prowlarr is ready.
 
 ## 0.5.2
 
