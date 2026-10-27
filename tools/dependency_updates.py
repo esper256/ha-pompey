@@ -25,6 +25,21 @@ def api(path, method="GET", body=None):
     return json.loads(result.stdout) if result.stdout.strip() else None
 
 
+def release_number(run):
+    import re
+    match = re.fullmatch(r"Release PR #(\d+)", run.get("display_title", ""))
+    return int(match[1]) if match else None
+
+
+def queue_decision(runs, number=None):
+    """One active release; unchanged failed candidates are never retried away."""
+    active = [run for run in runs if release_number(run) and run["status"] != "completed"]
+    if active:
+        return "busy"
+    previous = next((run for run in runs if release_number(run) == number), None) if number else None
+    return "attempted" if previous else "dispatch"
+
+
 def main():
     if os.environ.get("GITHUB_ACTIONS") != "true":
         raise RuntimeError("Publishing update PRs is restricted to the repository workflow")
@@ -41,6 +56,10 @@ def main():
     base = command("git", "rev-parse", "origin/main")
     summary = []
     failures = []
+    runs = api("repos/" + repo + "/actions/workflows/test.yaml/runs?event=workflow_dispatch&per_page=100")["workflow_runs"]
+    if queue_decision(runs) == "busy":
+        print("A release is already in flight; dependency queue is unchanged.")
+        return
     for component in COMPONENTS:
         branch = "codex/upstream-" + component.lower()
         try:
@@ -65,7 +84,11 @@ def main():
                 old_candidate = json.loads(base64.b64decode(remote["content"]))
                 comparison = api("repos/" + repo + "/compare/main..." + pr["head"]["sha"])
                 if candidate == old_candidate and comparison["behind_by"] == 0:
-                    summary.append(component + ": candidate unchanged (no CI retry)")
+                    if queue_decision(runs, pr["number"]) == "dispatch":
+                        api("repos/" + repo + "/actions/workflows/test.yaml/dispatches", "POST", {"ref": "main", "inputs": {"candidate_pr": str(pr["number"])}})
+                        summary.append(component + ": dispatched existing candidate " + pr["html_url"])
+                        break
+                    summary.append(component + ": candidate unchanged (prior acceptance retained; no retry)")
                     continue
             lease = command("git", "ls-remote", "origin", "refs/heads/" + branch).split()
             expected = lease[0] if lease else ""
@@ -86,11 +109,13 @@ def main():
             if existing:
                 pr = api("repos/" + repo + "/pulls/" + str(pr["number"]), "PATCH", {"title": "Update pinned " + component + " for Pompey " + version, "body": body})
             else:
-                pr = api("repos/" + repo + "/pulls", "POST", {"base": "main", "head": branch, "title": "Update pinned " + component + " for Pompey " + version, "body": body})
-            # GITHUB_TOKEN does not reliably start unattended PR CI. An explicit
-            # dispatch runs the required checks against this exact branch head.
-            api("repos/" + repo + "/actions/workflows/test.yaml/dispatches", "POST", {"ref": branch, "inputs": {"candidate_pr": str(pr["number"])}})
+                pr = api("repos/" + repo + "/pulls", "POST", {"base": "main", "head": branch, "title": "Update pinned " + component + " for Pompey " + version, "body": body, "draft": True})
+            # Publish one candidate at a time. After publication the next
+            # discovery starts from the new main/version instead of wasting
+            # acceptance on several immediately stale parallel candidates.
+            api("repos/" + repo + "/actions/workflows/test.yaml/dispatches", "POST", {"ref": "main", "inputs": {"candidate_pr": str(pr["number"])}})
             summary.append(component + ": " + pr["html_url"])
+            break
         except (OSError, ValueError, KeyError, IndexError, RuntimeError, subprocess.SubprocessError) as exc:
             summary.append(component + ": discovery failed (" + type(exc).__name__ + "): " + str(exc)[:240])
             failures.append(component)

@@ -1,4 +1,6 @@
 name: Validation
+run-name: >-
+  ${{ github.event_name == 'workflow_dispatch' && (inputs.candidate_pr || inputs.release_pr) && format('Release PR #{0}', inputs.candidate_pr || inputs.release_pr) || github.event.pull_request.title || github.workflow }}
 on:
   pull_request:
     branches: [main]
@@ -11,14 +13,49 @@ on:
         description: 'Actions-bot dependency PR to accept and publish after release checks'
         type: string
         required: false
+      release_pr:
+        description: 'Same-repository stable release PR to accept, merge and publish'
+        type: string
+        required: false
 permissions:
   contents: read
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.run_id }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || inputs.candidate_pr || inputs.release_pr || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || inputs.candidate_pr != '' || inputs.release_pr != '' }}
 jobs:
+  release_plan:
+    name: Plan immutable release candidate
+    if: github.event_name == 'workflow_dispatch' && (inputs.candidate_pr != '' || inputs.release_pr != '')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    permissions:
+      contents: read
+      pull-requests: write
+    outputs:
+      pr: ${{ steps.plan.outputs.pr }}
+      kind: ${{ steps.plan.outputs.kind }}
+      base: ${{ steps.plan.outputs.base }}
+      head: ${{ steps.plan.outputs.head }}
+      revision: ${{ steps.plan.outputs.revision }}
+      tree: ${{ steps.plan.outputs.tree }}
+      version: ${{ steps.plan.outputs.version }}
+      attempt: ${{ steps.plan.outputs.attempt }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: main
+          persist-credentials: false
+      - id: plan
+        run: python3 tools/release_plan.py
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_PR: ${{ inputs.candidate_pr }}
+          RELEASE_PR: ${{ inputs.release_pr }}
+
   changes:
     name: Select checks
+    needs: release_plan
+    if: always() && (needs.release_plan.result == 'success' || needs.release_plan.result == 'skipped')
     runs-on: ubuntu-24.04
     timeout-minutes: 3
     outputs:
@@ -26,6 +63,7 @@ jobs:
       suite: ${{ steps.scope.outputs.suite }}
       draft: ${{ steps.scope.outputs.draft }}
       context: ${{ steps.scope.outputs.context }}
+      revision: ${{ steps.scope.outputs.revision }}
     steps:
       - uses: actions/checkout@v7.0.1
         with:
@@ -35,27 +73,39 @@ jobs:
           EVENT: ${{ github.event_name }}
           BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
           HEAD: ${{ github.sha }}
+          RELEASE_REVISION: ${{ needs.release_plan.outputs.revision }}
           DRAFT: ${{ github.event.pull_request.draft || false }}
         run: python3 tools/ci_scope.py
 
   fast:
     name: Fast development checks
     needs: changes
-    if: needs.changes.outputs.code == 'true'
+    if: ${{ !cancelled() && needs.changes.result == 'success' && needs.changes.outputs.code == 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 3
     steps:
       - uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ needs.changes.outputs.revision }}
+          persist-credentials: false
       - run: python3 tests/fast.py --host
 
   acceptance:
     name: Application integration and network isolation
     needs: [changes, fast]
-    if: needs.changes.outputs.suite != 'none'
+    if: ${{ !cancelled() && needs.changes.result == 'success' && needs.fast.result == 'success' && needs.changes.outputs.suite != 'none' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ needs.changes.outputs.revision }}
+          persist-credentials: false
+      - name: Use the native containerd image store
+        uses: docker/setup-docker-action@v5.6.0
+        with:
+          daemon-config: |
+            {"features":{"containerd-snapshotter":true}}
       - name: Restore build layers
         uses: actions/cache@v5
         with:
@@ -66,9 +116,8 @@ jobs:
             pompey-build-${{ runner.os }}-
       - name: Build the amd64 application image
         run: |
-          docker buildx create --use --driver docker-container
-          docker buildx build --load --platform linux/amd64 \
-            --build-arg BUILD_ARCH=amd64 --build-arg BUILD_VERSION="$(python3 tools/release_metadata.py current)" --build-arg BUILD_REF="$GITHUB_SHA" \
+          docker buildx build --platform linux/amd64 \
+            --build-arg BUILD_ARCH=amd64 --build-arg BUILD_VERSION="$(python3 tools/release_metadata.py current)" --build-arg BUILD_REF="${{ needs.changes.outputs.revision }}" \
             --cache-from type=local,src=/tmp/pompey-build-cache \
             --cache-to type=local,dest=/tmp/pompey-build-cache-new,mode=max \
             -t localhost/pompey:foundation pompey/
@@ -81,7 +130,7 @@ jobs:
           git fetch --tags origin "$ref"
           mkdir -p /tmp/pompey-upgrade-baseline
           git archive FETCH_HEAD pompey | tar -xf - -C /tmp/pompey-upgrade-baseline
-          docker buildx build --load --platform linux/amd64 \
+          docker buildx build --platform linux/amd64 \
             --cache-from type=local,src=/tmp/pompey-build-cache \
             -t localhost/pompey:upgrade-baseline /tmp/pompey-upgrade-baseline/pompey
         env:
@@ -98,6 +147,9 @@ jobs:
         env:
           POMPEY_SUITE: ${{ needs.changes.outputs.suite }}
           POMPEY_CONTAINER_COMMAND: docker
+      - name: Summarize scenario, build and upgrade timings
+        if: always()
+        run: python3 tools/ci_summary.py
       - name: Preserve required acceptance summary
         run: cp .test-results/timing-summary.json .test-results/required-timing-summary.json
       - uses: actions/upload-artifact@v7
@@ -122,22 +174,23 @@ jobs:
         run: python3 tools/ci_scope.py --require
 
   promote:
-    name: Publish accepted dependency update
-    needs: [changes, acceptance, required]
-    if: github.event_name == 'workflow_dispatch' && inputs.candidate_pr != '' && needs.required.result == 'success' && needs.acceptance.result == 'success'
+    name: Publish accepted release
+    needs: [release_plan, changes, acceptance, required]
+    if: always() && needs.release_plan.result == 'success' && needs.required.result == 'success' && needs.acceptance.result == 'success'
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
       actions: read
+      checks: write
       contents: write
       pull-requests: write
     steps:
       - uses: actions/checkout@v7.0.1
         with:
-          # Never execute verifier code from the candidate with write tokens.
           ref: main
-      - name: Merge protected candidate and publish its exact accepted tree
+          persist-credentials: false
+      - name: Merge through protected CI and publish the accepted tree
         run: python3 tools/promote_candidate.py
         env:
           GH_TOKEN: ${{ github.token }}
-          CANDIDATE_PR: ${{ inputs.candidate_pr }}
+          RELEASE_PLAN: ${{ toJSON(needs.release_plan.outputs) }}

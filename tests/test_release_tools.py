@@ -8,7 +8,7 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
-from promote_candidate import validate, validate_contents, validate_acceptance, MANIFEST
+from promote_candidate import validate, validate_contents, validate_acceptance, validate_plan, MANIFEST
 from release_baseline import choose, FALLBACK
 from release_metadata import next_patch
 
@@ -97,6 +97,56 @@ class PromotionPolicy(unittest.TestCase):
         self.assertEqual(choose({"tag_name": "v0.5.0"}), "v0.5.0")
         self.assertEqual(choose({"tag_name": "v0.6.0", "prerelease": True}), FALLBACK)
         self.assertEqual(choose({"tag_name": "--unsafe-ref"}), FALLBACK)
+
+
+class ReleasePlanning(unittest.TestCase):
+    def test_merge_gate_rejects_changed_head_base_tree_and_foreign_repo(self):
+        plan = dict(kind="release", head="head", base="base", revision="merge", tree="tree")
+        pr = {"head": {"sha": "head", "repo": {"full_name": "esper256/ha-pompey"}},
+              "base": {"ref": "main"}, "state": "open"}
+        merge = {"parents": [{"sha": "base"}, {"sha": "head"}], "tree": {"sha": "tree"}}
+        validate_plan(plan, pr, "base", merge)
+        for changed in [{**plan, "head": "another"}, {**plan, "base": "stale"}, {**plan, "tree": "other"}]:
+            with self.assertRaises(ValueError):
+                validate_plan(changed, pr, "base", merge)
+        with self.assertRaises(ValueError):
+            validate_plan(plan, pr, "advanced-main", merge)
+        changed = copy.deepcopy(pr)
+        changed["head"]["repo"]["full_name"] = "someone/fork"
+        with self.assertRaises(ValueError):
+            validate_plan(plan, changed, "base", merge)
+
+    def test_planning_requires_new_stable_version_and_exact_merge_parents(self):
+        from release_plan import validate_candidate, stable_version
+        pr = {"head": {"sha": "head", "repo": {"full_name": "esper256/ha-pompey"}},
+              "base": {"ref": "main", "sha": "base"}, "state": "open"}
+        merge = {"parents": [{"sha": "base"}, {"sha": "head"}]}
+        validate_candidate(pr, "base", merge, "0.5.1", "0.5.0")
+        for version in ["0.5.0", "0.4.9"]:
+            with self.assertRaises(ValueError):
+                validate_candidate(pr, "base", merge, version, "0.5.0")
+        with self.assertRaises(ValueError):
+            stable_version('version: "0.5.1-beta.1"')
+        with self.assertRaises(ValueError):
+            validate_candidate(pr, "base", {"parents": [{"sha": "head"}]}, "0.5.1", "0.5.0")
+
+    def test_queue_serializes_active_releases_and_retains_failed_evidence(self):
+        from dependency_updates import queue_decision
+        active = {"display_title": "Release PR #105", "status": "in_progress"}
+        self.assertEqual(queue_decision([active]), "busy")
+        failed = {**active, "status": "completed", "conclusion": "failure"}
+        self.assertEqual(queue_decision([failed], 105), "attempted")
+        self.assertEqual(queue_decision([failed], 106), "dispatch")
+        self.assertEqual(queue_decision([{**active, "display_title": "Unrelated workflow"}]), "dispatch")
+
+    def test_timing_summary_preserves_failure_upgrade_and_safe_case_labels(self):
+        from ci_summary import markdown
+        result = markdown({"success": False, "journeys": [{"layout": "forward-upgrade", "success": False,
+            "containers": [{"success": False, "cases": [{"scenario": "<script>|unsafe", "status": "failed"}]}]}]})
+        self.assertIn("Previous-release upgrade", result)
+        self.assertIn("failed / incomplete", result)
+        self.assertNotIn("<script>", result)
+        self.assertIn("&#124;", result)
 
 
 if __name__ == "__main__":
