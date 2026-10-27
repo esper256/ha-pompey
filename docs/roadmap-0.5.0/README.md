@@ -8,6 +8,23 @@ distinction visible when an image is viewed outside its issue.
 server and open `/?view=overview`, `diagnostics`, `recovery`, `setup`, `storage`,
 `vpn` or `support`. Images in `images/` are browser screenshots of those views.
 
+## Roadmap issues
+
+The [0.5.0 milestone](https://github.com/esper256/ha-pompey/milestone/1) groups
+the proposed work. Priorities describe implementation order, not completed work.
+
+| Priority | Issue |
+| --- | --- |
+| Required | [#89 Automated dependency updates and releases](https://github.com/esper256/ha-pompey/issues/89) |
+| Required | [#90 Reliable VPN download recovery](https://github.com/esper256/ha-pompey/issues/90) |
+| Required | [#91 Per-request troubleshooting](https://github.com/esper256/ha-pompey/issues/91) |
+| Required | [#92 Targeted recovery actions](https://github.com/esper256/ha-pompey/issues/92) |
+| Required | [#93 Setup and connectivity checks](https://github.com/esper256/ha-pompey/issues/93) |
+| Next | [#94 Storage failure protection and recovery](https://github.com/esper256/ha-pompey/issues/94) |
+| Next | [#95 Focused outage and recovery acceptance](https://github.com/esper256/ha-pompey/issues/95) |
+| Polish | [#96 Application status, versions and support logs](https://github.com/esper256/ha-pompey/issues/96) |
+| Required | [#97 Terse ecosystem overview](https://github.com/esper256/ha-pompey/issues/97) |
+
 ## Overview principles
 
 - Show current counts with stable definitions: downloading, seeding and stalled
