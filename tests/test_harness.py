@@ -337,7 +337,7 @@ class KnownVpnResumePolicy(unittest.TestCase):
                 elif failure == "job":
                     proof[3]["jobs"]["configuration"]["failures"] = 1
                 elif failure == "event":
-                    proof[1].append({"kind": "job-failed", "phase": "household"})
+                    proof[1].append({"kind": "job-failed", "phase": "runtime"})
                 elif failure == "fixture":
                     proof[2].append("Unexpected DNS")
                 elif failure == "shutdown":

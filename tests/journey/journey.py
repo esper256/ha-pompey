@@ -1,4 +1,4 @@
-"""Run real household scenarios with shared clients, evidence and background checks."""
+"""Run real integration scenarios with shared clients, evidence and background checks."""
 
 import json
 import os
@@ -10,7 +10,7 @@ import traceback
 
 sys.path[:0] = ["/tests/journey", "/usr/local/bin"]
 from catalogue import cases, offers
-from household import Household, Background, configure, identities
+from applications import ApplicationStack, Background, configure, identities
 from movie_requests import movie_request
 from tv_requests import tv_request
 from stack_checks import rotation_scenario
@@ -35,7 +35,7 @@ def collect_failure(client, root):
     active = client.evidence.active if client else None
     if client:
         session = Session(Deadline(10), client.session.opener)
-        probe = Household(client.secrets, session, client.evidence)
+        probe = ApplicationStack(client.secrets, session, client.evidence)
         probe.skey = client.skey
         for name, action in [
             ("radarrMovies", lambda: probe.arr("GET", "/movie")),
@@ -196,7 +196,7 @@ def main():
             lambda: Path("/data/pompey/secrets.json").is_file(),
             "Startup did not configure engines",
         )
-        client = Household(
+        client = ApplicationStack(
             json.loads(Path("/data/pompey/secrets.json").read_text()), session, evidence
         )
         restored = os.environ.get("POMPEY_TEST_CONFIGURED") == "1" or bool(plan)
@@ -293,9 +293,9 @@ def main():
         )
         assert {c["prefix"] for c in evidence.data["cases"]} == set(
             evidence.data["requestedCases"]
-        ), "A selected journey did not execute"
+        ), "A selected scenario did not execute"
         assert all(c["status"] == "passed" for c in evidence.data["cases"]), (
-            "A selected journey remains incomplete"
+            "A selected scenario remains incomplete"
         )
         evidence.data["success"] = True
         evidence.checkpoint()
@@ -307,7 +307,7 @@ def main():
             else "PASS: fresh install",
             "and",
             len(evidence.data["cases"]),
-            "real household journeys",
+            "integration scenarios",
             flush=True,
         )
     except BaseException as exc:

@@ -1,7 +1,7 @@
 #!/command/with-contenv bashio
 # shellcheck shell=bash
 # Write engine configs before they start. Radarr/Sonarr/qbit stay localhost.
-# Prowlarr is published on the host so the household can add sources.
+# Prowlarr is published on the host for indexer configuration.
 # Seerr has no indexer settings.
 set -euo pipefail
 # shellcheck source=/dev/null

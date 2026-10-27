@@ -1,4 +1,4 @@
-"""Small reusable transport, deadline and durable evidence helpers for real journeys."""
+"""Small reusable transport, deadline and durable evidence helpers for integration scenarios."""
 
 from http.cookiejar import CookieJar
 import hashlib
@@ -74,7 +74,7 @@ class Deadline:
     def remaining(self, maximum=30):
         remaining = self.until - time.monotonic()
         if remaining <= 0:
-            raise TimeoutError("Journey deadline exceeded")
+            raise TimeoutError("Scenario deadline exceeded")
         return min(maximum, remaining)
 
     def wait(self, predicate, message, seconds=60):

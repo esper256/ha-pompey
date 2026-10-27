@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Move titles into kid vs general folders from Radarr/Sonarr certification."""
+"""Route titles to rating-specific or general libraries from Radarr/Sonarr certification."""
 
 from __future__ import annotations
 
@@ -201,7 +201,7 @@ def route_library(
                         )
                     continue
                 pending["error"] = (
-                    "Files have not reached the intended library. Check storage and the Arr queue in Debug."
+                    "Files have not reached the intended library. Check storage permissions and the Arr queue through the advanced application interfaces."
                 )
                 # Never submit a move from a new path while old payload remains.
                 if at_destination or now < pending["retryAt"]:

@@ -2,22 +2,24 @@
 
 ## Unreleased
 
+- Standardize product, Home Assistant configuration, diagnostics, documentation and CI terminology. Use neutral integration and age-rating terminology while preserving existing configuration keys and storage defaults.
+
 ## 0.4.0
 
 - Reject TV releases that lack the original language while allowing dual audio that includes it, prefer season packs, and explicitly set Sonarr’s minimum custom-format score to 0.
 
 - Target fresh amd64 installations; migration from earlier layouts is not supported.
 - Bundle pinned current stable applications and quality resources during the Supervisor build. Remove runtime application downloads and replacement/rollback machinery.
-- Run applications and household maintenance as one unprivileged user; keep VPN setup privileged and engine DNS blocked outside the tunnel. Local applications start without a fresh VPN handshake.
+- Run applications and maintenance jobs as one unprivileged user; keep VPN setup privileged and engine DNS blocked outside the tunnel. Local applications start without a fresh VPN handshake.
 - Use Home Assistant cold backups for recovery, and pause request closeout when search history appears reset or bulk-deleted.
-- Add household diagnostics with explicit release searches and real Arr rejection reasons.
+- Add diagnostics with explicit release searches and real Arr rejection reasons.
 - Verify real movie and TV imports, selected seasons, language/anime preferences, quality profiles, unwanted-file cleanup, request deletion, same-container restart and configured-clone preservation. Keep automatic dependency promotion disabled pending broader and forward-upgrade coverage.
 - Known issue: an interrupted download can remain stalled after VPN connectivity recovers. Local applications remain available and the kill switch stays active. The strict recovery scenario runs as advisory CI for this release; other acceptance and packet checks remain required.
 
 ## 0.3.7
 
-- Relax Recyclarr defaults for family-friendly libraries while keeping quality tiers and genuine junk protections.
-- Accept normal x265 and audio formats, prefer original-language releases without making dubbed releases impossible, and stop Max score-only upgrade churn.
+- Adjust Recyclarr defaults while preserving quality tiers and low-quality release filtering.
+- Accept x265 and common audio formats, prefer original-language releases, and prevent Max upgrades based only on release scores.
 - Add Recyclarr-managed Anime profiles with Seerr Sonarr routing and dual-audio preference.
 - Remove stale managed custom-format state so previous strict Pompey policies do not continue rejecting releases.
 - Allow 720p WEB TV fallbacks and keep broad TRaSH unwanted-format heuristics out of relaxed profiles.
@@ -39,7 +41,7 @@
 ## 0.3.4
 
 - Apply qBittorrent 5.2 share limits so Stop sharing pauses a finished torrent. Arr still removes it after import.
-- Stage By Rating under `downloads` so the movie and TV folders only contain the libraries people browse. Empty leftover staging folders are removed after their titles move.
+- Stage By Rating under `downloads` so movie and TV directories contain only final libraries. Empty leftover staging folders are removed after their titles move.
 
 ## 0.3.3
 
@@ -79,7 +81,7 @@
 
 ## 0.2.54
 
-- Import manually selected downloads for requested titles without grabbing duplicate copies.
+- Import manually selected downloads for requested titles without downloading duplicate copies.
 - Stop further searches and queued downloads when a request is removed.
 
 ## 0.2.53
@@ -107,7 +109,7 @@
 
 - Fix troubleshooting pages failing to load.
 - Fix access to advanced request options.
-- Add By Rating sorting and respect explicit kid or general folder choices.
+- Add By Rating sorting and respect explicit rating-specific or general library choices.
 - Remove obsolete library choices from requests.
 
 ## 0.2.47
@@ -125,13 +127,13 @@
 
 ## 0.2.44
 
-- Fix kid-rated titles failing to move to the kid library.
+- Fix rating-based routing failures for titles with lower age ratings.
 - Reduce log noise and avoid replaying old download logs.
 - Fix quality presets failing to apply and remove obsolete quality choices.
 
 ## 0.2.43
 
-- Look for better copies of Default and Max titles when sources are added.
+- Search for higher-quality releases of Default and Max titles when sources are added.
 - Stop future searches when a request is removed, keeping library files.
 
 ## 0.2.42
@@ -232,11 +234,11 @@
 
 ## 0.2.22
 
-- Fix setup getting stuck after changing the media folder.
+- Fix setup failures after changing the media folder.
 
 ## 0.2.21
 
-- Default storage to /media/dlna with separate kid and general movie and TV folders.
+- Default storage to /media/dlna with separate rating-specific and general movie and TV libraries.
 
 ## 0.2.20
 
@@ -265,7 +267,7 @@
 
 ## 0.2.14
 
-- Fix setup getting stuck before Plex connection.
+- Fix setup failures before Plex connection.
 
 ## 0.2.13
 
@@ -320,13 +322,13 @@
 
 - Add Home Assistant OS support and automatic startup.
 - Fix connections to VPN servers specified by hostname.
-- Sort titles into kid or general libraries by rating.
+- Sort titles into rating-specific or general libraries by rating.
 - Add the app icon and logo.
 
 ## 0.2.0
 
 - Add search and automatic setup after VPN connection.
-- Add separate kid and general libraries.
+- Add separate rating-specific and general libraries.
 - Add VPN port forwarding.
 
 ## 0.1.1

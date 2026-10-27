@@ -1,10 +1,10 @@
-"""Movie household outcomes; transport/setup/reporting live in shared helpers."""
+"""Movie application workflows; transport/setup/reporting live in shared helpers."""
 
 from pathlib import Path
 import json
 import time
 import urllib.parse
-from household import tunnel_bytes
+from applications import tunnel_bytes
 from stack_checks import outage
 from support import digest, save_json
 from request_lifecycle import close_request

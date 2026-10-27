@@ -15,7 +15,7 @@ def tunnel_bytes():
     return sum(int(row.split()[1]) for row in rows)
 
 
-class Household:
+class ApplicationStack:
     def __init__(self, secrets, session, evidence):
         self.session = session
         self.evidence = evidence
@@ -261,7 +261,7 @@ def configure(client, restored):
     if not restored:
         assert client.search("GET", "/settings/public")["initialized"] is False
         assert client.arr("GET", "/movie") == [], (
-            "Fresh-install journey has existing titles"
+            "Fresh-install scenario has existing titles"
         )
     # Create the first administrator before indexer setup can delay it past reconcile.
     client.search("POST", "/auth/plex", {"authToken": "synthetic-token"})
@@ -303,7 +303,7 @@ def configure(client, restored):
     )
     client.healthy(client.created_at)
     client.ready_at = time.time()
-    stamp("household-setup-complete")
+    stamp("application-setup-complete")
 
 
 class Background:

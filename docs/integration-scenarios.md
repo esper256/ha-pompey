@@ -1,10 +1,10 @@
-# Household acceptance scenarios
+# Integration acceptance scenarios
 
-This is the numbered list used to select the first expansion. An outcome can be an assertion in a shared journey rather than a separate installation. Unselected families remain stretch goals; their presence here does not claim passing coverage.
+This is the numbered list used to select the first expansion. An outcome can be an assertion in a shared scenario rather than a separate installation. Unselected families remain stretch goals; their presence here does not claim passing coverage.
 
 | # | Outcome | First expansion |
 | --- | --- | --- |
-| 1 | Movie request reaches the correct kid/general library | Existing PG/R/unknown journeys, exact bytes and subtitles |
+| 1 | Movie request reaches the correct rating-based library | Existing PG/R/unknown scenarios, exact bytes and subtitles |
 | 2 | Single TV episode reaches the correct library | `single-episode` |
 | 3 | Complete season pack imports correctly | `season-pack`, two distinct episodes |
 | 4 | Selected seasons download only intended episodes | `selected-seasons`, two offered seasons and only season 2 requested |
@@ -50,14 +50,14 @@ The synthetic Skyhook schema was captured from the public Sonarr metadata respon
 
 The restart handoff is declared before execution. It is not a retry after failure: the first phase proves a waiting request and an incomplete torrent, performs shared background checks, and exits cleanly. The host validates shutdown, archives the first boot's logs/report/transcript, and starts the same container once. The second phase proves the original requests and cached partial bytes survived before completing them. Synthetic payloads and external credentials are reconstructed identically; actual application databases, downloader resume files and media are preserved. It does not simulate Supervisor or promise HA restore/upgrade compatibility.
 
-Tests assert household outcomes and native decisions. They must not directly set monitoring flags, patch engine binaries, clear native databases/cooldowns, force a torrent to stop, or silently accept a lower-priority release to make a test pass. A legitimate product failure stays a failing assertion with evidence, rather than becoming an expected failure or skipped CI requirement.
+Tests assert application workflows and native decisions. They must not directly set monitoring flags, patch engine binaries, clear native databases/cooldowns, force a torrent to stop, or silently accept a lower-priority release to make a test pass. A legitimate product failure stays a failing assertion with evidence, rather than becoming an expected failure or skipped CI requirement.
 
 Focused validation uses names, for example:
 
 ```sh
-bash tests/run.sh --skip-build --journey-only --only single-episode season-pack selected-seasons anime-dual-audio
-bash tests/run.sh --skip-build --journey-only --only waiting-content restart-partial
-bash tests/run.sh --skip-build --journey-only --only vpn-download-loss
+bash tests/run.sh --skip-build --integration-only --only single-episode season-pack selected-seasons anime-dual-audio
+bash tests/run.sh --skip-build --integration-only --only waiting-content restart-partial
+bash tests/run.sh --skip-build --integration-only --only vpn-download-loss
 ```
 
 The full CI layout additionally checks the logic/packet suites and a configured clone. Focused runs are diagnosis tools and do not replace that gate. Passing/failing observations for this expansion are recorded in the testing guide and PR; this table describes intended assertions, not an unconditional validation claim.

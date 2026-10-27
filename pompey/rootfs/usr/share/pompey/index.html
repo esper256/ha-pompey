@@ -294,13 +294,13 @@
     <ol id="steps"></ol>
     <p class="now" id="now">Starting Pompey…</p>
     <form id="vpn" hidden>
-      <label for="wg">Paste your VPN WireGuard configuration (.conf).</label>
+      <label for="wg">WireGuard VPN configuration (.conf)</label>
       <textarea id="wg" name="config" spellcheck="false" autocomplete="off" autocapitalize="off"></textarea>
       <button type="submit" id="wg-go">Connect VPN</button>
     </form>
     <div id="open-search" hidden>
-      <a id="open-search-btn" href="#" target="_blank" rel="noopener">Open search</a>
-      <a id="open-sources-btn" href="#" target="_blank" rel="noopener">Open sources</a>
+      <a id="open-search-btn" href="#" target="_blank" rel="noopener">Search and requests</a>
+      <a id="open-sources-btn" href="#" target="_blank" rel="noopener">Manage indexers</a>
       <p class="hint" id="open-search-url"></p>
     </div>
     <section id="debug-consoles" hidden aria-label="Troubleshooting">
@@ -318,14 +318,14 @@
       </div>
       <div class="vpn-rates">
         <div class="vpn-col down">
-          <div class="dir">Down</div>
+          <div class="dir">Download</div>
           <div class="rate" id="vpn-down-rate">—</div>
-          <div class="total" id="vpn-down-total">0 B in</div>
+          <div class="total" id="vpn-down-total">0 B received</div>
         </div>
         <div class="vpn-col up">
-          <div class="dir">Up</div>
+          <div class="dir">Upload</div>
           <div class="rate" id="vpn-up-rate">—</div>
-          <div class="total" id="vpn-up-total">0 B out</div>
+          <div class="total" id="vpn-up-total">0 B sent</div>
         </div>
       </div>
       <svg id="vpn-graph" viewBox="0 0 320 68" preserveAspectRatio="none" aria-hidden="true">
@@ -339,9 +339,9 @@
     <p class="error" id="err" hidden></p>
   </main>
   <details style="max-width:48rem;margin:1.5rem auto;padding:1rem">
-    <summary>Why isn't this available?</summary>
-    <p>Inspect current requests, downloads and import messages. A new search contacts your sources and shows Arr's release decisions.</p>
-    <button id="inspect">Inspect current state</button>
+    <summary>Request and download diagnostics</summary>
+    <p>Review requests, downloads and import messages. Use Search releases to query your indexers and view release rejection reasons.</p>
+    <button id="inspect">Refresh diagnostics</button>
     <div id="diagnostics" aria-live="polite"></div>
   </details>
   <script>
@@ -467,8 +467,8 @@
       vpnIface.textContent = "Connected";
       vpnDownRate.textContent = vpnHist.length > 1 ? fmtRate(downBps) : "—";
       vpnUpRate.textContent = vpnHist.length > 1 ? fmtRate(upBps) : "—";
-      vpnDownTotal.textContent = fmtBytes(rx) + " in";
-      vpnUpTotal.textContent = fmtBytes(tx) + " out";
+      vpnDownTotal.textContent = fmtBytes(rx) + " received";
+      vpnUpTotal.textContent = fmtBytes(tx) + " sent";
       const downs = vpnHist.map((p) => p.down);
       const ups = vpnHist.map((p) => p.up);
       const max = Math.max(1, ...downs, ...ups);
@@ -539,7 +539,7 @@
         openSearch.hidden = false;
         openSearchBtn.href = url;
         openSourcesBtn.href = sourcesUrl;
-        openSearchUrl.textContent = "If these links fail, open Home Assistant using its local address.";
+        openSearchUrl.textContent = "These interfaces require access to the Home Assistant server through your local network.";
       } else {
         openSearch.hidden = true;
       }
@@ -567,15 +567,15 @@
         const body = await res.json().catch(() => ({}));
         if (!res.ok || body.ok === false) {
           err.hidden = false;
-          err.textContent = body.error || "Could not use that VPN file.";
+          err.textContent = body.error || "The WireGuard configuration could not be applied.";
           return;
         }
         vpn.hidden = true;
         vpnSubmitted = true;
-        now.textContent = "Connecting VPN…";
+        now.textContent = "Connecting to the VPN…";
       } catch (_exc) {
         err.hidden = false;
-        err.textContent = "Could not save the VPN configuration. Try again.";
+        err.textContent = "Unable to save the WireGuard configuration. Check connectivity and try again.";
       } finally {
         wgGo.disabled = false;
       }
@@ -594,37 +594,37 @@
         ...(body ? {body:JSON.stringify(body)} : {})
       });
       const data = await response.json();
-      if (!response.ok) throw new Error(data.error || "Evidence unavailable");
+      if (!response.ok) throw new Error(data.error || "Diagnostic information is unavailable");
       return data;
     }
     document.getElementById("inspect").addEventListener("click", async () => {
       diagnosis.replaceChildren();
-      paragraph("Collecting evidence…");
+      paragraph("Loading diagnostics…");
       try {
         const data = await diagnosticRequest("");
         diagnosis.replaceChildren();
-        paragraph("Observed " + new Date(data.updated * 1000).toLocaleString());
+        paragraph("Updated " + new Date(data.updated * 1000).toLocaleString());
         (data.attention || []).forEach(paragraph);
-        (data.requests || []).forEach(request => paragraph(request.title + ": " + request.state + (request.arrLinked ? "" : "; not yet linked to a library title")));
+        (data.requests || []).forEach(request => paragraph(request.title + ": " + request.state + (request.arrLinked ? "" : "; not yet linked to a Radarr or Sonarr entry")));
         (data.downloads || []).forEach(download => paragraph(
-          (download.title || "Unidentified download") + ": " + (download.state || "unknown") +
+          (download.title || "Unidentified download") + ": " + (download.state || "Unknown state") +
           (download.messages?.length ? ". " + download.messages.join("; ") : "") +
           (download.note ? ". " + download.note : "")
         ));
         (data.titles || []).forEach(title => {
-          paragraph(title.title + ": " + (title.hasFile ? "Imported at " + title.path : "Awaiting import") +
-            (title.monitored ? "" : "; monitoring is off"));
+          paragraph(title.title + ": " + (title.hasFile ? "Library location: " + title.path : "Awaiting import") +
+            (title.monitored ? "" : "; monitoring disabled"));
           const button = document.createElement("button");
-          button.textContent = "Search and explain: " + title.title;
+          button.textContent = "Search releases: " + title.title;
           button.addEventListener("click", async () => {
             button.disabled = true;
             try {
               const result = await diagnosticRequest("/search", {kind:title.kind,id:title.id});
               paragraph(result.status + " at " + new Date(result.updated * 1000).toLocaleString());
-              if (!result.releases?.length) paragraph("The search returned no releases. This does not establish that none exist elsewhere.");
+              if (!result.releases?.length) paragraph("The configured indexers returned no releases.");
               (result.releases || []).forEach(release => paragraph(release.title + ": " +
-                (release.rejections?.length ? release.rejections.join("; ") : "Eligible according to Arr") +
-                "; source reports " + (release.reportedSeeders ?? "unknown") + " seeders"));
+                (release.rejections?.length ? release.rejections.join("; ") : "No rejection reasons reported") +
+                "; reported seeders: " + (release.reportedSeeders ?? "unknown")));
             } catch (error) { paragraph(error.message); }
             finally { button.disabled = false; }
           });
@@ -632,8 +632,9 @@
         });
         if (data.requestReview) {
           paragraph(data.requestReview);
+          paragraph("Existing monitoring is preserved. Future monitoring changes will use the current request history.");
           const button = document.createElement("button");
-          button.textContent = "Keep existing monitoring and track the current request history";
+          button.textContent = "Accept current request history";
           button.addEventListener("click", async () => {
             button.disabled = true;
             try { paragraph((await diagnosticRequest("/rebaseline", {confirm:true})).message); }
@@ -657,21 +658,21 @@
             const response = await fetch("health.json", { cache: "no-store" });
             const health = response.ok ? await response.json() : null;
             if (!health || Date.now() / 1000 - (Number(health.updated) || 0) > 35) {
-              err.textContent = "Status unavailable. Check the app log.";
+              err.textContent = "Service status is unavailable. Check the Pompey log.";
               err.hidden = false;
             } else {
               const down = Object.entries(health.services || {}).filter(([, up]) => !up).map(([name]) => name);
               const failed = Object.entries(health.jobs || {}).filter(([, job]) => job && job.failures > 0).map(([name]) => name);
               const overdue = Object.entries(health.jobs || {}).filter(([, job]) => job && job.overdue).map(([name]) => name);
               const messages = [...(health.attention || [])];
-              if (down.length) messages.unshift("Waiting for: " + down.join(", "));
-              if (failed.length) messages.push("Retrying: " + failed.join(", "));
+              if (down.length) messages.unshift("Unavailable services: " + down.join(", "));
+              if (failed.length) messages.push("Retrying maintenance: " + failed.join(", "));
               if (overdue.length) messages.push("Maintenance delayed: " + overdue.join(", "));
               err.textContent = messages.join(" ");
               err.hidden = !messages.length;
             }
           } catch (_) {
-            err.textContent = "Status unavailable.";
+            err.textContent = "Service status is unavailable.";
             err.hidden = false;
           }
         }
@@ -679,7 +680,7 @@
         // Polling is read-only. A torn status.json must not look like boot
         // started over just because someone opened the sidebar.
         if (!document.body.classList.contains("is-ready")) {
-          now.textContent = "Waiting for Pompey…";
+          now.textContent = "Waiting for service status…";
         }
       }
     }

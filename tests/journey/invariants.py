@@ -1,4 +1,4 @@
-"""One household checkpoint, with failure evidence that recovery cannot erase."""
+"""One integration checkpoint, with failure evidence that recovery cannot erase."""
 
 from datetime import datetime
 import fcntl
@@ -77,7 +77,7 @@ class Invariants:
         self.since = client.ready_at if since is None else since
         self.commands = CommandHistory()
         self.checkpoints = []
-        # Retain startup events too, but only initialized-household failures are
+        # Retain startup events too, but only failures after initialization are
         # unexpected: before this point Seerr and the source are not configured.
         assert any(e["kind"] == "controller-started" for e in source_events()), (
             "Controller event producer did not start"
@@ -87,7 +87,7 @@ class Invariants:
     def capture(self):
         events = source_events()
         all_events = [
-            dict(e, phase="household" if e["time"] >= self.since else "setup")
+            dict(e, phase="runtime" if e["time"] >= self.since else "setup")
             for e in events
         ]
         all_events.extend(self.commands.failures.values())
