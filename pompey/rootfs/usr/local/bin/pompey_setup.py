@@ -86,6 +86,13 @@ class Handler(BaseHTTPRequestHandler):
         self._send(200 if proc.returncode == 0 else 400, json.loads(proc.stdout))
 
     def do_GET(self):
+        if self.path.split("?")[0] == "/diagnostics/preferences":
+            try:
+                from pompey_preferences import status
+                self._send(200, status())
+            except (OSError, ValueError, KeyError, TypeError):
+                self._send(503, {"error": "Preferences are temporarily unavailable"})
+            return
         if self.path.split("?")[0] in {"/diagnostics", "/diagnostics/overview"}:
             try:
                 self._diagnostic("overview" if self.path.split("?")[0].endswith("/overview") else "snapshot")
@@ -96,7 +103,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         path = self.path.split("?", 1)[0]
-        if path in {"/diagnostics/search", "/diagnostics/rebaseline"}:
+        if path in {"/diagnostics/search", "/diagnostics/rebaseline", "/diagnostics/preferences"}:
             try:
                 length = int(self.headers.get("Content-Length", "0"))
                 if not 0 < length < 4096:
@@ -106,9 +113,15 @@ class Handler(BaseHTTPRequestHandler):
                     raise ValueError("Expected an object")
                 if path.endswith("rebaseline") and payload.get("confirm") is not True:
                     raise ValueError("Confirm that monitoring should be preserved")
+                if path.endswith("preferences"):
+                    from pompey_preferences import save
+                    self._send(200, save(payload))
+                    return
                 self._diagnostic(
                     "rebaseline" if path.endswith("rebaseline") else "search", payload
                 )
+            except BlockingIOError:
+                self._send(409, {"error": "Maintenance is running. Try saving again shortly."})
             except (ValueError, OSError, subprocess.TimeoutExpired) as exc:
                 self._send(400, {"error": str(exc)})
             return

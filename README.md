@@ -29,7 +29,7 @@ Restrict ports 5055 and 9696 to your local network. Radarr, Sonarr and qBittorre
 | NAT-PMP gateway | Empty; port forwarding disabled |
 | Advanced application interfaces | Disabled |
 
-Library paths are relative to the media directory. They must not overlap one another or the `downloads` directory. Path traversal and symlinks that escape the configured directory are rejected before directories are created. Restart Pompey after changing Pompey settings.
+Library paths are relative to the media directory. They must not overlap one another or the `downloads` directory. Path traversal and symlinks that escape the configured directory are rejected before directories are created. Restart Pompey after changing Home Assistant environment settings; preferences saved in Ingress apply through normal reconciliation.
 
 The default directory names are retained for compatibility. You can configure different names for your libraries. Automatic routing sends G, PG and PG-13 movies, and TV-Y, TV-Y7, TV-G and TV-PG series, to the libraries for lower age ratings. Other and unavailable ratings use the general libraries. Select a specific library in Seerr to override automatic routing.
 
@@ -55,7 +55,11 @@ Pompey supports compatible full-tunnel WireGuard configurations without requirin
 
 An atomic IPv4/IPv6 firewall update installs the fail-closed policy before applications start. Local interfaces remain accessible during a VPN outage. Replies from the published web interfaces retain the original container-network route even while the VPN is active and Local network access is empty. Direct private container networks are detected from live routes; additional LAN access is explicitly configured. Internet traffic and application DNS remain restricted to the tunnel. Saving a replacement WireGuard configuration reconnects the VPN.
 
-The sidebar shows a compact overview of torrents, monitored titles, enabled indexers and open requests. The Overview, Requests, Setup and Status tabs show current counts, request progress, setup checks, bundled versions and maintenance freshness. Unavailable observations retain their last known values and age. **Requests and downloads** displays current requests, downloads and import messages. **Search releases** performs an explicit indexer search and displays Arr's rejection reasons. Opening diagnostics does not initiate a search.
+The sidebar uses **Overview**, **Requests** and **Config** tabs. Overview shows torrents, monitored titles, source availability, VPN traffic and bundled application versions. Connection checks appear when setup or a service needs attention. Unavailable observations retain their last known values and age.
+
+Requests explains missing monitored media and native Arr download/import queues, including work added outside Seerr. Select a table row to inspect transfer speed, connected seeds/peers and native import messages. **Inspect releases** explicitly searches configured indexers and shows Arr’s rejection reasons; it does not start a download. Completed and declined request history stays in Seerr. The queue view is limited to the first 100 entries per Arr application; diagnostics warn when more exist.
+
+Config saves seeding policy, simultaneous download limits and the Anime dual-audio preference. The controller applies saved preferences on its next successful configuration pass, normally within about a minute. The UI distinguishes saved from applied; changes to profiles can take longer if upstream services are unavailable. Existing HA behavior options are accepted until the first Ingress save, then Ingress preferences take precedence. Media paths, network access and advanced interfaces remain in Home Assistant’s app configuration.
 
 Configuration, requests, download policies and library routing run as separate jobs with bounded execution and retry backoff. They continue retrying after an outage.
 

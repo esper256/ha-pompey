@@ -378,7 +378,10 @@ def recyclarr_is_fresh() -> bool:
     from pathlib import Path
 
     manifest = Path("/usr/share/pompey/engines.json")
+    from pompey_preferences import current
     record = persist.load("profiles")
+    if record.get("prefer_dual_audio", True) != current()["prefer_dual_audio"]:
+        return False
     if record.get("bundle") != hashlib.sha256(manifest.read_bytes()).hexdigest():
         return False
     for kind, host in [("radarr", radarr_url()), ("sonarr", sonarr_url())]:
@@ -439,12 +442,14 @@ def run_recyclarr(*, force: bool = False) -> bool:
     import hashlib
     from pathlib import Path
 
+    from pompey_preferences import current as current_preferences
     persist.save(
         "profiles",
         {
             "bundle": hashlib.sha256(
                 Path("/usr/share/pompey/engines.json").read_bytes()
-            ).hexdigest()
+            ).hexdigest(),
+            "prefer_dual_audio": current_preferences()["prefer_dual_audio"],
         },
     )
     return True
@@ -1051,6 +1056,8 @@ def main() -> int:
         Path(ready_dir()) / "configuration.json",
         {"ok": True, "updated": time.time(), "error": ""},
     )
+    from pompey_preferences import applied
+    applied()
     mark_status("ready", "Ready", 100)
     log("Application connections configured")
     return 0

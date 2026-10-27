@@ -87,6 +87,81 @@ class ObservationSemantics(unittest.TestCase):
         self.assertEqual(phase, "Awaiting approval")
 
 
+class IngressPreferences(unittest.TestCase):
+    def test_invalid_write_preserves_prior_policy_and_pending_means_not_applied(self):
+        import pompey_preferences as preferences
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, POMPEY_DATA=tmp):
+            original = {**preferences.DEFAULTS, "after_download": "share_one_day"}
+            state.save("preferences", {"values": original})
+            preferences.applied()
+            self.assertFalse(preferences.status()["pending"])
+            for field, value in [("after_download", []), ("simultaneous_downloads", True),
+                                 ("simultaneous_downloads", 21), ("prefer_dual_audio", "false")]:
+                with self.subTest(field=field, value=value), self.assertRaises(ValueError):
+                    preferences.save({**original, field: value})
+                self.assertEqual(preferences.current(), original)
+            with patch("pompey_runtime.stack_lock", side_effect=BlockingIOError):
+                with self.assertRaises(BlockingIOError):
+                    preferences.save(preferences.DEFAULTS)
+                self.assertEqual(preferences.current(), original)
+            preferences.save(preferences.DEFAULTS)
+            self.assertTrue(preferences.status()["pending"])
+            self.assertEqual(api.qbit_share_limits()["ratio"], 0)
+            self.assertEqual(api.simultaneous_downloads(), 8)
+
+    def test_legacy_values_are_used_until_first_save_and_audio_changes_affect_profiles(self):
+        import pompey_preferences as preferences
+        from recyclarr_sync import render_config
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, POMPEY_DATA=tmp,
+                AFTER_DOWNLOAD="share_to_ratio", SIMULTANEOUS_DOWNLOADS="3"):
+            self.assertEqual(preferences.current()["after_download"], "share_to_ratio")
+            state.save("preferences", {"values": {**preferences.DEFAULTS, "prefer_dual_audio": False}})
+            self.assertEqual(api.after_download(), "stop_sharing")
+            self.assertIn("score: 0", render_config("r", "key", "s", "key"))
+            self.assertNotIn("score: 15", render_config("r", "key", "s", "key"))
+
+
+class WorkflowEvidence(unittest.TestCase):
+    def test_queue_evidence_includes_manual_work_and_marks_stale_peer_data(self):
+        from pompey_diagnostics import workflow
+        source = {"available": True, "updated": 100, "data": {"titles": []}}
+        sources = {"radarr": source, "sonarr": source,
+                   "qbittorrent": {"available": False, "updated": 90}}
+        titles = [{"kind": "radarr", "id": 4, "title": "Example", "monitored": True}]
+        queues = {"radarr": [{"movieId": 4, "downloadId": "ABC", "sizeleft": 10}]}
+        torrents = {"abc": {"state": "stalledDL", "num_seeds": 0, "num_leechs": 2, "dlspeed": 0},
+                    "manual": {"name": "Manual grab", "state": "stoppedUP"}}
+        result = workflow(sources, titles, queues, torrents)
+        linked = next(row for row in result if row["id"] == 4)
+        self.assertEqual(linked["phase"], "Current progress unavailable")
+        self.assertEqual(linked["lastKnownPhase"], "Waiting for peers")
+        self.assertEqual(linked["updated"], 90)
+        self.assertEqual(linked["download"]["connectedPeers"], 2)
+        self.assertEqual(len(result), 2)
+        self.assertEqual(result[1]["title"], "Manual grab")
+
+    def test_completed_titles_are_excluded_without_hiding_missing_episodes(self):
+        from pompey_diagnostics import workflow
+        sources = {"radarr": {"available": True, "updated": 100},
+                   "sonarr": {"available": True, "updated": 100, "data": {"titles": [
+                       {"id": 2, "statistics": {"episodeCount": 5, "episodeFileCount": 3}},
+                       {"id": 3, "statistics": {"episodeCount": 5, "episodeFileCount": 5}}]}}}
+        titles = [{"kind": "radarr", "id": 1, "title": "Complete", "monitored": True, "hasFile": True},
+                  {"kind": "sonarr", "id": 2, "title": "Partial", "monitored": True, "hasFile": 3},
+                  {"kind": "sonarr", "id": 3, "title": "Caught up", "monitored": True, "hasFile": 5}]
+        rows = workflow(sources, titles, {}, {})
+        self.assertEqual([row["title"] for row in rows], ["Partial"])
+        self.assertEqual(rows[0]["phase"], "Missing episodes")
+
+    def test_requested_monitoring_off_is_not_hidden_as_an_unrequested_title(self):
+        from pompey_diagnostics import workflow
+        title = {"kind": "radarr", "id": 1, "title": "Paused request", "monitored": False}
+        sources = {"radarr": {"available": True, "updated": 100}}
+        self.assertEqual(workflow(sources, [title], {}, {}), [])
+        rows = workflow(sources, [title], {}, {}, {("radarr", 1)})
+        self.assertEqual(rows[0]["phase"], "Monitoring disabled")
+
+
 class CumulativeFailureEvidence(unittest.TestCase):
     def test_recovery_and_controller_restart_do_not_erase_failure(self):
         from pompey_events import record
