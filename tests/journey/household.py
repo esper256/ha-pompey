@@ -1,6 +1,7 @@
 """Common real application setup, clients, identity and background-state checks."""
 
 import json
+import os
 from pathlib import Path
 import subprocess
 import time
@@ -263,6 +264,30 @@ def configure(client, restored):
         assert client.arr("GET", "/movie") == [], (
             "Fresh-install journey has existing titles"
         )
+    if os.environ.get("POMPEY_TEST_DNS_TRACE") == "1":
+        for entry in Path("/proc").glob("[0-9]*/cmdline"):
+            try:
+                command = entry.read_bytes().split(b"\0")[0]
+            except OSError:
+                continue
+            if command.endswith(b"/seerr/usr/local/bin/node"):
+                subprocess.Popen(
+                    [
+                        "/tests/journey/tool",
+                        "strace",
+                        "-f",
+                        "-e",
+                        "trace=network,openat",
+                        "-s",
+                        "200",
+                        "-p",
+                        entry.parent.name,
+                        "-o",
+                        "/artifacts/seerr-dns.trace",
+                    ]
+                )
+                time.sleep(0.3)
+                break
     # Create the first administrator before indexer setup can delay it past reconcile.
     client.search("POST", "/auth/plex", {"authToken": "synthetic-token"})
     client.skey = client.search("GET", "/settings/main")["apiKey"]

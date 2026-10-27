@@ -57,6 +57,7 @@ jobs:
         run: bash tests/run.sh --skip-build --layout ci --exclude vpn-download-loss
         env:
           POMPEY_CONTAINER_COMMAND: docker
+          POMPEY_TEST_DNS_TRACE: "1"
       - name: Preserve required acceptance summary
         run: cp .test-results/timing-summary.json .test-results/required-timing-summary.json
       - name: Advisory known issue — VPN download resumption
