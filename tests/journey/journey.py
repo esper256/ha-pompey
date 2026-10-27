@@ -82,6 +82,7 @@ def collect_failure(client, root):
             except Exception as exc:
                 snapshots["caseDetailError"] = str(exc)
     for file in [
+        Path("/etc/resolv.conf"),
         *[
             Path("/tmp/pompey") / name
             for name in ["configuration.json", "health.json", "status.json"]
@@ -92,6 +93,26 @@ def collect_failure(client, root):
             snapshots[str(file)] = tail(file)
         except OSError as exc:
             snapshots[str(file)] = {"error": str(exc)}
+    try:
+        dns = subprocess.run(
+            [
+                "s6-setuidgid",
+                "pompey",
+                sys.executable,
+                "-c",
+                "import socket; print(socket.getaddrinfo('plex.tv', 443, type=socket.SOCK_STREAM))",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=3,
+        )
+        snapshots["engineDnsProbe"] = {
+            "returncode": dns.returncode,
+            "stdout": dns.stdout,
+            "stderr": dns.stderr,
+        }
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        snapshots["engineDnsProbe"] = {"error": str(exc)}
     save_json(root / "failure-state.json", snapshots)
     for cmd in [["wg", "show"], ["nft", "list", "table", "inet", "pompey"]]:
         try:
