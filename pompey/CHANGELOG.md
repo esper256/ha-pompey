@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.5.2
+
+- Update quality-resources: trash_guides ed6d7226232c, config_templates 89eebadd4299 → trash_guides 6ac59721b3c9, config_templates 89eebadd4299.
+
 ## 0.5.1
 
 - Update Prowlarr: v2.6.5.5623 → v2.7.0.5723.
