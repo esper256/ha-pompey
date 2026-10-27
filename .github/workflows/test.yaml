@@ -80,7 +80,7 @@ jobs:
   fast:
     name: Fast development checks
     needs: changes
-    if: needs.changes.outputs.code == 'true'
+    if: ${{ !cancelled() && needs.changes.result == 'success' && needs.changes.outputs.code == 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 3
     steps:
@@ -93,7 +93,7 @@ jobs:
   acceptance:
     name: Application integration and network isolation
     needs: [changes, fast]
-    if: needs.changes.outputs.suite != 'none'
+    if: ${{ !cancelled() && needs.changes.result == 'success' && needs.fast.result == 'success' && needs.changes.outputs.suite != 'none' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
