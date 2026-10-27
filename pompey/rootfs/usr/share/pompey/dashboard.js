@@ -118,7 +118,6 @@
   function showAttention() {
     attentionOnly = true;
     setFilters();
-    openPanel("diagnostic-panel");
   }
   function metric(title, value, detail, source, action = null, warning = false) {
     const node = document.createElement(action ? "button" : "div");
@@ -451,6 +450,7 @@
   async function refreshRequests() {
     if (requestsBusy) return;
     requestsBusy = true;
+    let restoreFocus = false;
     element("inspect").disabled = true;
     try {
       const data = await diagnosticRequest("");
@@ -462,7 +462,7 @@
         const ownedFocus = component.row.contains(document.activeElement) || component.detailRow.contains(document.activeElement);
         component.row.remove(); component.detailRow.remove(); components.delete(key);
         if (selectedWorkflow === key) selectedWorkflow = null;
-        if (ownedFocus) element("inspect").focus({preventScroll: true});
+        restoreFocus ||= ownedFocus;
       }
       for (const key of requestOrder) {
         const item = items.get(key);
@@ -499,7 +499,10 @@
         updateSummary(component, component.item);
       }
       renderRequests();
-    } finally { requestsBusy = false; element("inspect").disabled = false; }
+    } finally {
+      requestsBusy = false; element("inspect").disabled = false;
+      if (restoreFocus) element("inspect").focus({preventScroll: true});
+    }
   }
   async function refreshOverview() {
     if (overviewBusy || location.protocol === "file:") return;
