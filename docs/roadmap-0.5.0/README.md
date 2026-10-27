@@ -39,6 +39,8 @@ Maintainer review on issues #89–#97 supersedes the original mockups:
 
 ## Development implementation status
 
+[Current implementation screenshots and release-review notes](release-review.md) show the actual product screens with explicitly synthetic data. The older images below remain design proposals.
+
 Production approval for the initial 0.5.0 release is pending review of current implementation screenshots. Merging the development beta does not approve a stable release. Dependency discovery remains inactive on the prerelease version.
 
 The development branch uses Overview, Requests, Setup and Status tabs, with Overview selected by default and storage attention visible across all views. It includes the compact overview and shared observations (#97), request-focused read-only explanations (#91), optional media-server/setup checks (#93), bundled versions and bounded log repetition (#96), native executable exclusions (#99), VPN interface-replacement recovery (#90), and storage service holds/restoration (#94). These are implemented increments; the broader issue checklists remain open until their remaining cases are verified.
