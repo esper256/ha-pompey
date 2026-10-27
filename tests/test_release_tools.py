@@ -92,6 +92,15 @@ class PromotionPolicy(unittest.TestCase):
             with self.subTest(path=path), self.assertRaises(ValueError):
                 validate_contents("sonarr", before, changed, "0.5.1")
 
+    def test_pending_notes_move_into_the_next_release_without_rewriting_history(self):
+        from release_metadata import release_notes, split_unreleased
+        before = "# Changelog\n\n## Unreleased\n\n- Fix concurrent requests.\n\n## 0.5.0\n\nExisting release.\n"
+        after = release_notes(before, "0.5.1", "- Update quality resources.")
+        self.assertNotIn("## Unreleased", after)
+        self.assertTrue(after.startswith("# Changelog\n\n## 0.5.1\n"))
+        self.assertIn("- Fix concurrent requests.", after)
+        self.assertTrue(after.endswith(split_unreleased(before)[1]))
+
     def test_baseline_tracks_the_last_stable_release_not_an_old_public_tag(self):
         self.assertEqual(choose({"tag_name": "v0.4.0"}), FALLBACK)
         self.assertEqual(choose({"tag_name": "v0.5.0"}), "v0.5.0")

@@ -296,7 +296,7 @@ def journey(
         "POMPEY_TEST_SELECTED_CASES=" + json.dumps(selected),
         "-e",
         "POMPEY_JOB_INTERVALS="
-        + json.dumps({"configuration": 2, "routing": 2, "requests": 2, "downloads": 2}),
+        + json.dumps({"configuration": 2, "routing": 2, "requests": 120 if baseline else 2, "downloads": 2}),
     ]
     flags += engine.namespace_security
     if baseline:

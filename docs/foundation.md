@@ -18,6 +18,6 @@ One scenario verifies an empty installation. Additional scenarios use unique con
 
 ## Release validation
 
-Required CI is the release gate. Version 0.4.0 permits only the documented VPN download-resumption timeout, subject to successful network recovery and complete safety evidence. Other failures remain fatal. See [testing](testing.md) for the exact exception and coverage boundaries.
+Required automated CI is the release gate. Full release acceptance includes strict VPN transfer resumption, storage and cold-start faults, configured clones and a real previous-release upgrade. The historical 0.4.0 VPN timeout exception is not carried forward into current release acceptance.
 
-Upstream candidates must be built and tested using their actual binaries and configuration. Automatic dependency promotion remains disabled pending broader integration and forward-upgrade coverage. Actual Supervisor installation, Home Assistant Ingress authorization, NAS behavior and Plex playback remain unautomated boundaries.
+Upstream candidates are built and tested using their actual binaries and configuration. Dependency discovery serializes candidates and trusted-main release orchestration verifies the tested merge tree before protected merge and publication. Actual Supervisor installation, Home Assistant Ingress authorization, NAS behavior and media-player playback remain unautomated boundaries. See [testing](testing.md) and [update architecture](arr-auto-update.md).

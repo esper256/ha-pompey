@@ -102,7 +102,8 @@ def reconcile_requests():
     if sorted(json.dumps(r, sort_keys=True) for r in first) != sorted(
         json.dumps(r, sort_keys=True) for r in second
     ):
-        raise RuntimeError("Seerr requests changed; deferring cancellation")
+        api.log_if_new("request-snapshot-changing", "Seerr requests changed during inspection; preserving monitoring until the next check")
+        return
     uncertain = set()
     for row in second:
         kind, external_id = identity(row)

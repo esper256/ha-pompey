@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Preserve monitoring and defer cancellation when Seerr requests change during inspection, without reporting normal concurrent activity as a failed controller job.
+
 ## 0.5.0
 
 - Refine Ingress to Overview, Requests and Config tabs; show connection checks only when they need attention. Keep VPN connection state beside its label.

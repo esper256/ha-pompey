@@ -8,7 +8,7 @@ import base64
 import copy
 import json
 from dependency_updates import api
-from release_metadata import current, next_patch
+from release_metadata import current, next_patch, split_unreleased
 
 ALLOWED = {"pompey/rootfs/usr/share/pompey/engines.json", "pompey/config.yaml", "pompey/Dockerfile", "pompey/CHANGELOG.md"}
 MANIFEST = "pompey/rootfs/usr/share/pompey/engines.json"
@@ -67,8 +67,12 @@ def validate_contents(component, before, after, version):
     if new == old or new != expected:
         raise ValueError("Candidate changed dependencies outside its component")
     header = "# Changelog\n\n"
-    if not before["pompey/CHANGELOG.md"].startswith(header) or not after["pompey/CHANGELOG.md"].startswith(header + "## " + version + "\n") or not after["pompey/CHANGELOG.md"].endswith(before["pompey/CHANGELOG.md"][len(header):]):
-        raise ValueError("Candidate rewrote existing release notes")
+    pending, history = split_unreleased(before["pompey/CHANGELOG.md"])
+    after_notes = after["pompey/CHANGELOG.md"]
+    prefix = header + "## " + version + "\n"
+    if (not after_notes.startswith(prefix) or not history or not after_notes.endswith(history)
+            or (pending and pending not in after_notes[len(prefix):-len(history)])):
+        raise ValueError("Candidate rewrote or omitted existing release notes")
 
 
 def validate(pr, files, sha, comparison, protection):
