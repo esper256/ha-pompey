@@ -129,7 +129,8 @@ def main():
     protection = required_protection(repo)
     if plan["kind"] == "dependency":
         files = api(base + "/pulls/" + number + "/files?per_page=100")
-        validate({**pr, "draft": False}, files, plan["head"], {"behind_by": 0}, protection)
+        comparison = api(base + "/compare/" + plan["base"] + "..." + plan["head"])
+        validate({**pr, "draft": False}, files, plan["head"], comparison, protection)
         def contents(ref):
             return {path: base64.b64decode(api(base + "/contents/" + path + "?ref=" + ref)["content"]).decode() for path in ALLOWED}
         validate_contents(pr["head"]["ref"].removeprefix("codex/upstream-"), contents(plan["base"]), contents(plan["head"]), plan["version"])

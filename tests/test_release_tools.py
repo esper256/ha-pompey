@@ -146,14 +146,16 @@ class ReleasePlanning(unittest.TestCase):
         pr = {"head": {"sha": "head", "repo": {"full_name": "esper256/ha-pompey"}},
               "base": {"ref": "main", "sha": "base"}, "state": "open"}
         merge = {"parents": [{"sha": "base"}, {"sha": "head"}]}
-        validate_candidate(pr, "base", merge, "0.5.1", "0.5.0")
+        validate_candidate(pr, "base", merge, "0.5.1", "0.5.0", {"behind_by": 0})
+        with self.assertRaises(ValueError):
+            validate_candidate(pr, "base", merge, "0.5.1", "0.5.0", {"behind_by": 1})
         for version in ["0.5.0", "0.4.9"]:
             with self.assertRaises(ValueError):
-                validate_candidate(pr, "base", merge, version, "0.5.0")
+                validate_candidate(pr, "base", merge, version, "0.5.0", {"behind_by": 0})
         with self.assertRaises(ValueError):
             stable_version('version: "0.5.1-beta.1"')
         with self.assertRaises(ValueError):
-            validate_candidate(pr, "base", {"parents": [{"sha": "head"}]}, "0.5.1", "0.5.0")
+            validate_candidate(pr, "base", {"parents": [{"sha": "head"}]}, "0.5.1", "0.5.0", {"behind_by": 0})
 
     def test_queue_serializes_active_releases_and_retains_failed_evidence(self):
         from dependency_updates import queue_decision
