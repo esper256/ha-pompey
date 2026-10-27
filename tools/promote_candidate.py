@@ -116,10 +116,7 @@ def main():
     jobs = api(base + "/actions/runs/" + run_id + "/attempts/" + str(attempt) + "/jobs?per_page=100")["jobs"]
     # The workflow runs on trusted main; its read-only test jobs check out the
     # exact synthetic merge SHA resolved by the trusted planning job.
-    expected_run = {**run, "head_sha": plan["revision"]}
-    if run.get("head_sha") != plan["base"]:
-        raise ValueError("Release workflow did not start from the planned trusted main")
-    validate_acceptance(expected_run, jobs, plan["revision"], attempt, context="Release acceptance")
+    validate_acceptance(run, jobs, plan["base"], attempt, context="Release acceptance")
     pr = api(base + "/pulls/" + number)
     main_sha = api(base + "/git/ref/heads/main")["object"]["sha"]
     merge = api(base + "/git/commits/" + plan["revision"])
