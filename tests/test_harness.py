@@ -1,6 +1,7 @@
 """Regressions for evidence loss, retry masking and binary payload boundaries."""
 
 import json
+import copy
 import os
 import socket
 import struct
@@ -24,6 +25,7 @@ from torrent_files import TorrentFiles
 from external import World
 from fixture_network import DnsServer, PEER_IP
 from invariants import CommandHistory, Invariants, InvariantFailure
+from known_vpn_resume import known_resume_failure
 
 
 class CumulativeInvariantEvents(unittest.TestCase):
@@ -265,6 +267,82 @@ class PayloadBoundary(unittest.TestCase):
         _, _, status = world.respond("plex.tv", "/download/1", {})
         self.assertEqual(status, 404)
         self.assertEqual(world.unknown, ["plex.tv/download/1"])
+
+
+class KnownVpnResumePolicy(unittest.TestCase):
+    def proof(self):
+        return [
+            {
+                "success": False,
+                "error": {
+                    "category": "timeout",
+                    "stage": "Downloader did not verify the payload",
+                },
+                "cases": [
+                    {
+                        "scenario": "vpn-download-loss",
+                        "status": "failed",
+                        "vpnLossDuringDownload": True,
+                    }
+                ],
+                "stackChecks": {"vpnOutage": {"success": True}},
+            },
+            [{"kind": "controller-started", "phase": "setup"}],
+            [],
+            {
+                "services": {
+                    name: True
+                    for name in [
+                        "radarr",
+                        "sonarr",
+                        "prowlarr",
+                        "qbittorrent",
+                        "seerr",
+                        "vpn",
+                    ]
+                },
+                "attention": [],
+                "jobs": {
+                    name: {"failures": 0, "overdue": False}
+                    for name in ["configuration", "requests", "downloads", "routing"]
+                },
+            },
+            {},
+        ]
+
+    def test_accepts_only_proven_download_resume_failure(self):
+        self.assertTrue(known_resume_failure(*self.proof()))
+
+    def test_other_network_application_fixture_and_safety_failures_remain_fatal(self):
+        for failure in [
+            "other timeout",
+            "http",
+            "outage",
+            "service",
+            "job",
+            "event",
+            "fixture",
+            "shutdown",
+        ]:
+            with self.subTest(failure=failure):
+                proof = copy.deepcopy(self.proof())
+                if failure == "other timeout":
+                    proof[0]["error"]["stage"] = "VPN loss was not reported"
+                elif failure == "http":
+                    proof[0]["error"]["category"] = "application-http"
+                elif failure == "outage":
+                    proof[0]["stackChecks"]["vpnOutage"]["success"] = False
+                elif failure == "service":
+                    proof[3]["services"]["vpn"] = False
+                elif failure == "job":
+                    proof[3]["jobs"]["configuration"]["failures"] = 1
+                elif failure == "event":
+                    proof[1].append({"kind": "job-failed", "phase": "household"})
+                elif failure == "fixture":
+                    proof[2].append("Unexpected DNS")
+                elif failure == "shutdown":
+                    proof[4]["shutdownError"] = "unclean shutdown"
+                self.assertFalse(known_resume_failure(*proof))
 
 
 if __name__ == "__main__":
