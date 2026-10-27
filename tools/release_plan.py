@@ -23,13 +23,15 @@ def contents(path, revision):
     return base64.b64decode(api(BASE + "/contents/" + path + "?ref=" + revision)["content"]).decode()
 
 
-def validate_candidate(pr, main, merge, version, previous):
+def validate_candidate(pr, main, merge, version, previous, comparison):
     if (pr["state"] != "open" or pr["head"]["repo"]["full_name"] != REPO
             or pr["base"]["ref"] != "main" or pr["base"]["sha"] != main):
         raise ValueError("Release requires an open, current, same-repository PR into main")
     parents = [parent["sha"] for parent in merge["parents"]]
     if parents != [main, pr["head"]["sha"]]:
         raise ValueError("Merge candidate does not match the current base and PR head")
+    if comparison["behind_by"] != 0:
+        raise ValueError("Release branch is behind main; regenerate or update it before acceptance")
     if tuple(map(int, version.split("."))) <= tuple(map(int, previous.split("."))):
         raise ValueError("Release version must advance current main")
 
@@ -67,7 +69,8 @@ def main():
     merge = api(BASE + "/git/commits/" + merge_sha)
     version = stable_version(contents("pompey/config.yaml", merge_sha))
     previous = stable_version(contents("pompey/config.yaml", main_sha))
-    validate_candidate(pr, main_sha, merge, version, previous)
+    comparison = api(BASE + "/compare/" + main_sha + "..." + pr["head"]["sha"])
+    validate_candidate(pr, main_sha, merge, version, previous, comparison)
     hold(pr)
     plan = {"pr": str(number), "kind": "dependency" if bot else "release", "base": main_sha,
             "head": pr["head"]["sha"], "revision": merge_sha, "tree": merge["tree"]["sha"],
