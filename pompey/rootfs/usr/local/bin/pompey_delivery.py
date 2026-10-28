@@ -5,6 +5,7 @@ they never authorize filesystem or torrent deletion.
 """
 
 from pathlib import Path
+import json
 import time
 from urllib.parse import urlencode
 
@@ -30,15 +31,35 @@ def final_path(path, kind):
     return bool(path) and any(contained(path, root) for root in roots)
 
 
-def record_file(receipts, key, file, path, *, historical=False, download_id=None):
+def record_file(receipts, key, file, path, *, historical=False, download_id=None, excluded=None):
     prior = receipts.get(key, {})
-    if file.get("id") in prior.get("rejectedFileIds", []) or download_id and download_id in prior.get("rejectedDownloadIds", []):
+    excluded = excluded or {}
+    rejected_files = set(prior.get("rejectedFileIds", [])) | set(excluded.get("rejectedFileIds", []))
+    rejected_downloads = set(prior.get("rejectedDownloadIds", [])) | set(excluded.get("rejectedDownloadIds", []))
+    if file.get("id") in rejected_files or download_id and download_id in rejected_downloads:
         return False
     if prior.get("status") == "delivered":
         return True
     receipts[key] = {**prior, "status": "delivered", "at": time.time(), "fileId": file.get("id"),
                      "path": str(path), "historical": historical, "downloadId": download_id}
     return True
+
+
+def import_rejections(data):
+    """Honor 0.6.0 recovery journals before backfilling new delivery receipts."""
+    if data.get("rejectionsImported"):
+        return
+    for path in state.directory().glob("release-sequence-*.json"):
+        sequence = json.loads(path.read_text())
+        token = identity(sequence["kind"], sequence.get("identity", {}))
+        if not token:
+            continue
+        entry = data.setdefault("titles", {}).setdefault(token, {"receipts": {}})
+        for attempt in sequence["attempts"]:
+            target = attempt.get("target", {})
+            entry["rejectedFileIds"] = sorted(set(entry.get("rejectedFileIds", [])) | {f["id"] for f in target.get("libraryFiles", [])})
+            entry["rejectedDownloadIds"] = sorted(set(entry.get("rejectedDownloadIds", [])) | {attempt["downloadId"]})
+    data["rejectionsImported"] = True
 
 
 def recent_history(call, kind, ident):
@@ -57,6 +78,7 @@ def recent_history(call, kind, ident):
 def reopen(target):
     """Called under the recovery lock after durable intent, before native removal."""
     data = state.load("deliveries")
+    import_rejections(data)
     token = identity(target["kind"], target["identity"])
     if not token:
         return
@@ -76,6 +98,7 @@ def reconcile():
     """Run inside the existing download job/lock; bound detailed TV/history reads."""
     from pompey_recovery import api_for, native_data
     data = state.load("deliveries")
+    import_rejections(data)
     saved = data.setdefault("titles", {})
     for kind in ("radarr", "sonarr"):
         detail_budget = 1 if kind == "radarr" else 2
@@ -93,7 +116,7 @@ def reconcile():
                 file = row.get("movieFile") or {}
                 path = file.get("path") or str(Path(row.get("path", "")) / file.get("relativePath", ""))
                 if row.get("hasFile") and file.get("id") and final_path(path, kind) and Path(path).is_file():
-                    record_file(receipts, "movie", file, path)
+                    record_file(receipts, "movie", file, path, excluded=entry)
                 if not receipts.get("movie") and detail_budget and time.time() - entry.get("checked", 0) > 3600:
                     # Backfill only a native successful import into a final
                     # library, never a title/name match or a staging import.
@@ -103,9 +126,9 @@ def reconcile():
                         imported = details.get("importedpath")
                         if event.get("eventType") == "downloadFolderImported" and final_path(imported, kind):
                             ident = details.get("fileid")
-                            record_file(receipts, "movie", {"id": int(ident) if str(ident).isdigit() else None}, imported,
-                                        historical=True, download_id=event.get("downloadId"))
-                            break
+                            if record_file(receipts, "movie", {"id": int(ident) if str(ident).isdigit() else None}, imported,
+                                           historical=True, download_id=event.get("downloadId"), excluded=entry):
+                                break
                     entry["checked"] = time.time()
                 if receipts.get("movie", {}).get("status") == "delivered" and row.get("monitored"):
                     state.save("deliveries", data)  # Evidence precedes the monitoring change.
@@ -127,7 +150,7 @@ def reconcile():
                         if key and key not in receipts and event.get("eventType") == "downloadFolderImported" and final_path(imported, kind):
                             ident = details.get("fileid")
                             record_file(receipts, key, {"id": int(ident) if str(ident).isdigit() else None}, imported,
-                                        historical=True, download_id=event.get("downloadId"))
+                                        historical=True, download_id=event.get("downloadId"), excluded=entry)
                     entry["historyChecked"] = time.time()
                 unmonitor = []
                 for episode in episodes:
@@ -137,7 +160,7 @@ def reconcile():
                     file = files.get(episode.get("episodeFileId"), {})
                     path = file.get("path") or str(Path(row.get("path", "")) / file.get("relativePath", ""))
                     if file and final_path(path, kind) and Path(path).is_file():
-                        record_file(receipts, key, file, path)
+                        record_file(receipts, key, file, path, excluded=entry)
                     if receipts.get(key, {}).get("status") == "delivered" and episode.get("monitored"):
                         unmonitor.append(episode["id"])
                 if unmonitor:
