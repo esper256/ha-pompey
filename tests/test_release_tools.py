@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
-from promote_candidate import validate, validate_contents, validate_acceptance, validate_plan, validate_check_target, MANIFEST
+from promote_candidate import validate, validate_contents, validate_acceptance, validate_plan, validate_check_target, MANIFEST, ALLOWED
 from release_baseline import choose, FALLBACK
 from release_metadata import next_patch
 
@@ -131,6 +131,32 @@ class PromotionPolicy(unittest.TestCase):
             changed = {**after, path: value}
             with self.subTest(path=path), self.assertRaises(ValueError):
                 validate_contents("sonarr", before, changed, "0.5.1")
+
+    def test_bundle_preserves_each_component_source_and_scope_restriction(self):
+        before = {path: (ROOT / path).read_text() for path in ALLOWED}
+        from release_metadata import next_patch, release_notes
+        import re
+        version = next_patch(re.search(r'^version: "([^\"]+)"$', before["pompey/config.yaml"], re.M)[1])
+        after = dict(before)
+        after["pompey/config.yaml"] = re.sub(r'^version: "[^\"]+"$', 'version: "' + version + '"', before["pompey/config.yaml"], flags=re.M)
+        after["pompey/Dockerfile"] = re.sub(r'^ARG BUILD_VERSION="[^\"]+"$', 'ARG BUILD_VERSION="' + version + '"', before["pompey/Dockerfile"], flags=re.M)
+        after["pompey/CHANGELOG.md"] = release_notes(before["pompey/CHANGELOG.md"], version, "- Update dependencies.")
+        pins = json.loads(before[MANIFEST])
+        pins["engines"]["Sonarr"]["version"] = "test-new-version"
+        pins["engines"]["recyclarr"]["version"] = "test-new-version"
+        pins["resources"]["trash_guides"] = "a" * 40
+        after[MANIFEST] = json.dumps(pins)
+        validate_contents("bundle", before, after, version)
+        for changed in [
+            {**pins, "schema": 99},
+            {**pins, "engines": {**pins["engines"], "unknown": {"version": "1"}}},
+            {**pins, "resources": {**pins["resources"], "trash_guides": "unpinned"}},
+        ]:
+            with self.assertRaises(ValueError):
+                validate_contents("bundle", before, {**after, MANIFEST: json.dumps(changed)}, version)
+        pins["engines"]["Sonarr"]["artifacts"]["linuxmusl-amd64"]["url"] = "https://example.invalid/unsafe.tar.gz"
+        with self.assertRaises(ValueError):
+            validate_contents("bundle", before, {**after, MANIFEST: json.dumps(pins)}, version)
 
     def test_pending_notes_move_into_the_next_release_without_rewriting_history(self):
         from release_metadata import release_notes, split_unreleased
