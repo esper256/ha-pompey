@@ -435,8 +435,17 @@ def _movie_request(client, case, background, ledger_file, *, resume):
             client.wait_command(scan["commandId"])
             wait(lambda: not movie()["hasFile"], "Radarr did not notice the user-moved file")
             wait(delivered, "Moving the file reopened its delivery")
-            current = client.session.call("GET", "http://127.0.0.1:8099/diagnostics")
-            assert not any(r["kind"] == "radarr" and r["id"] == item["id"] for r in current["workflow"]), current
+            def moved_delivery_visible():
+                current = client.session.call("GET", "http://127.0.0.1:8099/diagnostics")
+                title = next((t for t in current["titles"] if t["kind"] == "radarr" and t["id"] == item["id"]), {})
+                pending = [r for r in current["workflow"] if r["kind"] == "radarr" and r["id"] == item["id"]]
+                active["movedDeliveryObservation"] = {"title": title, "pending": pending, "attention": current["attention"]}
+                # Native cleanup/rescan and the dashboard's cached projection
+                # converge independently. Require the complete visible outcome,
+                # with healthy sources, rather than inspecting the old cache.
+                return (not current["attention"] and title.get("available") and title.get("delivered")
+                        and title.get("hasFile") is False and not pending)
+            wait(moved_delivery_visible, "Dashboard did not show the moved movie as delivered after cleanup", 10)
             choices = post(client, "/recovery/releases", {"kind":"radarr","id":item["id"]})
             assert choices["choices"] and choices["choices"][0].get("movedFilesRetained"), choices
             plan = post(client, "/recovery/preview", {"kind":"radarr","id":item["id"],"downloadId":infohash})

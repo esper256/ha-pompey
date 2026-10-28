@@ -1,0 +1,39 @@
+name: Dependabot auto-merge
+on:
+  pull_request_target:
+    branches: [main]
+    types: [opened, reopened, synchronize, ready_for_review]
+  push:
+    branches: [main]
+  workflow_run:
+    workflows: [Validation, 'Bump *']
+    types: [completed]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: dependabot-merge-queue
+  cancel-in-progress: false
+jobs:
+  maintain:
+    if: >-
+      github.repository == 'esper256/ha-pompey' &&
+      (github.event_name == 'push' || github.event_name == 'workflow_dispatch' ||
+       (github.event_name == 'pull_request_target' && github.event.pull_request.user.login == 'dependabot[bot]') ||
+       (github.event_name == 'workflow_run' && github.event.workflow_run.event == 'pull_request' &&
+        github.event.workflow_run.actor.login == 'dependabot[bot]' && github.event.workflow_run.conclusion == 'success'))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    permissions:
+      contents: write
+      pull-requests: write
+      checks: read
+    steps:
+      # Only trusted main is checked out, never the privileged PR's code.
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: main
+          persist-credentials: false
+      - run: python3 tools/dependabot_queue.py
+        env:
+          GH_TOKEN: ${{ github.token }}

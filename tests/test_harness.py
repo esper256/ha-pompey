@@ -1,6 +1,8 @@
 """Regressions for evidence loss, retry masking and binary payload boundaries."""
 
 import json
+import io
+from contextlib import redirect_stdout
 import os
 import socket
 import struct
@@ -215,10 +217,12 @@ class DurableEvidence(unittest.TestCase):
             )
             report.begin(case)
             report.stamp("requested")
-            try:
-                raise RuntimeError("native command failed")
-            except RuntimeError as exc:
-                report.fail(exc)
+            with redirect_stdout(io.StringIO()) as output:
+                try:
+                    raise RuntimeError("native command failed")
+                except RuntimeError as exc:
+                    report.fail(exc)
+            self.assertIn("native command failed", output.getvalue())
             saved = json.loads((Path(tmp) / "result.json").read_text())
             self.assertFalse(saved["success"])
             self.assertEqual(saved["cases"][0]["status"], "failed")
