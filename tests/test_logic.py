@@ -33,7 +33,7 @@ class StorageInterruptionEvidence(unittest.TestCase):
             ready = Path(folder)
             (ready / "storage.json").write_text(json.dumps({"ok": True, "phase": "ready"}))
             guard = StorageGuard(ready)
-            failure = {"ok": False, "path": "/media/share/downloads", "reason": "Storage could not be accessed.",
+            failure = {"ok": False, "failureKind": "mount_changed", "path": "/media/share/downloads", "reason": "Storage could not be accessed.",
                        "detail": "Input/output error (errno=5)"}
 
             def run(args, **kwargs):
@@ -50,13 +50,38 @@ class StorageInterruptionEvidence(unittest.TestCase):
                 self.assertIn("/media/share/downloads", log.call_args.args[1])
                 self.assertIn("errno=5", log.call_args.args[1])
                 self.assertEqual(sum(c.args[0][0:2] == ["s6-svc", "-d"] for c in commands.call_args_list), 3)
+                failure = {"ok": False, "failureKind": "io", "reason": "Storage is read-only."}
+                guard.check()
+                self.assertEqual(guard.status["phase"], "paused")
+                self.assertEqual(guard.status["heldServices"], ["qbittorrent", "radarr", "sonarr"])
+                self.assertFalse(any(c.args[0][0:2] == ["s6-svc", "-u"] for c in commands.call_args_list))
                 failure = {"ok": True}
                 guard.check()
                 guard.check()
                 self.assertFalse(guard.blocked)
-                self.assertEqual(log.call_count, 2)
+                self.assertEqual(log.call_count, 3)
                 self.assertIn("restarting held applications: qbittorrent, radarr, sonarr", log.call_args.args[1])
                 self.assertEqual(sum(c.args[0][0:2] == ["s6-svc", "-u"] for c in commands.call_args_list), 3)
+
+    def test_io_failure_blocks_maintenance_without_interrupting_imports(self):
+        from types import SimpleNamespace
+        from storage_guard import StorageGuard
+        with tempfile.TemporaryDirectory() as folder:
+            guard = StorageGuard(Path(folder))
+            for reason in ["Storage is full.", "Storage is read-only.", "Input/output error"]:
+                with self.subTest(reason=reason), patch("storage_guard.emit"), \
+                     patch("storage_guard.subprocess.run", return_value=SimpleNamespace(
+                         stdout=json.dumps({"ok": False, "failureKind": "io", "reason": reason}))) as commands:
+                    guard.check()
+                    self.assertTrue(guard.blocked)
+                    self.assertEqual(guard.status["phase"], "degraded")
+                    self.assertEqual(commands.call_count, 1)
+            with patch("storage_guard.emit"), patch("storage_guard.stack_lock"), \
+                 patch("storage_guard.subprocess.run", return_value=SimpleNamespace(stdout='{"ok":true}')) as commands:
+                guard.check()
+                self.assertFalse(guard.blocked)
+                self.assertEqual(commands.call_count, 1)
+                self.assertIsNone(guard.status["failureKind"])
 
     def test_timed_out_probe_is_distinguishable_from_a_permission_failure(self):
         from contextlib import nullcontext
@@ -69,13 +94,16 @@ class StorageInterruptionEvidence(unittest.TestCase):
                 if args[-1] == "report":
                     raise subprocess.TimeoutExpired(args, 8)
 
-            with patch("storage_guard.subprocess.run", side_effect=run), \
+            with patch("storage_guard.subprocess.run", side_effect=run) as commands, \
                  patch("storage_guard.subprocess.check_output", return_value="false"), \
                  patch("storage_guard.stack_lock", side_effect=lambda: nullcontext()), \
                  patch("storage_guard.emit") as log:
                 guard.check()
                 self.assertTrue(guard.blocked)
                 self.assertIn("exceeded 8 seconds", log.call_args.args[1])
+                self.assertEqual(guard.status["phase"], "degraded")
+                self.assertEqual(commands.call_count, 1)
+                self.assertEqual(commands.call_args.args[0][-1], "report")
 
 
 class SupportLogEvidence(unittest.TestCase):

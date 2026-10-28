@@ -82,13 +82,14 @@ def report():
     expected = json.loads((ready / "storage-baseline.json").read_text())
     for folder, identity in expected.items():
         if mount_identity(folder) != identity:
-            return {"ok": False, "path": folder, "reason": "The expected storage mount is unavailable.", "updated": time.time()}
+            return {"ok": False, "path": folder, "failureKind": "mount_changed", "reason": "The expected storage mount is unavailable.", "updated": time.time()}
+    for folder in expected:
         try:
             check(folder)
         except OSError as exc:
             import errno
             reason = {errno.ENOSPC: "Storage is full.", errno.EROFS: "Storage is read-only.", errno.EACCES: "Storage access was denied.", errno.EDQUOT: "Storage quota is exhausted."}.get(exc.errno, "Storage could not be accessed.")
-            return {"ok": False, "path": folder, "reason": reason,
+            return {"ok": False, "path": folder, "failureKind": "io", "reason": reason,
                     "detail": f"{exc.strerror or 'I/O error'} (errno={exc.errno})",
                     "updated": time.time()}
     return {"ok": True, "updated": time.time()}

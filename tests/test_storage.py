@@ -54,6 +54,7 @@ class StorageAccess(unittest.TestCase):
                 result = storage.report()
                 self.assertFalse(result["ok"])
                 self.assertEqual(result["path"], "/media/share")
+                self.assertEqual(result["failureKind"], "mount_changed")
                 probe.assert_not_called()
 
     def test_mount_report_excludes_credentials_and_shows_parent_modes(self):
