@@ -399,6 +399,20 @@ class ObservationSemantics(unittest.TestCase):
         phase, _, _ = request_progress({"status": 1}, None, [], {})
         self.assertEqual(phase, "Awaiting approval")
 
+    def test_stale_arr_queue_does_not_report_a_missing_torrent_as_downloading(self):
+        from pompey_diagnostics import request_progress
+        queue = [{"downloadId": "ABC", "sizeleft": 1024}]
+        for kind in ["radarr", "sonarr"]:
+            title = {"kind": kind, "hasFile": True}
+            phase, _, _ = request_progress({"status": 2}, title, queue,
+                                          {"abc": {"state": "downloading"}})
+            self.assertEqual(phase, "Downloading")
+            for remaining in [1024, 0]:
+                queue[0]["sizeleft"] = remaining
+                phase, _, _ = request_progress({"status": 2}, title, queue, {})
+                self.assertEqual(phase, "Waiting for queue refresh")
+            queue[0]["sizeleft"] = 1024
+
 
 class IngressPreferences(unittest.TestCase):
     def test_invalid_write_preserves_prior_policy_and_pending_means_not_applied(self):
