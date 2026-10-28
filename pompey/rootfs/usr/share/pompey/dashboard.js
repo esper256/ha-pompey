@@ -321,6 +321,7 @@
     element("storage-reason").textContent = (storage.reason || "Storage could not be checked.") + (storage.path ? " " + storage.path : "");
     element("storage-action").textContent = storage.phase === "paused"
       ? "Downloads and imports are paused. Restore the share or free space; access is checked automatically."
+      : storage.phase === "degraded" ? "Pompey maintenance is suspended. Applications remain running; check the share. Access is checked automatically."
       : storage.phase === "attention" ? "Application shutdown could not be confirmed. Review the Home Assistant log."
       : "Stopping affected applications while storage is unavailable.";
   }

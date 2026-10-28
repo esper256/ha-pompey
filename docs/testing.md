@@ -277,3 +277,7 @@ The final standard PR cohort, `bash tests/run.sh --layout ci --suite pr`, passed
 ## Fast development-loop measurement
 
 After one explicit development-tool preparation, the default `bash tests/run.sh` passed in **1.63 seconds total**, including cached tool-container startup. Actual check execution took **1.14 seconds**: Python syntax, focused product/harness/release/CI-policy tests, browser JavaScript parsing and batched shell lint. No product build, application process, namespace packet check or download ran. The earlier 116-second PR measurement included a clone; clone preservation now belongs only to the release tier. PR integration duration will be measured separately in CI. These are local observations, not a hard timing assertion that would make slow machines fail otherwise-correct tests.
+
+## Storage interruption safety
+
+Fast safety checks distinguish confirmed mount replacement from I/O failures and timeouts. Only mount replacement stops services; failed probes suspend new Pompey maintenance and recovery does not restart applications that were never held. The existing release storage scenario continues to cover replacement of the mounted filesystem. This is not yet evidence of atomic media publication: native copy fallbacks and interruption during an import still require an Arr transfer-boundary change and a real-application regression scenario.

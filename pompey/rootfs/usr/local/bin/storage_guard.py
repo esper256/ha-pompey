@@ -1,4 +1,4 @@
-"""Bounded storage observation and conservative service hold after detected loss."""
+"""Bounded storage observation and service hold only after confirmed mount replacement."""
 
 import json
 from pathlib import Path
@@ -41,6 +41,17 @@ class StorageGuard:
             current = {"ok": False, "reason": "Storage check did not complete. Check the share and server connection."}
         if not current["ok"]:
             self.blocked = True
+            if current.get("failureKind") != "mount_changed":
+                # A slow/busy CIFS server is not evidence that the mount vanished.
+                # Terminating Arr here can interrupt an import into its final name.
+                held = self.status.get("heldServices", [])
+                self.save(**current, phase="paused" if held else "degraded")
+                self.notice("Warning", f"Storage check failed; Pompey maintenance is suspended. {current['reason']} "
+                            f"Path: {current.get('path') or 'not identified'}. "
+                            f"Detail: {current.get('detail') or 'unavailable'}. "
+                            + ("Previously held applications remain stopped." if held else
+                               "Applications remain running so in-progress imports are not interrupted."))
+                return
             self.save(**current, phase="stopping")
             self.notice("Warning", f"Pausing qBittorrent, Radarr and Sonarr to protect media: {current['reason']} "
                         f"Path: {current.get('path') or 'not identified'}. "
@@ -59,13 +70,15 @@ class StorageGuard:
         elif self.blocked:
             with stack_lock():
                 held = self.status.get("heldServices", [])
-                self.notice("Info", "Storage checks passed; restarting held applications: " + (", ".join(held) or "none") + ".")
+                self.notice("Info", "Storage checks passed; " +
+                            ("restarting held applications: " + ", ".join(held) + "." if held else
+                             "resuming Pompey maintenance. Applications were not restarted."))
                 for name in held:
                     subprocess.run(["s6-svc", "-u", "/run/service/" + name], check=True, timeout=3)
-                self.save(ok=True, phase="restarting", heldServices=[], reason="", path=None)
+                self.save(ok=True, phase="restarting", heldServices=[], reason="", path=None, failureKind=None, detail=None)
             self.blocked = False
         else:
-            self.save(ok=True, phase="ready", reason="", path=None)
+            self.save(ok=True, phase="ready", reason="", path=None, failureKind=None, detail=None)
 
     def poll(self, pool, now):
         if self.future is not None and self.future.done():
