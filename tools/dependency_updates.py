@@ -1,4 +1,4 @@
-"""Create independently testable pinned-bundle PRs; never modify a live installation."""
+"""Create one weekly pinned-dependency bundle PR; never modify a live installation."""
 
 import json
 import os
@@ -9,7 +9,7 @@ from build_engine_manifest import build
 from release_metadata import current, next_patch, set_version, release_notes
 
 MANIFEST = "pompey/rootfs/usr/share/pompey/engines.json"
-COMPONENTS = ["Radarr", "Sonarr", "Prowlarr", "seerr", "qbittorrent-nox", "recyclarr", "dotnet", "quality-resources"]
+BRANCH = "codex/upstream-bundle"
 
 
 def command(*args):
@@ -57,81 +57,69 @@ def main():
         return
     command("git", "fetch", "origin", "main")
     base = command("git", "rev-parse", "origin/main")
-    summary = []
-    failures = []
     runs = api("repos/" + repo + "/actions/workflows/test.yaml/runs?event=workflow_dispatch&per_page=100")["workflow_runs"]
     if queue_decision(runs) == "busy":
         print("A release is already in flight; dependency queue is unchanged.")
         return
-    for component in COMPONENTS:
-        branch = "codex/upstream-" + component.lower()
-        try:
-            command("git", "switch", "-C", branch, "origin/main")
-            original = json.loads(Path(MANIFEST).read_text())
-            resolved = build(component)
-            candidate = json.loads(json.dumps(original))
-            candidate["engines"].update(resolved["engines"])
-            if "resources" in resolved:
-                candidate["resources"] = resolved["resources"]
-            if candidate == original:
-                summary.append(component + ": current")
-                continue
-            query = urlencode({"head": repo.split("/")[0] + ":" + branch, "state": "open"})
-            existing = api("repos/" + repo + "/pulls?" + query)
-            if existing:
-                pr = existing[0]
-                if pr["user"]["login"] != "github-actions[bot]":
-                    raise RuntimeError("Existing update branch is not owned by the Actions bot")
-                remote = api("repos/" + repo + "/contents/" + MANIFEST + "?" + urlencode({"ref": branch}))
-                import base64
-                old_candidate = json.loads(base64.b64decode(remote["content"]))
-                comparison = api("repos/" + repo + "/compare/main..." + pr["head"]["sha"])
-                if candidate == old_candidate and comparison["behind_by"] == 0:
-                    if queue_decision(runs, pr["number"]) == "dispatch":
-                        api("repos/" + repo + "/actions/workflows/test.yaml/dispatches", "POST", {"ref": "main", "inputs": {"candidate_pr": str(pr["number"])}})
-                        summary.append(component + ": dispatched existing candidate " + pr["html_url"])
-                        break
-                    summary.append(component + ": candidate unchanged (prior acceptance retained; no retry)")
-                    continue
-            lease = command("git", "ls-remote", "origin", "refs/heads/" + branch).split()
-            expected = lease[0] if lease else ""
-            Path(MANIFEST).write_text(json.dumps(candidate, indent=2) + "\n")
-            version = next_patch(current())
-            set_version(version)
-            old = original["resources"] if component == "quality-resources" else original["engines"][component]
-            new = candidate["resources"] if component == "quality-resources" else candidate["engines"][component]
-            def describe(value):
-                return value["version"] if "version" in value else ", ".join(name + " " + commit[:12] for name, commit in value.items())
-            notes = f"## {version}\n\n- Update {component}: {describe(old)} → {describe(new)}.\n\n"
-            changelog = Path("pompey/CHANGELOG.md")
-            addition = f"- Update {component}: {describe(old)} → {describe(new)}."
-            changelog.write_text(release_notes(changelog.read_text(), version, addition))
-            command("git", "add", MANIFEST, "pompey/config.yaml", "pompey/Dockerfile", "pompey/CHANGELOG.md")
-            command("git", "-c", "user.name=github-actions[bot]", "-c", "user.email=41898282+github-actions[bot]@users.noreply.github.com", "commit", "-m", "Update pinned " + component + " for Pompey " + version)
-            command("git", "push", "--force-with-lease=refs/heads/" + branch + ":" + expected, "origin", "HEAD:refs/heads/" + branch)
-            body = f"Update the pinned {component} bundle and publish Pompey {version} after required release and forward-upgrade acceptance.\n\nBase: `{base}`. Existing installs change only through Home Assistant updates. Failed candidates retain their evidence and do not replace released pins.\n\n{notes}"
-            if existing:
-                pr = api("repos/" + repo + "/pulls/" + str(pr["number"]), "PATCH", {"title": "Update pinned " + component + " for Pompey " + version, "body": body})
+    command("git", "switch", "-C", BRANCH, "origin/main")
+    original = json.loads(Path(MANIFEST).read_text())
+    # Resolve all components before publishing anything. A discovery failure
+    # leaves the existing bundle untouched rather than publishing a partial set.
+    candidate = build("all")
+    query = urlencode({"head": repo.split("/")[0] + ":" + BRANCH, "state": "open"})
+    existing = api("repos/" + repo + "/pulls?" + query)
+    pr = existing[0] if existing else None
+    if pr and pr["user"]["login"] != "github-actions[bot]":
+        raise RuntimeError("Existing update branch is not owned by the Actions bot")
+    if candidate == original:
+        if pr:
+            api("repos/" + repo + "/pulls/" + str(pr["number"]), "PATCH", {"state": "closed"})
+        print("All bundled dependencies are current; no build or release needed.")
+        return
+    if pr:
+        remote = api("repos/" + repo + "/contents/" + MANIFEST + "?" + urlencode({"ref": BRANCH}))
+        import base64
+        old_candidate = json.loads(base64.b64decode(remote["content"]))
+        comparison = api("repos/" + repo + "/compare/main..." + pr["head"]["sha"])
+        if candidate == old_candidate and comparison["behind_by"] == 0:
+            if queue_decision(runs, pr["number"]) == "dispatch":
+                api("repos/" + repo + "/actions/workflows/test.yaml/dispatches", "POST", {"ref": "main", "inputs": {"candidate_pr": str(pr["number"])}})
             else:
-                pr = api("repos/" + repo + "/pulls", "POST", {"base": "main", "head": branch, "title": "Update pinned " + component + " for Pompey " + version, "body": body, "draft": True})
-            # Publish one candidate at a time. After publication the next
-            # discovery starts from the new main/version instead of wasting
-            # acceptance on several immediately stale parallel candidates.
-            api("repos/" + repo + "/actions/workflows/test.yaml/dispatches", "POST", {"ref": "main", "inputs": {"candidate_pr": str(pr["number"])}})
-            summary.append(component + ": " + pr["html_url"])
-            break
-        except (OSError, ValueError, KeyError, IndexError, RuntimeError, subprocess.SubprocessError) as exc:
-            summary.append(component + ": discovery failed (" + type(exc).__name__ + "): " + str(exc)[:240])
-            failures.append(component)
-            # Continue resolving unrelated components; never retry a failed CI.
-            command("git", "reset", "--hard", "origin/main")
-    output = "\n".join(summary)
-    print(output)
+                print("Bundle unchanged; prior acceptance evidence retained without automatic retry.")
+            return
+    lease = command("git", "ls-remote", "origin", "refs/heads/" + BRANCH).split()
+    expected = lease[0] if lease else ""
+    Path(MANIFEST).write_text(json.dumps(candidate, indent=2) + "\n")
+    version = next_patch(current())
+    set_version(version)
+    notes = bundle_notes(original, candidate)
+    changelog = Path("pompey/CHANGELOG.md")
+    changelog.write_text(release_notes(changelog.read_text(), version, notes))
+    command("git", "add", MANIFEST, "pompey/config.yaml", "pompey/Dockerfile", "pompey/CHANGELOG.md")
+    title = "Update pinned dependencies for Pompey " + version
+    command("git", "-c", "user.name=github-actions[bot]", "-c", "user.email=41898282+github-actions[bot]@users.noreply.github.com", "commit", "-m", title)
+    command("git", "push", "--force-with-lease=refs/heads/" + BRANCH + ":" + expected, "origin", "HEAD:refs/heads/" + BRANCH)
+    body = (f"Update the pinned dependency bundle and publish Pompey {version} after full release and forward-upgrade acceptance.\n\n"
+            f"Base: `{base}`. Existing installs change only through Home Assistant updates. Failed candidates retain their evidence.\n\n" + notes + "\n")
+    if pr:
+        pr = api("repos/" + repo + "/pulls/" + str(pr["number"]), "PATCH", {"title": title, "body": body})
+    else:
+        pr = api("repos/" + repo + "/pulls", "POST", {"base": "main", "head": BRANCH, "title": title, "body": body, "draft": True})
+    api("repos/" + repo + "/actions/workflows/test.yaml/dispatches", "POST", {"ref": "main", "inputs": {"candidate_pr": str(pr["number"])}})
+    print("Dependency bundle: " + pr["html_url"])
     if os.environ.get("GITHUB_STEP_SUMMARY"):
         with Path(os.environ["GITHUB_STEP_SUMMARY"]).open("a") as target:
-            target.write("## Dependency maintenance\n\n" + "\n".join("- " + line for line in summary) + "\n")
-    if failures:
-        raise RuntimeError("Dependency discovery failed for: " + ", ".join(failures))
+            target.write("## Dependency maintenance\n\n" + pr["html_url"] + "\n\n" + notes + "\n")
+
+
+def bundle_notes(before, after):
+    def describe(value):
+        return value["version"] if "version" in value else ", ".join(name + " " + commit[:12] for name, commit in value.items())
+    changes = [(name, old, after["engines"][name]) for name, old in before["engines"].items()
+               if old != after["engines"][name]]
+    if before["resources"] != after["resources"]:
+        changes.append(("quality-resources", before["resources"], after["resources"]))
+    return "\n".join(f"- Update {name}: {describe(old)} → {describe(new)}." for name, old, new in changes)
 
 
 if __name__ == "__main__":
