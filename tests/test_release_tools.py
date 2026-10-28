@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
-from promote_candidate import validate, validate_contents, validate_acceptance, validate_plan, validate_check_target, MANIFEST, ALLOWED
+from promote_candidate import validate, validate_contents, validate_acceptance, validate_plan, validate_check_target, MANIFEST
 from release_baseline import choose, FALLBACK
 from release_metadata import next_patch
 
@@ -133,7 +133,16 @@ class PromotionPolicy(unittest.TestCase):
                 validate_contents("sonarr", before, changed, "0.5.1")
 
     def test_bundle_preserves_each_component_source_and_scope_restriction(self):
-        before = {path: (ROOT / path).read_text() for path in ALLOWED}
+        pins = {"schema": 1, "engines": {
+            name: {"version": "v1", "artifacts": {"linuxmusl-amd64": {
+                "url": url + "v1/app.tar.gz", "sha256": "a" * 64}}}
+            for name, url in {"Sonarr": "https://github.com/Sonarr/Sonarr/releases/download/",
+                              "recyclarr": "https://github.com/recyclarr/recyclarr/releases/download/"}.items()
+        }, "resources": {"trash_guides": "b" * 40}}
+        before = {"pompey/config.yaml": 'version: "0.5.0"\nprivileged: false\n',
+                  "pompey/Dockerfile": 'ARG BUILD_VERSION="0.5.0"\n',
+                  "pompey/CHANGELOG.md": '# Changelog\n\n## 0.5.0\n\nExisting release.\n',
+                  MANIFEST: json.dumps(pins)}
         from release_metadata import next_patch, release_notes
         import re
         version = next_patch(re.search(r'^version: "([^\"]+)"$', before["pompey/config.yaml"], re.M)[1])

@@ -2,6 +2,8 @@
 
 ## 0.6.4
 
+- Bundle dependency updates weekly, retain manual discovery, and remove post-release update chaining. Full release and upgrade acceptance remain required.
+
 - Reconcile retained imports against complete native grab history and current library files, clearing stale attention without authorizing download deletion. Identify missing episodes in partial packs.
 - Show download age from qBittorrent’s added timestamp in Releases.
 - Correct the Review import destination tooltip and guidance.
