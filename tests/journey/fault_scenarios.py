@@ -101,6 +101,13 @@ def media_discovery(client):
         recovered = observed()
         assert recovered["state"] == "saved-selections" and recovered["selectedLibraries"] == 1, recovered
         assert "reachable" not in recovered, recovered
+        transcript = Path("/tmp/world/events/transcript.jsonl")
+        scan_path = '"path": "/library/sections/1/all"'
+        previous_scans = transcript.read_text().count(scan_path)
+        client.search("POST", "/settings/plex/sync", {"start": True})
+        client.wait(lambda: not client.search("GET", "/settings/plex/sync")["running"],
+                    "Seerr did not finish scanning the empty fixture library", 15)
+        assert transcript.read_text().count(scan_path) > previous_scans, "Seerr did not request fixture library contents"
     finally:
         client.search("PUT", "/settings/plex/library/1", {"enabled": False})
         control("plex-library/clear")

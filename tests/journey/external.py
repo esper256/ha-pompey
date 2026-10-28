@@ -464,6 +464,10 @@ class World:
                 return js({"error": "Intentional media-server outage"}, 503)
             libraries = [{"key": "1", "title": "Fixture movies", "type": "movie", "agent": "tv.plex.agents.movie", "scanner": "Plex Movie"}] if self.controls.get("plex-library") else []
             return js({"MediaContainer": {"Directory": libraries}})
+        if host == "198.18.0.2" and path == "/library/sections/1/all":
+            # The discovery fixture is a real, empty library. Seerr can scan
+            # it while enabled, including on its normal background schedule.
+            return js({"MediaContainer": {"size": 0, "totalSize": 0, "offset": 0, "Metadata": []}})
         if path == "/" and host in {PEER_IP, "198.18.0.2"}:
             return js(
                 {
