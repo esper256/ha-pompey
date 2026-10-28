@@ -57,8 +57,31 @@ class NativeImportHandoffSafety(unittest.TestCase):
                 self.assertEqual(row["phase"], "Available · download retained")
                 self.assertFalse(row["attention"])
                 self.assertEqual(row["messages"], [])
+                # Restarting qBittorrent discovers moved source files are gone.
+                # Sonarr then returns this torrent to its native error queue.
+                torrent.update(state="missingFiles", progress=0, amount_left=8192)
+                title = {"kind": "sonarr", "id": 7, "title": "Example", "hasFile": 2}
+                queue = [{"id": n, "seriesId": 7, "downloadId": "ABC", "status": "warning",
+                          "episode": episodes[n - 1], "statusMessages": [{"messages": ["Files missing"]}]} for n in [1, 2]]
+                rows = workflow(sources, [title], {"sonarr": queue}, {"abc": torrent})
+                self.assertEqual(len(rows), 2)
+                for row in rows:
+                    self.assertEqual(row["phase"], "Available · download retained")
+                    self.assertFalse(row["attention"])
+                    self.assertEqual(row["messages"], [])
+                    self.assertEqual(row["download"]["state"], "missingFiles")
+                receipt = state.load("download-imports")
+                receipt["abc"]["titleId"] = 8
+                state.save("download-imports", receipt)
+                self.assertTrue(all(row["attention"] for row in workflow(sources, [title], {"sonarr": queue}, {"abc": torrent})))
                 second.unlink()
-                self.assertEqual(library_availability("sonarr", "http://sonarr/api/v3", {}, "abc", 7)["missing"], ["S06E02"])
+                result = library_availability("sonarr", "http://sonarr/api/v3", {}, "abc", 7)
+                self.assertEqual(result["missing"], ["S06E02"])
+                receipt["abc"].update(titleId=7, availability=result)
+                state.save("download-imports", receipt)
+                for row in workflow(sources, [title], {"sonarr": queue}, {"abc": torrent}):
+                    self.assertTrue(row["attention"])
+                    self.assertIn("S06E02", row["nextAction"])
                 records[1]["seriesId"] = 8
                 self.assertEqual(library_availability("sonarr", "http://sonarr/api/v3", {}, "abc", 7)["state"], "unknown")
 
@@ -311,6 +334,27 @@ class SupportLogEvidence(unittest.TestCase):
 
 
 class ObservationSemantics(unittest.TestCase):
+    def test_media_server_observations_distinguish_settings_from_live_health(self):
+        import urllib.error
+        from pompey_observations import media_server_settings
+        for kind in [1, 2, 3]:
+            with patch("pompey_observations.get", side_effect=[{"ip": "server"}, [{"enabled": True}]]):
+                result = media_server_settings("seerr", "secret", kind)
+                self.assertEqual(result["state"], "saved-selections")
+                self.assertNotIn("reachable", result)
+            with patch("pompey_observations.get", side_effect=[{"ip": "server"}, []]):
+                self.assertEqual(media_server_settings("seerr", "secret", kind)["state"], "no-libraries")
+        for error, expected in [(urllib.error.HTTPError("seerr", 403, "Forbidden", {}, None), "seerr-auth"),
+                                (TimeoutError(), "seerr-connection"), (ValueError("bad response"), "unknown")]:
+            with patch("pompey_observations.get", side_effect=[{"hostname": "server"}, error]):
+                result = media_server_settings("seerr", "secret", 1)
+                self.assertTrue(result["configured"])
+                self.assertEqual(result["state"], expected)
+                self.assertIn("observed", result)
+        with patch("pompey_observations.get", return_value={}) as read:
+            self.assertFalse(media_server_settings("seerr", "secret", 1)["configured"])
+            self.assertEqual(read.call_count, 1)
+
     def test_access_hosts_reject_wildcards_urls_and_bind_addresses_and_preserve_explicit_names(self):
         from pompey_hosts import hostname, merged_hosts
         self.assertEqual(hostname("HA.Example.org"), "ha.example.org")

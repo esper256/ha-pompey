@@ -118,6 +118,10 @@ def _movie_request(client, case, background, ledger_file, *, resume):
         if evidence.data.get("willRestart") and not resume:
             active.update(resumeStage="waiting", savedArrId=waiting["id"])
             return "waiting"
+        if os.environ.get("POMPEY_TEST_BASELINE") != "1":
+            from fault_scenarios import indexer_recovery, media_discovery
+            media_discovery(client)
+            indexer_recovery(client, case, waiting, request, background)
         client.session.call(
             "POST", f"http://10.77.0.2:18080/control/publish/{case.movie_id}", {}
         )

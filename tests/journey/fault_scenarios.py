@@ -70,3 +70,72 @@ def storage_recovery(client, case, background, ledger_file):
     background.verify(client, full=True)
     client.arr("GET", "/movie/lookup?term=tmdb:" + str(case.movie_id))
     client.evidence.active.update(storageProtectionVerified=True, priorTitlesVerified=len({r["prefix"] for r in background.ledger}))
+
+
+def media_discovery(client):
+    """A saved library list must not masquerade as a live Plex health check."""
+    from pompey_observations import read_source
+    from support import HttpFailure
+    started = time.monotonic()
+    control = lambda path: client.session.call("POST", "http://10.77.0.2:18080/control/" + path, {})
+    original = client.search("GET", "/settings/plex")
+    def observed():
+        return read_source("seerr", client.secrets)["mediaServer"]
+    assert observed()["state"] == "no-libraries"
+    control("fault/plex/on")
+    try:
+        try:
+            client.search("POST", "/settings/plex/library/sync", {})
+        except HttpFailure as exc:
+            assert exc.status in {500, 502, 503}, exc
+        else:
+            raise AssertionError("Seerr did not surface the configured Plex outage")
+        cached = observed()
+        assert cached["state"] == "no-libraries" and "reachable" not in cached, cached
+    finally:
+        control("fault/plex/off")
+    control("plex-library")
+    libraries = client.search("POST", "/settings/plex/library/sync", {})
+    assert len(libraries) == 1 and libraries[0]["enabled"] is False, libraries
+    client.search("PUT", "/settings/plex/library/1", {"enabled": True})
+    try:
+        recovered = observed()
+        assert recovered["state"] == "saved-selections" and recovered["selectedLibraries"] == 1, recovered
+        assert "reachable" not in recovered, recovered
+    finally:
+        client.search("POST", "/settings/plex", original)
+    client.evidence.active["mediaDiscovery"] = {"failureAndRecovery": True, "cachedEvidenceHonest": True,
+                                                "seconds": round(time.monotonic() - started, 3)}
+
+
+def indexer_recovery(client, case, movie, request, background):
+    """Exercise real Prowlarr backoff, then native test/RSS recovery of a waiting request."""
+    from pompey_observations import read_source, indexer_availability
+    from support import HttpFailure
+    started = time.monotonic()
+    control = lambda value: client.session.call("POST", "http://10.77.0.2:18080/control/fault/indexer/" + value, {})
+    indexer = next(row for row in client.prow("GET", "/indexer") if row["name"] == "Synthetic source")
+    control("on")
+    try:
+        try:
+            client.prow("GET", "/search?query=" + case.title + "&indexerIds=" + str(indexer["id"]) + "&type=search")
+        except HttpFailure as exc:
+            assert exc.status in {400, 500, 502, 503}, exc
+        def degraded():
+            counts, issues = indexer_availability(read_source("prowlarr", client.secrets))
+            return issues and counts["healthy"] == 0 and issues
+        issues = client.wait(degraded, "Prowlarr did not expose the indexer outage", 15)
+        assert issues[0]["name"] == indexer["name"] and issues[0]["retryAfter"], issues
+        unchanged = client.arr("GET", "/movie/" + str(movie["id"]))
+        assert unchanged["monitored"] and not unchanged["hasFile"], unchanged
+        assert client.search("GET", "/request/" + str(request["id"]))["media"]["tmdbId"] == case.movie_id
+        background.verify(client, full=True)
+    finally:
+        control("off")
+    # Supported native validation clears backoff; the caller publishes the
+    # release and runs RssSync. This proves recovery, not the production cadence.
+    client.prow("POST", "/indexer/test", indexer)
+    client.wait(lambda: not indexer_availability(read_source("prowlarr", client.secrets))[1],
+                "Prowlarr did not recover after native validation", 15)
+    client.evidence.active["indexerOutage"] = {"requestId": request["id"], "arrId": movie["id"],
+        "nativeAcceleration": ["Prowlarr indexer test", "Radarr RssSync"], "seconds": round(time.monotonic() - started, 3)}

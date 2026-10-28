@@ -29,10 +29,14 @@ RUN apk add --no-cache \
     zlib
 
 # Build-only tools never enter the final runtime filesystem.
+# Keep the version and SHA-256 together; verified against v0.22.0/checksums.txt
+# and the downloaded archive. Verification must precede extraction/execution.
 RUN test "${BUILD_ARCH}" = amd64 \
  && apk add --no-cache --virtual .vendor-tools git \
- && curl -fsSL "https://github.com/google/go-containerregistry/releases/download/v0.22.0/go-containerregistry_Linux_x86_64.tar.gz" \
-    | tar -xz -C /usr/local/bin crane \
+ && curl -fsSL "https://github.com/google/go-containerregistry/releases/download/v0.22.0/go-containerregistry_Linux_x86_64.tar.gz" -o /tmp/crane.tar.gz \
+ && echo "edb74d53fad9a596860f59d1c5d04a43dfb5f441dc71f57060dd0bf39483c833  /tmp/crane.tar.gz" | sha256sum -c - \
+ && tar -xzf /tmp/crane.tar.gz -C /usr/local/bin crane \
+ && rm /tmp/crane.tar.gz \
  && chmod +x /usr/local/bin/crane
 
 COPY rootfs/usr/share/pompey/engines.json /usr/share/pompey/engines.json
@@ -48,7 +52,7 @@ ARG BUILD_DESCRIPTION="Search for a movie or show; VPN WireGuard for all interne
 ARG BUILD_NAME="Pompey"
 ARG BUILD_REF=""
 ARG BUILD_REPOSITORY="esper256/ha-pompey"
-ARG BUILD_VERSION="0.6.4"
+ARG BUILD_VERSION="0.6.5"
 
 
 ENV BUILD_VERSION="${BUILD_VERSION}" \
