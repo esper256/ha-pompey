@@ -29,6 +29,8 @@ def request_progress(request, title, queue, torrents):
         return "Import needs attention", "Review the reported problem and file matches in the native importer.", messages
     for row in queue:
         torrent = torrents.get(str(row.get("downloadId", "")).lower(), {})
+        if not torrent:
+            return "Waiting for queue refresh", "Arr still lists this download, but it is absent from the current qBittorrent snapshot. Status updates automatically as the application queues synchronize.", messages
         native = torrent.get("state", "")
         if native in {"stalledDL", "metaDL", "forcedMetaDL"}:
             return "Waiting for peers" if native == "stalledDL" else "Retrieving torrent metadata", "Wait for a source to connect, or inspect releases to check alternatives. Inspection does not start a download.", messages
