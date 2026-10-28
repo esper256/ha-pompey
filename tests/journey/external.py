@@ -285,8 +285,8 @@ class World:
                 raise ValueError("Invalid fixture fault control")
             self.controls["fault:" + name] = value == "on"
             return js({"ok": True})
-        if path == "/control/plex-library":
-            self.controls["plex-library"] = True
+        if path in {"/control/plex-library", "/control/plex-library/clear"}:
+            self.controls["plex-library"] = path == "/control/plex-library"
             return js({"ok": True})
         if path.startswith("/control/certify/"):
             ident = path.rsplit("/", 1)[1]

@@ -78,7 +78,6 @@ def media_discovery(client):
     from support import HttpFailure
     started = time.monotonic()
     control = lambda path: client.session.call("POST", "http://10.77.0.2:18080/control/" + path, {})
-    original = client.search("GET", "/settings/plex")
     def observed():
         return read_source("seerr", client.secrets)["mediaServer"]
     assert observed()["state"] == "no-libraries"
@@ -103,7 +102,9 @@ def media_discovery(client):
         assert recovered["state"] == "saved-selections" and recovered["selectedLibraries"] == 1, recovered
         assert "reachable" not in recovered, recovered
     finally:
-        client.search("POST", "/settings/plex", original)
+        client.search("PUT", "/settings/plex/library/1", {"enabled": False})
+        control("plex-library/clear")
+        assert client.search("POST", "/settings/plex/library/sync", {}) == []
     client.evidence.active["mediaDiscovery"] = {"failureAndRecovery": True, "cachedEvidenceHonest": True,
                                                 "seconds": round(time.monotonic() - started, 3)}
 
