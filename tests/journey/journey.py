@@ -85,6 +85,7 @@ def collect_failure(client, root):
                 snapshots["caseDetailError"] = str(exc)
     for file in [
         Path("/etc/resolv.conf"),
+        Path("/data/pompey/state/download-imports.json"),
         *[
             Path("/tmp/pompey") / name
             for name in ["configuration.json", "health.json", "status.json"]

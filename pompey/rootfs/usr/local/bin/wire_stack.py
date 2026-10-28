@@ -288,7 +288,7 @@ def ensure_media_management(base: str, api_key: str, kind: str) -> None:
     if not isinstance(cfg, dict):
         raise RuntimeError(f"{kind} media management missing")
     want = {
-        "enableCompletedDownloadHandling": True,
+        "enableCompletedDownloadHandling": False,
         "skipFreeSpaceCheckWhenImporting": True,
         "minimumFreeSpaceWhenImporting": MIN_IMPORT_FREE_SPACE,
         "copyUsingHardlinks": False,
@@ -340,7 +340,7 @@ def ensure_media_management(base: str, api_key: str, kind: str) -> None:
 
 
 def ensure_download_client_handling(base: str, api_key: str, kind: str) -> None:
-    """Keep completed-download handling on. Do not grab the same title again if
+    """Keep automatic imports off; Pompey submits stopped downloads. Do not regrab if
     a torrent was dropped before the file was renamed into the library.
     """
     try:
@@ -350,7 +350,7 @@ def ensure_download_client_handling(base: str, api_key: str, kind: str) -> None:
     if not isinstance(cfg, dict):
         raise RuntimeError(f"{kind} download-client configuration missing")
     want = {
-        "enableCompletedDownloadHandling": True,
+        "enableCompletedDownloadHandling": False,
         "autoRedownloadFailed": False,
     }
     if "autoRedownloadFailedFromInteractiveSearch" in cfg:
@@ -369,7 +369,7 @@ def ensure_download_client_handling(base: str, api_key: str, kind: str) -> None:
         )
     except RuntimeError as exc:
         raise RuntimeError(f"{kind} download-client configuration failed") from exc
-    log(f"{kind} completed-download handling enabled; completed torrents are not re-downloaded")
+    log(f"{kind} automatic imports disabled; Pompey hands stopped downloads to native scans")
 
 
 def recyclarr_is_fresh() -> bool:

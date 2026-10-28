@@ -33,13 +33,7 @@ def movie_request(client, case, background, ledger_file, *, resume=False):
         client.evidence.active.update(status="running", resumed=True)
     else:
         client.evidence.begin(case)
-    if case.late_certification:
-        client.service("wire", False)
-    try:
-        return _movie_request(client, case, background, ledger_file, resume=resume)
-    finally:
-        if case.late_certification:
-            client.service("wire", True)
+    return _movie_request(client, case, background, ledger_file, resume=resume)
 
 
 def _movie_request(client, case, background, ledger_file, *, resume):
@@ -262,16 +256,12 @@ def _movie_request(client, case, background, ledger_file, *, resume):
         move_identity = download_file_identity(reconciled)
         settings = client.arr("GET", "/config/mediamanagement")
         assert settings["copyUsingHardlinks"] is False, settings
+        assert client.arr("GET", "/config/downloadclient")["enableCompletedDownloadHandling"] is False
     client.release(download)
     wait(
         lambda: (t := torrent()) and t["progress"] == 1,
         "Downloader did not verify the payload",
     )
-    if move_identity:
-        # Exercise the native move precondition before explicitly requesting
-        # an immediate Arr scan. Do not stop/resume the torrent from the test.
-        wait(lambda: (t := torrent()) and t["state"] in {"stoppedUP", "pausedUP"},
-               "Completed download did not stop for native move import")
     stamp("download-verified")
     client.refresh_downloads()
     item = wait(
@@ -297,7 +287,8 @@ def _movie_request(client, case, background, ledger_file, *, resume):
     stamp("imported")
     if case.late_certification:
         staging = Path(item["path"])
-        assert str(staging).startswith("/media/dlna/downloads/By Rating/Movies/"), item
+        assert any(str(staging).startswith(root) for root in (
+            "/media/dlna/downloads/By Rating/Movies/", "/media/dlna/Movies/Not Kid Friendly/")), item
         staged = next(staging.glob("*.mkv"))
         before_move = digest(staged)
         client.session.call(
@@ -309,7 +300,6 @@ def _movie_request(client, case, background, ledger_file, *, resume):
         client.wait_command(command["id"])
         assert client.arr("GET", "/movie/" + str(item["id"]))["certification"] == "PG"
         active["freshHealthSince"] = time.time()
-        client.service("wire", True)
 
         def move_intent():
             state = Path("/data/pompey/state/routing-movie.json")

@@ -132,6 +132,10 @@ def attention():
     review = state.load("requests").get("reviewRequired")
     if review:
         notices.append(str(review))
+    for receipt in state.load("download-imports").values():
+        if receipt.get("phase") == "submitting":
+            notices.append("Import acknowledgement missing for " + receipt.get("title", "download") +
+                           ". Review the native queue/history before manually importing; Pompey will not resubmit it.")
     extra = persist_notices()
     if extra:
         notices.extend(extra)
@@ -293,6 +297,8 @@ def maintain_downloads():
         raise RuntimeError("Download client returned an invalid torrent list")
     seed_times(payload)
     secrets = api.load_secrets()
+    from pompey_imports import handoff
+    handoff(payload, secrets)
     manual_imports(payload, secrets)
     observe_blocked_imports(secrets)
 

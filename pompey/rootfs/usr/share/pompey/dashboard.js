@@ -549,7 +549,7 @@
     if (signature !== component.actionSignature) {
       component.actionSignature = signature; component.actions.replaceChildren(); component.primaryActions.replaceChildren(); component.searchButton = null;
       if (item.available && item.phase === "Import needs attention" && ["radarr","sonarr"].includes(item.kind)) {
-        nativeLink(item.kind, component.primaryActions, "Review import", "activity/queue");
+        nativeLink(item.kind, component.primaryActions, "Review import", item.manualImport ? "wanted/missing" : "activity/queue");
       }
       if(item.available && ["radarr","sonarr"].includes(item.kind) && item.id && (item.downloadId || item.library)) {
         const retry = text("button","Try another","danger-button");

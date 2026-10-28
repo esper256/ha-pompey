@@ -45,6 +45,16 @@ class Job:
 
 
 def execute(job):
+    if job.name == "configuration":
+        # Arr starts independently. qBittorrent installs the Arr import gate
+        # under stack_lock before starting. Do not hold that lock while waiting
+        # for qBittorrent: return to the scheduler instead.
+        try:
+            with urllib.request.urlopen(HEALTH["qbittorrent"], timeout=1):
+                pass
+        except OSError:
+            job.phase = "waiting"
+            return False
     if job.exclusive:
         try:
             with stack_lock(blocking=False):

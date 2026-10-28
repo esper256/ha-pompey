@@ -111,7 +111,15 @@ def inspect_target(payload):
         if torrent.get("category") != kind:
             raise ValueError("The torrent is not in this application's managed category")
         if not queued:
-            raise ValueError("Arr is synchronizing or cleaning up this torrent. Refresh after native cleanup or seeding finishes")
+            # Disabled automatic importing hides completed downloads from Arr's
+            # queue. Only a settled, positively owned handoff can use history
+            # blocklisting plus downloader deletion instead of queue removal.
+            from media_policy import finished, STOPPED
+            receipt = state.load("download-imports").get(token, {})
+            if (receipt.get("phase") != "review" or receipt.get("kind") != kind
+                    or receipt.get("titleId") != ident or receipt.get("path") != torrent.get("content_path")
+                    or not finished(torrent) or torrent.get("state") not in STOPPED):
+                raise ValueError("Arr is synchronizing or the import outcome is uncertain. Review native import history before retrying")
         for path_key in ("content_path", "save_path"):
             if torrent.get(path_key):
                 inside(torrent[path_key], Path(api.media_root()) / "downloads")
@@ -313,6 +321,11 @@ def reject(payload):
                 call("DELETE", "/queue/" + str(target["queueIds"][0]) + "?" + urlencode({"removeFromClient": str(target["removeDownload"]).lower(), "blocklist": "true", "skipRedownload": "false"}))
             else:
                 call("POST", "/history/failed/" + str(target["grabId"]), {})
+                if target["removeDownload"]:
+                    # Exact hash and files were previewed and revalidated above.
+                    # Never guess filesystem paths or remove library files here.
+                    api.http("POST", api.qbit_url() + "/api/v2/torrents/delete",
+                             urlencode({"hashes": target["downloadId"], "deleteFiles": "true"}).encode())
             attempt["stage"] = "blocked"
             save_sequence(sequence)
             # Native failure auto-retry is deliberately disabled in Pompey. This
