@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.6.4
+
+- Update recyclarr: v8.8.0 → v8.8.1.
+
 ## 0.6.3
 
 - Coordinate native Arr imports after downloads finish and stop, closing the automatic-import race before qBittorrent starts. Preserve durable handoff receipts and review paths for unresolved imports.

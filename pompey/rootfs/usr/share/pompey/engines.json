@@ -29,11 +29,11 @@
       }
     },
     "recyclarr": {
-      "version": "v8.8.0",
+      "version": "v8.8.1",
       "artifacts": {
         "linuxmusl-amd64": {
-          "url": "https://github.com/recyclarr/recyclarr/releases/download/v8.8.0/recyclarr-linux-musl-x64.tar.xz",
-          "sha256": "836a308bfa9b4fce6174865041021cea6ef3b721c0b3c4c8fff3e89b5de6786e"
+          "url": "https://github.com/recyclarr/recyclarr/releases/download/v8.8.1/recyclarr-linux-musl-x64.tar.xz",
+          "sha256": "0be88912321fb7fc14fbb7e9216e9ea14d4b7b1d3c1fc0283e8a2fcc2927e26d"
         }
       }
     },
