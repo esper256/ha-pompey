@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.6.1
 
 - Keep durable delivery records for movies and individual episodes; stop automatic monitoring after final-library delivery, preserve completion after manual file moves, and reopen content only through an explicit retry.
 - Explain retained completed torrents and provide Check downloads and per-title Check library actions through existing native maintenance.
