@@ -81,6 +81,10 @@ def handoff(items, secrets):
         relevant = [t for t in items if t.get("category") == kind and t.get("hash")]
         if not relevant:
             continue
+        commands = api.object_list(api.http("GET", base + "/command", headers=headers),
+                                   "native commands", ("id", "name", "status"))
+        moving = any(c["status"] in {"queued", "started"} and c["name"] in {
+            "BulkMoveMovie", "BulkMoveSeries", "RefreshMovie", "RefreshSeries"} for c in commands)
         queue = api.http("GET", base + "/queue?page=1&pageSize=100&includeUnknownSeriesItems=false&includeUnknownMovieItems=false", headers=headers)
         rows = api.object_list(queue.get("records") if isinstance(queue, dict) else None, "import queue", ("id",))
         for torrent in relevant:
@@ -103,7 +107,7 @@ def handoff(items, secrets):
                     receipt.update(phase="complete", error=None)
                 continue
             if (not finished(torrent) or torrent.get("state") not in {"stoppedUP", "pausedUP"}
-                    or not owned or any(r.get("trackedDownloadState") == "imported" for r in owned)):
+                    or moving or not owned or any(r.get("trackedDownloadState") == "imported" for r in owned)):
                 continue
             path = torrent.get("content_path", "")
             if not contained(path, api.downloads_complete()) or not Path(path).exists():

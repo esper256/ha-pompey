@@ -25,14 +25,50 @@ from concurrent.futures import Future
 
 
 class NativeImportHandoffSafety(unittest.TestCase):
-    def test_configuration_does_not_hold_startup_gate_lock_while_downloader_is_absent(self):
+    def test_vpn_restart_releases_lock_before_waiting_for_startup_gate(self):
+        from contextlib import contextmanager
+        import vpn_recovery as recovery
+        held = False
+        @contextmanager
+        def lock():
+            nonlocal held
+            held = True
+            try: yield
+            finally: held = False
+        @contextmanager
+        def ready(*args, **kwargs):
+            from types import SimpleNamespace
+            self.assertFalse(held, "Startup gate cannot run while recovery owns its lock")
+            yield SimpleNamespace(status=200)
+        with tempfile.TemporaryDirectory() as root, patch.dict(os.environ, POMPEY_READY=root):
+            Path(root, "vpn-recovery.json").write_text('{"interface":1}')
+            read = Path.read_text
+            with patch.object(Path, "read_text", lambda p, *a, **kw: "2" if str(p) == "/sys/class/net/wg0/ifindex" else read(p, *a, **kw)), \
+                 patch.object(recovery, "stack_lock", lock), patch.object(recovery.subprocess, "check_output", return_value="true"), \
+                 patch.object(recovery.subprocess, "run"), patch.object(recovery.urllib.request, "urlopen", ready):
+                recovery.main()
+            self.assertEqual(json.loads(Path(root, "vpn-recovery.json").read_text())["phase"], "reconnected")
+
+    def test_routing_preserves_intent_while_native_workers_can_overwrite_paths(self):
+        import route_rating as routing
+        for name in ["RefreshSeries", "DownloadedEpisodesScan", "BulkMoveSeries"]:
+            with patch.object(routing, "http_json", return_value=[{"id": 1, "name": name, "status": "started"}]) as http, \
+                 patch.object(state, "save") as save:
+                routing.route_library("key", "http://sonarr/api/v3/series", "/kid", "/general", ["/staging"], set(), "series")
+                self.assertEqual(http.call_count, 1)
+                save.assert_not_called()
+
+    def test_downloader_jobs_release_startup_gate_lock_when_service_is_absent(self):
         import pompey_controller as controller
-        job = Job("configuration", [], 60, 180)
-        with patch.object(controller.urllib.request, "urlopen", side_effect=OSError("not ready")), \
-             patch.object(controller, "stack_lock") as lock, patch.object(controller, "run_process") as run:
-            self.assertFalse(controller.execute(job))
-            lock.assert_not_called()
-            run.assert_not_called()
+        for name in ["configuration", "downloads"]:
+            job = Job(name, [], 60, 180)
+            with patch.object(controller.urllib.request, "urlopen", side_effect=OSError("not ready")) as probe, \
+                 patch.object(controller, "stack_lock") as lock, patch.object(controller, "run_process") as run:
+                self.assertFalse(controller.execute(job))
+                probe.assert_called_once()
+                lock.return_value.__exit__.assert_called_once()
+                self.assertEqual(job.phase, "waiting")
+                run.assert_not_called()
 
     def test_handoff_requires_complete_stopped_owned_path_and_persists_before_post(self):
         import pompey_imports as imports
@@ -44,6 +80,7 @@ class NativeImportHandoffSafety(unittest.TestCase):
                        "state": "stoppedUP", "progress": 1, "amount_left": 0}
             queue = [{"id": 1, "seriesId": 7, "downloadId": "ABC", "trackedDownloadState": "importPending"}]
             history = []
+            commands = []
             posts = []
             def http(method, url, body=None, **kwargs):
                 if "/config/downloadclient" in url:
@@ -54,6 +91,8 @@ class NativeImportHandoffSafety(unittest.TestCase):
                     return {"records": history}
                 if "/manualimport?" in url:
                     return [{"path": str(path / "episode.mkv"), "rejections": [{"reason": "Existing file is better"}]}]
+                if method == "GET" and url.endswith("/command"):
+                    return commands
                 if method == "POST":
                     self.assertEqual(state.load(imports.JOURNAL)["abc"]["phase"], "submitting")
                     posts.append(body)
@@ -67,6 +106,10 @@ class NativeImportHandoffSafety(unittest.TestCase):
                 self.assertEqual(posts, [])
                 history.append({"id": 2, "seriesId": 7, "downloadId": "ABC", "eventType": "grabbed"})
                 queue.clear()  # Native CDH-off behavior hides completed items.
+                commands.append({"id": 3, "name": "BulkMoveSeries", "status": "started"})
+                imports.handoff([torrent], secrets)
+                self.assertEqual(posts, [])
+                commands.clear()
                 imports.handoff([torrent], secrets)
                 self.assertEqual(posts, [{"name": "DownloadedEpisodesScan", "path": str(path),
                                           "downloadClientId": "ABC", "importMode": "Move"}])
@@ -86,6 +129,7 @@ class NativeImportHandoffSafety(unittest.TestCase):
             state.save(imports.JOURNAL, {"abc": {"phase": "submitting", "kind": "radarr"}})
             def http(method, url, **kwargs):
                 self.assertEqual(method, "GET")
+                if url.endswith("/command"): return []
                 return {"enableCompletedDownloadHandling": False} if "/config/" in url else {"records": []}
             with patch.object(api, "http", side_effect=http):
                 imports.handoff([{"hash": "abc", "category": "radarr"}],
