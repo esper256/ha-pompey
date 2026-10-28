@@ -38,7 +38,8 @@ def read_source(name, secrets):
         base = host.rstrip("/") + "/api/v3"
         key = secrets[name + "_api_key"]
         titles = rows(get(base + ("/movie" if name == "radarr" else "/series"), key))
-        queue = get(base + "/queue?page=1&pageSize=100&includeUnknownSeriesItems=true&includeUnknownMovieItems=true", key)
+        queue = get(base + "/queue?page=1&pageSize=100&includeUnknownSeriesItems=true&includeUnknownMovieItems=true"
+                    + ("&includeEpisode=true" if name == "sonarr" else ""), key)
         rows(queue["records"])
         return {"titles": titles, "queue": queue, "indexers": rows(get(base + "/indexer", key))}
     if name == "prowlarr":

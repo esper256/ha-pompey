@@ -48,6 +48,7 @@ def checks():
     for script in ["test_logic.py", "test_harness.py", "test_release_tools.py", "test_ci_policy.py"]:
         run(script, [sys.executable, str(ROOT / "tests" / script)])
     run("UI JavaScript syntax", ["node", "tests/ui_syntax.js"])
+    run("Ingress routing", ["node", "tests/test_ingress.js"])
     shells = {"bash": [], "sh": []}
     for folder in ["pompey/rootfs/etc", "pompey/rootfs/usr/local/bin", "tests", "tools"]:
         for path in (ROOT / folder).rglob("*"):
