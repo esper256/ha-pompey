@@ -47,6 +47,71 @@ def before_downloader():
     raise RuntimeError("Downloader startup held: " + failure)
 
 
+def library_availability(kind, base, headers, digest, title_id):
+    """Observe the whole grabbed release; this evidence never authorizes deletion."""
+    from pompey_delivery import final_path
+    events = []
+    history_size = None
+    for page in range(1, 5):
+        payload = api.http("GET", base + "/history?" + urlencode({
+            "downloadId": digest.upper(), "page": page, "pageSize": 250}), headers=headers)
+        if not isinstance(payload, dict):
+            raise RuntimeError("Native import history is unavailable")
+        rows = api.object_list(payload.get("records"), "import history", ("id",))
+        total = payload.get("totalRecords")
+        if type(total) is not int or total < 0:
+            raise RuntimeError("Native import history did not report its size")
+        if history_size is not None and total != history_size:
+            raise RuntimeError("Native import history changed during inspection")
+        history_size = total
+        events.extend(rows)
+        if len({row["id"] for row in events}) != len(events):
+            raise RuntimeError("Native import history pages overlap")
+        if len(events) >= total:
+            break
+        if not rows:
+            raise RuntimeError("Native import history is incomplete")
+    else:
+        raise RuntimeError("Native import history exceeds the inspection limit")
+    field = "movieId" if kind == "radarr" else "seriesId"
+    grabs = [r for r in events if str(r.get("downloadId", "")).lower() == digest.lower()
+             and r.get("eventType") == "grabbed"]
+    if not grabs or any(r.get(field) != title_id for r in grabs):
+        return {"state": "unknown", "detail": "Native history does not identify the complete release for this title."}
+    title = api.http("GET", base + ("/movie/" if kind == "radarr" else "/series/") + str(title_id), headers=headers)
+    if title.get("id") != title_id:
+        raise RuntimeError("Native title identity changed")
+
+    def present(file):
+        path = file.get("path") or str(Path(title.get("path", "")) / file.get("relativePath", ""))
+        if not file.get("id") or not final_path(path, kind) or type(file.get("size")) is not int or file["size"] <= 0:
+            return False
+        try:
+            return Path(path).is_file() and Path(path).stat().st_size == file["size"]
+        except OSError:
+            return False
+
+    if kind == "radarr":
+        satisfied = bool(title.get("hasFile") and present(title.get("movieFile") or {}))
+        missing = [] if satisfied else [title.get("title", "Movie")]
+    else:
+        expected = {r.get("episodeId") for r in grabs}
+        if any(type(ident) is not int or ident <= 0 for ident in expected):
+            return {"state": "unknown", "detail": "Native grab history does not identify every episode."}
+        episodes = api.object_list(api.http("GET", base + "/episode?seriesId=" + str(title_id), headers=headers), "episodes", ("id",))
+        files = api.object_list(api.http("GET", base + "/episodefile?seriesId=" + str(title_id), headers=headers), "episode files", ("id",))
+        by_episode = {r["id"]: r for r in episodes if r.get("seriesId") == title_id}
+        by_file = {r["id"]: r for r in files if r.get("seriesId") == title_id}
+        missing = []
+        for ident in sorted(expected):
+            episode = by_episode.get(ident, {})
+            if not episode.get("hasFile") or not present(by_file.get(episode.get("episodeFileId"), {})):
+                season, number = episode.get("seasonNumber"), episode.get("episodeNumber")
+                missing.append(f"S{season:02d}E{number:02d}" if type(season) is int and type(number) is int else "Episode ID " + str(ident))
+        satisfied = not missing
+    return {"state": "satisfied" if satisfied else "missing", "missing": missing}
+
+
 def handoff(items, secrets):
     from media_policy import finished, contained
     # Also close the gate if a user changed it in a native UI. Never temporarily
@@ -56,8 +121,11 @@ def handoff(items, secrets):
     present = {t.get("hash", "").lower() for t in items}
     receipts = {key: value for key, value in receipts.items()
                 if key in present or value.get("phase") not in {"complete", "review"}}
+    inspection_keys = [key for key, receipt in sorted(receipts.items(), key=lambda pair: pair[1].get("availabilityChecked", 0))
+                       if key in present and receipt.get("phase") in {"review", "complete"} and receipt.get("titleId")
+                       and time.time() - receipt.get("availabilityChecked", 0) >= 60][:4]
     for kind, base, headers in endpoints(secrets):
-        for receipt_key, receipt in receipts.items():
+        for receipt_key, receipt in sorted(receipts.items(), key=lambda pair: pair[1].get("availabilityChecked", 0)):
             if receipt.get("kind") != kind:
                 continue
             if receipt.get("phase") == "submitted":
@@ -78,6 +146,12 @@ def handoff(items, secrets):
                     if exc.status != 404:
                         raise
                     receipt.update(phase="review", error="Import command expired; review native history before retrying.")
+            if receipt_key in inspection_keys:
+                try:
+                    receipt["availability"] = library_availability(kind, base, headers, receipt_key, receipt["titleId"])
+                except (RuntimeError, OSError) as exc:
+                    receipt["availability"] = {"state": "unknown", "detail": str(exc)}
+                receipt["availabilityChecked"] = time.time()
         relevant = [t for t in items if t.get("category") == kind and t.get("hash")]
         if not relevant:
             continue

@@ -25,6 +25,43 @@ from concurrent.futures import Future
 
 
 class NativeImportHandoffSafety(unittest.TestCase):
+    def test_retained_pack_requires_every_native_episode_and_complete_library_bytes(self):
+        from pompey_imports import library_availability
+        from pompey_diagnostics import workflow
+        with tempfile.TemporaryDirectory() as root, patch.dict(os.environ, MEDIA_ROOT=root, POMPEY_DATA=root):
+            folder = Path(root) / "TV/Kid Friendly/Example"
+            folder.mkdir(parents=True)
+            first, second = folder / "first.mkv", folder / "second.mkv"
+            first.write_bytes(b"complete")
+            second.write_bytes(b"half")
+            records = [{"id": n, "seriesId": 7, "episodeId": n, "eventType": "grabbed", "downloadId": "ABC"} for n in [1, 2]]
+            episodes = [{"id": n, "seriesId": 7, "hasFile": True, "episodeFileId": n, "seasonNumber": 6, "episodeNumber": n} for n in [1, 2]]
+            files = [{"id": n, "seriesId": 7, "path": str(path), "size": 8} for n, path in [(1, first), (2, second)]]
+            def http(method, url, **kwargs):
+                self.assertEqual(method, "GET", "Availability must never mutate native state or delete files")
+                if "/history?" in url: return {"records": records, "totalRecords": 2}
+                if "/series/" in url: return {"id": 7, "path": str(folder)}
+                if "/episode?" in url: return episodes
+                if "/episodefile?" in url: return files
+                self.fail(url)
+            with patch.object(api, "http", side_effect=http):
+                result = library_availability("sonarr", "http://sonarr/api/v3", {}, "abc", 7)
+                self.assertEqual(result, {"state": "missing", "missing": ["S06E02"]})
+                second.write_bytes(b"complete")
+                result = library_availability("sonarr", "http://sonarr/api/v3", {}, "abc", 7)
+                self.assertEqual(result["state"], "satisfied")
+                state.save("download-imports", {"abc": {"kind": "sonarr", "titleId": 7, "phase": "review", "messages": ["Old import rejection"], "availability": result}})
+                sources = {name: {"available": True, "updated": 100} for name in ["sonarr", "qbittorrent"]}
+                torrent = {"hash": "abc", "category": "sonarr", "state": "stoppedUP", "progress": 1, "amount_left": 0}
+                row = workflow(sources, [], {}, {"abc": torrent})[0]
+                self.assertEqual(row["phase"], "Available · download retained")
+                self.assertFalse(row["attention"])
+                self.assertEqual(row["messages"], [])
+                second.unlink()
+                self.assertEqual(library_availability("sonarr", "http://sonarr/api/v3", {}, "abc", 7)["missing"], ["S06E02"])
+                records[1]["seriesId"] = 8
+                self.assertEqual(library_availability("sonarr", "http://sonarr/api/v3", {}, "abc", 7)["state"], "unknown")
+
     def test_vpn_restart_releases_lock_before_waiting_for_startup_gate(self):
         from contextlib import contextmanager
         import vpn_recovery as recovery

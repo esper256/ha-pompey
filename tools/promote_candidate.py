@@ -41,6 +41,24 @@ def validate_contents(component, before, after, version):
     if after["pompey/Dockerfile"] != expected_docker:
         raise ValueError("Candidate changed the Dockerfile beyond the version")
     old, new = json.loads(before[MANIFEST]), json.loads(after[MANIFEST])
+    if component == "bundle":
+        if set(new["engines"]) != set(old["engines"]):
+            raise ValueError("Bundle changed the supported application set")
+        expected = copy.deepcopy(old)
+        expected.update(engines=new["engines"], resources=new["resources"])
+        if new != expected or new == old:
+            raise ValueError("Bundle changed unrelated metadata or contains no updates")
+        # Reuse each component's exact source, platform and digest restrictions.
+        # A bundle does not widen the release bot's permission to modify files.
+        for name in [*old["engines"], "quality-resources"]:
+            single = copy.deepcopy(old)
+            if name == "quality-resources":
+                single["resources"] = new["resources"]
+            else:
+                single["engines"][name] = new["engines"][name]
+            if single != old:
+                validate_contents(name.lower(), before, {**after, MANIFEST: json.dumps(single)}, version)
+        return
     expected = copy.deepcopy(old)
     if component == "quality-resources":
         if set(new["resources"]) != set(old["resources"]) or not all(re.fullmatch(r"[0-9a-f]{40}", commit) for commit in new["resources"].values()):

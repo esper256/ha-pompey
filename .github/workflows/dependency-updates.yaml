@@ -1,12 +1,8 @@
 name: Vendored dependency maintenance
 on:
   schedule:
-    - cron: '41 5 * * *'
+    - cron: '41 5 * * 1'
   workflow_dispatch:
-  workflow_run:
-    workflows: [Validation, 'Release PR #*']
-    branches: [main]
-    types: [completed]
 permissions:
   contents: read
 concurrency:
@@ -14,8 +10,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   discover:
-    if: >-
-      github.repository == 'esper256/ha-pompey' && (github.event_name != 'workflow_run' || (github.event.workflow_run.event == 'workflow_dispatch' && github.event.workflow_run.head_branch == 'main' && github.event.workflow_run.conclusion == 'success' && startsWith(github.event.workflow_run.display_title, 'Release PR #')))
+    if: github.repository == 'esper256/ha-pompey'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
