@@ -122,6 +122,14 @@ def tv_request(client, case, background, ledger_file):
         "Incomplete episodes imported"
     )
     evidence.stamp("incomplete-preserved")
+    def native_availability():
+        from pompey_imports import library_availability
+        from pompey_common import sonarr_url, arr_headers
+        return library_availability("sonarr", sonarr_url() + "/api/v3",
+                                    arr_headers(client.secrets["sonarr_api_key"]), infohash, series["id"])
+    if case.scenario == "season-pack" and os.environ.get("POMPEY_TEST_BASELINE") != "1":
+        missing = native_availability()
+        assert missing["state"] == "missing" and len(missing["missing"]) == len(selected.episodes), missing
     if case.scenario == "single-episode" and os.environ.get("POMPEY_TEST_BASELINE") != "1":
         def workflow_episode():
             diagnostic = client.session.call("GET", "http://127.0.0.1:8099/diagnostics")
@@ -163,6 +171,9 @@ def tv_request(client, case, background, ledger_file):
 
     imported = client.wait(routed, "TV files did not reach the intended library")
     if case.scenario == "season-pack" and os.environ.get("POMPEY_TEST_BASELINE") != "1":
+        availability = native_availability()
+        assert availability["state"] == "satisfied", availability
+        active["retainedImportAvailabilityVerified"] = True
         from release_recovery import reject_imported_pack
         selected = reject_imported_pack(client, case, series, files, selected)
         infohash = client.peer(selected)["infoHash"]

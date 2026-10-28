@@ -97,7 +97,9 @@ summary:hover { color: var(--fg); }
 .workflow-table, .release-table { width: 100%; border-collapse: collapse; table-layout: fixed; }
 .workflow-table { margin-top: 1rem; border: 1px solid var(--line); background: #0e151f; }
 .workflow-table th, .release-table th { padding: .75rem 1rem; color: var(--muted); font-size: .8rem; font-weight: 400; text-align: left; }
-.workflow-table th:first-child { width: 52%; }
+.workflow-table th:first-child { width: 48%; }
+.workflow-table th:last-child { width: 7rem; }
+.download-age { color: var(--muted); font-variant-numeric: tabular-nums; }
 .workflow-table td { border-top: 1px solid var(--line); padding: .85rem 1rem; vertical-align: middle; overflow-wrap: anywhere; }
 .workflow-row { cursor: pointer; }
 .workflow-row:hover { background: #17202e; }
@@ -202,6 +204,7 @@ body.is-ready .bar, body.is-ready #steps { display: none; }
   .workflow-row { display: block; padding: .85rem .8rem; border-top: 1px solid var(--line); }
   .workflow-table .workflow-row td { display: block; border: 0; padding: 0; }
   .workflow-row td + td { margin: .3rem 0 0 1.6rem; }
+  .workflow-row .download-age::before { content: "Download age · "; }
   .title-button { min-height: 1.8rem; }
   .workflow-table .detail-row { display: block; }
   .workflow-table .detail-cell { display: block; width: 100%; }

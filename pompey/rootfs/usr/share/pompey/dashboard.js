@@ -256,7 +256,8 @@
     const node = text(url ? "a" : "span", label, className);
     if (url) {
       node.dataset.app = service; node.href = url; node.target = "_blank"; node.rel = "noopener";
-      node.title = "Open " + labels[service] + (path ? " · Activity → Queue" : "") + " in a new tab";
+      const destination = {"activity/queue": "Activity → Queue", "wanted/missing": "Wanted → Missing"}[path];
+      node.title = "Open " + labels[service] + (destination ? " · " + destination : "") + " in a new tab";
       const arrow = text("span", "↗", "link-arrow"); arrow.setAttribute("aria-hidden","true"); node.append(arrow);
     } else {
       node.title = labels[service] + " is starting";
@@ -450,7 +451,7 @@
   let requestOrder = [];
   const table = document.createElement("table"); table.setAttribute("role", "table"); table.className = "workflow-table"; table.setAttribute("aria-label", "Release progress");
   const head = document.createElement("thead"); const headings = document.createElement("tr");
-  for (const label of ["Title", "Status"]) { const th = text("th", label); th.scope = "col"; headings.append(th); }
+  for (const label of ["Title", "Status", "Download age"]) { const th = text("th", label); th.scope = "col"; headings.append(th); }
   head.append(headings); table.append(head);
   const body = document.createElement("tbody"); body.setAttribute("role", "rowgroup"); table.append(body);
   const empty = text("p", "", "empty-state");
@@ -471,8 +472,9 @@
     const scope = text("small", "", "scope");
     const titleText = text("span", "", "title-text"); button.append(titleText, scope); title.append(button);
     const status = document.createElement("td"); status.setAttribute("role", "cell"); row.append(title, status);
+    const age = text("td", "—", "download-age"); row.append(age);
     const detailRow = document.createElement("tr"); detailRow.setAttribute("role", "row"); detailRow.className = "detail-row";
-    const cell = document.createElement("td"); cell.setAttribute("role", "cell"); cell.colSpan = 2; cell.className = "detail-cell"; detailRow.append(cell);
+    const cell = document.createElement("td"); cell.setAttribute("role", "cell"); cell.colSpan = 3; cell.className = "detail-cell"; detailRow.append(cell);
     const detail = document.createElement("section"); detail.className = "workflow-detail";
     detail.id = "workflow-" + (components.size + 1) + "-" + String(++nextRowId);
     button.setAttribute("aria-controls", detail.id);
@@ -485,7 +487,7 @@
     const primaryActions = document.createElement("div"); primaryActions.className = "actions";
     technical.append(actions, results);
     detail.append(evidence, primaryActions, technical); cell.append(detail);
-    const component = {key, row, button, titleText, scope, status, detailRow, evidence, actions, primaryActions, results, fields, actionSignature: null};
+    const component = {key, row, button, titleText, scope, status, age, detailRow, evidence, actions, primaryActions, results, fields, actionSignature: null};
     row.addEventListener("click", event => {
       if (event.target.closest("a")) return;
       selectedWorkflow = selectedWorkflow === key ? null : key;
@@ -512,7 +514,7 @@
     else if (item.messages?.length) {
       for (const message of [...new Set(item.messages)]) evidence.append(text("p", message, "check-warning"));
       if (item.phase === "Import needs attention") {
-        evidence.append(text("p", "Keep this download? Review its files and " + (item.kind === "sonarr" ? "episode assignments" : "movie match") + " using Interactive Import in " + labels[item.kind] + " → Activity → Queue. Confirm any replacement there. Try another rejects this release instead."));
+        evidence.append(text("p", "Keep this download? Review its files and " + (item.kind === "sonarr" ? "episode assignments" : "movie match") + " using " + (item.manualImport ? "Manual Import in " + labels[item.kind] + " → Wanted → Missing" : "Interactive Import in " + labels[item.kind] + " → Activity → Queue") + ". Confirm any replacement there. Try another rejects this release instead."));
       }
     } else if (["stalledDL", "metaDL", "forcedMetaDL"].includes(download?.state)) {
       const noConnections = download.connectedSeeds === 0 && download.connectedPeers === 0;
@@ -635,6 +637,10 @@
         component.titleText.textContent = item.title; component.button.setAttribute("aria-label", "Details for " + item.title + (item.scope ? ", " + item.scope : ""));
         component.scope.textContent = item.scope || ""; component.scope.hidden = !item.scope;
         component.status.replaceChildren(text("span", item.phase, "phase " + phaseClass(item)));
+        const added = item.download?.added;
+        const elapsed = Number.isFinite(added) && added > 0 ? Math.max(0, Date.now() / 1000 - added) : null;
+        component.age.textContent = elapsed === null ? "—" : elapsed < 60 ? "<1m" : elapsed < 3600 ? Math.floor(elapsed / 60) + "m" : elapsed < 86400 ? Math.floor(elapsed / 3600) + "h" : Math.floor(elapsed / 86400) + "d";
+        component.age.title = elapsed === null ? "Not currently in qBittorrent" : "Added to qBittorrent: " + new Date(added * 1000).toLocaleString();
         if (item.phase === "Downloading" && item.download) {
           const parts = [];
           if (Number.isFinite(item.download.progress)) parts.push(Math.round(item.download.progress * 100) + "%");

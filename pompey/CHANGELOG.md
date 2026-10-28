@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.6.4
+
+- Reconcile retained imports against complete native grab history and current library files, clearing stale attention without authorizing download deletion. Identify missing episodes in partial packs.
+- Show download age from qBittorrent’s added timestamp in Releases.
+- Correct the Review import destination tooltip and guidance.
+
 ## 0.6.3
 
 - Coordinate native Arr imports after downloads finish and stop, closing the automatic-import race before qBittorrent starts. Preserve durable handoff receipts and review paths for unresolved imports.

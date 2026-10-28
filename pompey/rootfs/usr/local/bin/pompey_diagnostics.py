@@ -188,12 +188,18 @@ def workflow(sources, titles, queues, torrents, requested=()):
             phase = "Import needs attention" if receipt.get("phase") in {"review", "submitting"} else "Waiting for import"
             action = ("The native import command has finished or its result is uncertain, but this download remains. Open Review import, choose Manual Import and select the download location shown below. Review file and episode matches before importing; completion alone does not authorize deletion."
                       if phase == "Import needs attention" else "Pompey submitted this complete, stopped download to Arr. Native import and cleanup are pending.")
+            availability = receipt.get("availability", {})
+            if availability.get("state") == "satisfied":
+                phase = "Available · download retained"
+                action = "All content identified by this release's native grab history is present in the library. No further import is needed. The torrent remains in qBittorrent; library availability alone does not authorize deleting its remaining files."
+            elif availability.get("state") == "missing":
+                action = "Not yet verified in the library: " + ", ".join(availability.get("missing", [])) + ". Review the native import and file matches."
         rows.append({"kind": receipt["kind"] if managed else "qbittorrent", "id": receipt.get("titleId") if managed else None, "title": torrent.get("name", "Download"),
             "manualImport": managed,
             "key": "qbittorrent:" + token, "downloadId": token,
             "phase": phase if available else "Current progress unavailable", "lastKnownPhase": phase,
             "nextAction": action,
-            "messages": receipt.get("messages", []) if managed else [], "download": download_evidence(torrent), "available": available,
+            "messages": ([action] if receipt.get("availability", {}).get("state") == "missing" else receipt.get("messages", [])) if managed and phase != "Available · download retained" else [], "download": download_evidence(torrent), "available": available,
             "updated": min((item.get("updated") or 0 for item in observed), default=0), "attention": phase in {"Import needs attention", "Completed · import unconfirmed", "Manual download retained", "Completed · unmanaged"}})
     return sorted(rows, key=lambda row: (not row["attention"], not bool(row["download"]), row["title"].lower()))
 
