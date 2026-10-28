@@ -105,6 +105,20 @@ def completed_download(torrent, queued, policy):
     return "Completed · import unconfirmed", "This torrent is stopped but absent from the observed Arr queue. Import and removal eligibility are unconfirmed. Automatic maintenance continues. Review the native application if it remains; completion alone does not authorize deletion."
 
 
+def reconciled_import(receipt, kind, ident, phase, action, messages):
+    """Project whole-release evidence consistently, including native error queues."""
+    if receipt.get("kind") != kind or receipt.get("titleId") != ident or not ident:
+        return phase, action, messages
+    availability = receipt.get("availability", {})
+    if availability.get("state") == "satisfied":
+        return ("Available · download retained",
+                "All content identified by this release's native grab history is present in the library. No further import is needed. The torrent remains in qBittorrent, which may report missing source files after import. Library availability alone does not authorize deleting its remaining files.", [])
+    if availability.get("state") == "missing":
+        action = "Not yet verified in the library: " + ", ".join(availability.get("missing", [])) + ". Review the native import and file matches."
+        messages = [*messages, action]
+    return phase, action, messages
+
+
 def workflow(sources, titles, queues, torrents, requested=()):
     """Explain Arr queues and missing monitored media, including non-Seerr work."""
     rows = []
@@ -156,6 +170,8 @@ def workflow(sources, titles, queues, torrents, requested=()):
                         phase, action = "Episode status unavailable", "Sonarr did not report episode counts. Check its library before searching for another release."
                 if not title:
                     phase, action = "Unmatched download", "Arr has not matched this download to a library title."
+                if title and torrent and torrent.get("category") == kind:
+                    phase, action, messages = reconciled_import(imports.get(token, {}), kind, ident, phase, action, messages)
                 observed = [source] + ([sources.get("qbittorrent", {})] if queued else [])
                 available = all(item.get("available") for item in observed)
                 episode = (queued or {}).get("episode") or {}
@@ -188,12 +204,7 @@ def workflow(sources, titles, queues, torrents, requested=()):
             phase = "Import needs attention" if receipt.get("phase") in {"review", "submitting"} else "Waiting for import"
             action = ("The native import command has finished or its result is uncertain, but this download remains. Open Review import, choose Manual Import and select the download location shown below. Review file and episode matches before importing; completion alone does not authorize deletion."
                       if phase == "Import needs attention" else "Pompey submitted this complete, stopped download to Arr. Native import and cleanup are pending.")
-            availability = receipt.get("availability", {})
-            if availability.get("state") == "satisfied":
-                phase = "Available · download retained"
-                action = "All content identified by this release's native grab history is present in the library. No further import is needed. The torrent remains in qBittorrent; library availability alone does not authorize deleting its remaining files."
-            elif availability.get("state") == "missing":
-                action = "Not yet verified in the library: " + ", ".join(availability.get("missing", [])) + ". Review the native import and file matches."
+            phase, action, _ = reconciled_import(receipt, receipt["kind"], receipt.get("titleId"), phase, action, [])
         rows.append({"kind": receipt["kind"] if managed else "qbittorrent", "id": receipt.get("titleId") if managed else None, "title": torrent.get("name", "Download"),
             "manualImport": managed,
             "key": "qbittorrent:" + token, "downloadId": token,

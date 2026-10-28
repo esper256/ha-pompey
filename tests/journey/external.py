@@ -279,6 +279,15 @@ class World:
             self.controls["visible:" + ident] = time.time()
             save_json(self.control_file, self.controls)
             return js({"ok": True})
+        if path.startswith("/control/fault/"):
+            name, value = path.split("/")[-2:]
+            if name not in {"indexer", "plex"} or value not in {"off", "on"}:
+                raise ValueError("Invalid fixture fault control")
+            self.controls["fault:" + name] = value == "on"
+            return js({"ok": True})
+        if path in {"/control/plex-library", "/control/plex-library/clear"}:
+            self.controls["plex-library"] = path == "/control/plex-library"
+            return js({"ok": True})
         if path.startswith("/control/certify/"):
             ident = path.rsplit("/", 1)[1]
             case = next(c for c in self.cases if str(c.movie_id) == ident)
@@ -319,6 +328,8 @@ class World:
             torrent.stamp("torrent-served")
             return "application/x-bittorrent", torrent.torrent, 200
         if path in {"/api", "/api/"}:
+            if self.controls.get("fault:indexer"):
+                return js({"error": "Intentional indexer outage"}, 503)
             if query.get("apikey") != ["fixture"]:
                 return js({"error": "bad key"}, 403)
             if query.get("t") == ["caps"]:
@@ -449,7 +460,14 @@ class World:
         if host == "plex.tv" and path == "/api/resources":
             return "application/xml", b'<MediaContainer size="0"/>', 200
         if path == "/library/sections":
-            return js({"MediaContainer": {"Directory": []}})
+            if self.controls.get("fault:plex"):
+                return js({"error": "Intentional media-server outage"}, 503)
+            libraries = [{"key": "1", "title": "Fixture movies", "type": "movie", "agent": "tv.plex.agents.movie", "scanner": "Plex Movie"}] if self.controls.get("plex-library") else []
+            return js({"MediaContainer": {"Directory": libraries}})
+        if host == "198.18.0.2" and path == "/library/sections/1/all":
+            # The discovery fixture is a real, empty library. Seerr can scan
+            # it while enabled, including on its normal background schedule.
+            return js({"MediaContainer": {"size": 0, "totalSize": 0, "offset": 0, "Metadata": []}})
         if path == "/" and host in {PEER_IP, "198.18.0.2"}:
             return js(
                 {

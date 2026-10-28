@@ -8,6 +8,7 @@ from pathlib import Path
 import threading
 import time
 import urllib.request
+import urllib.error
 
 import pompey_common as api
 
@@ -30,6 +31,29 @@ def rows(value):
     if not isinstance(value, list) or not all(isinstance(row, dict) for row in value):
         raise ValueError("Invalid application response")
     return value
+
+
+def media_server_settings(base, key, kind):
+    """Seerr returns saved library selections, not a live media-server probe."""
+    result = {"type": kind, "configured": None, "state": "unknown", "observed": time.time()}
+    path = "plex" if kind == 1 else "jellyfin" if kind in {2, 3} else None
+    if not path:
+        return {**result, "configured": False}
+    try:
+        settings = get(base + "/settings/" + path, key)
+        result["configured"] = bool(settings.get("ip") or settings.get("hostname"))
+        if result["configured"]:
+            libraries = rows(get(base + "/settings/" + path + "/library", key))
+            result["selectedLibraries"] = sum(bool(lib.get("enabled")) for lib in libraries)
+            result["state"] = "saved-selections" if result["selectedLibraries"] else "no-libraries"
+    except urllib.error.HTTPError as exc:
+        result["state"] = "seerr-auth" if exc.code in {401, 403} else "unknown"
+        exc.close()
+    except (TimeoutError, urllib.error.URLError, ConnectionError):
+        result["state"] = "seerr-connection"
+    except (OSError, ValueError, KeyError, TypeError):
+        result["state"] = "unknown"
+    return result
 
 
 def read_source(name, secrets):
@@ -63,19 +87,7 @@ def read_source(name, secrets):
     result.update(counts=count, requests=rows(recent["results"]), total=recent["pageInfo"]["results"])
     result["connections"] = {name: bool(rows(get(base + "/settings/" + name, key))) for name in ["radarr", "sonarr"]}
     # Return only optional media-server status, never settings credentials.
-    kind = public.get("mediaServerType")
-    result["mediaServer"] = {"type": kind, "configured": False}
-    path = "plex" if kind == 1 else "jellyfin" if kind in {2, 3} else None
-    if path:
-        try:
-            settings = get(base + "/settings/" + path, key)
-            configured = bool(settings.get("ip") or settings.get("hostname"))
-            result["mediaServer"]["configured"] = configured
-            if configured:
-                libraries = rows(get(base + "/settings/" + path + "/library", key))
-                result["mediaServer"].update(reachable=True, selectedLibraries=sum(bool(lib.get("enabled")) for lib in libraries))
-        except (OSError, ValueError, KeyError, TypeError):
-            result["mediaServer"]["reachable"] = False
+    result["mediaServer"] = media_server_settings(base, key, public.get("mediaServerType"))
     return result
 
 

@@ -328,8 +328,10 @@
   }
   function renderConnections() {
     const table = element("setup-checks"); table.replaceChildren();
-    const row = (name, message) => {
-      const tr = document.createElement("tr"); tr.append(text("td", name), text("td", message)); table.append(tr);
+    const row = (name, message, link) => {
+      const tr = document.createElement("tr"); const detail = text("td", message);
+      if (link) detail.append(document.createTextNode(" · "), link);
+      tr.append(text("td", name), detail); table.append(tr);
     };
     const setup = overview.setup;
     if (!setup.seerrAvailable) row("Seerr", "Connection unavailable");
@@ -342,7 +344,14 @@
     }
     if (overview.summary.indexers.value?.enabled === 0) row("Indexers", "Add a source in Prowlarr");
     const server = setup.mediaServer;
-    if (server?.configured && server.reachable === false) row(server.type === 1 ? "Plex" : server.type === 3 ? "Emby" : "Jellyfin", "Library discovery unavailable; check the connection in Seerr");
+    if (server && server.configured !== false) {
+      const messages = {"no-libraries": "No libraries selected in Seerr", "seerr-auth": "Seerr rejected access to its library settings",
+        "seerr-connection": "Could not reach Seerr to read library settings", "unknown": "Seerr library settings could not be verified"};
+      const message = !setup.seerrAvailable ? "Library settings are out of date" : messages[server.state];
+      if (message) row(server.type === 1 ? "Plex" : server.type === 3 ? "Emby" : "Jellyfin",
+        message + " · Observed " + age(server.observed),
+        appLink("seerr", "Review libraries", "app-link", "settings/" + (server.type === 1 ? "plex" : "jellyfin")));
+    }
     element("setup-panel").hidden = !table.children.length;
     element("setup-title").textContent = setup.seerrAvailable && !setup.initialized ? "Finish setup" : "Connections need attention";
     element("setup-note").textContent = "Review the connection in Seerr or Prowlarr. Status updates automatically.";
@@ -504,7 +513,7 @@
     const download = item.download;
     if (item.library && item.delivered) evidence.append(text("p", "Successfully delivered to the library. Later moves or deletion do not restart automatic downloads. Use Try another to request a replacement."));
     if (item.library && item.delivered && !item.hasFile) evidence.append(text("p", "Arr no longer reports a file at its old location. Files moved outside Arr are retained when requesting a replacement.", "field-help"));
-    const importing = ["Import needs attention", "Waiting for import", "Imported to library", "Imported"].includes(item.phase);
+    const importing = ["Import needs attention", "Waiting for import", "Imported to library", "Imported", "Available · download retained"].includes(item.phase);
     if (download && item.available && Number.isFinite(download.progress) && !importing) {
       const progress = document.createElement("div"); progress.className = "transfer-progress";
       const meter = document.createElement("progress"); meter.max = 1; meter.value = download.progress; meter.setAttribute("aria-label", "Download progress");

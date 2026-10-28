@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.6.5
+
+- Explain missing media-library selections and failures reading Seerr settings, with links and observation age. Saved selections are no longer presented as live media-server connectivity.
+- Cover indexer outage/recovery and configured media-server discovery in the existing release-only waiting-request journey, preserving background media and request identity.
+- Verify the pinned build-only crane archive with SHA-256 before extraction or execution.
+- Apply verified whole-release library availability to native Arr queue entries as well as retained downloads outside the queue. Restarting qBittorrent no longer turns a verified import into a false missing-source download warning.
+- Hide the download progress meter for verified imported releases while preserving the downloader's actual state in technical details. Partial packs and mismatched ownership still require attention; this change does not delete torrents or files.
+
 ## 0.6.4
 
 - Bundle dependency updates weekly, retain manual discovery, and remove post-release update chaining. Full release and upgrade acceptance remain required.
