@@ -6,7 +6,7 @@ from pathlib import Path
 import subprocess
 from urllib.parse import urlencode
 from build_engine_manifest import build
-from release_metadata import current, next_patch, set_version
+from release_metadata import current, next_patch, set_version, release_notes
 
 MANIFEST = "pompey/rootfs/usr/share/pompey/engines.json"
 COMPONENTS = ["Radarr", "Sonarr", "Prowlarr", "seerr", "qbittorrent-nox", "recyclarr", "dotnet", "quality-resources"]
@@ -21,7 +21,10 @@ def api(path, method="GET", body=None):
     if body is not None:
         args += ["--input", "-"]
     result = subprocess.run(args, input=json.dumps(body) if body is not None else None,
-                            capture_output=True, text=True, check=True)
+                            capture_output=True, text=True)
+    if result.returncode:
+        # Keep the actionable HTTP/permission error, without logging token or body.
+        raise RuntimeError("GitHub API " + method + " " + path + ": " + result.stderr.strip()[:500])
     return json.loads(result.stdout) if result.stdout.strip() else None
 
 
@@ -101,7 +104,8 @@ def main():
                 return value["version"] if "version" in value else ", ".join(name + " " + commit[:12] for name, commit in value.items())
             notes = f"## {version}\n\n- Update {component}: {describe(old)} → {describe(new)}.\n\n"
             changelog = Path("pompey/CHANGELOG.md")
-            changelog.write_text(changelog.read_text().replace("# Changelog\n\n", "# Changelog\n\n" + notes, 1))
+            addition = f"- Update {component}: {describe(old)} → {describe(new)}."
+            changelog.write_text(release_notes(changelog.read_text(), version, addition))
             command("git", "add", MANIFEST, "pompey/config.yaml", "pompey/Dockerfile", "pompey/CHANGELOG.md")
             command("git", "-c", "user.name=github-actions[bot]", "-c", "user.email=41898282+github-actions[bot]@users.noreply.github.com", "commit", "-m", "Update pinned " + component + " for Pompey " + version)
             command("git", "push", "--force-with-lease=refs/heads/" + branch + ":" + expected, "origin", "HEAD:refs/heads/" + branch)

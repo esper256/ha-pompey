@@ -25,6 +25,31 @@ from concurrent.futures import Future
 
 
 class SupportLogEvidence(unittest.TestCase):
+
+    def test_report_endpoint_preserves_raw_text_and_disables_http_caching(self):
+        import http.client
+        import threading
+        from http.server import ThreadingHTTPServer
+        from pompey_setup import Handler
+        raw = 'Real title /media/private/path Authorization: Bearer original-token\n'
+        server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            with patch("pompey_report.collect_report", return_value=raw):
+                connection = http.client.HTTPConnection(*server.server_address, timeout=2)
+                connection.request("POST", "/diagnostics/report", "{}", {"Content-Type": "application/json"})
+                response = connection.getresponse()
+                self.assertEqual(response.status, 200)
+                self.assertEqual(response.getheader("Cache-Control"), "no-store")
+                self.assertEqual(response.read().decode(), raw)
+                connection.close()
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join()
+
+
     def test_native_diagnostic_messages_redact_headers_and_embedded_credentials(self):
         from pompey_log_emit import redact_value
         data = {"id": 8, "messages": ['Authorization: Bearer bearer-secret',
@@ -54,6 +79,18 @@ class SupportLogEvidence(unittest.TestCase):
 
 
 class ObservationSemantics(unittest.TestCase):
+    def test_access_hosts_reject_wildcards_urls_and_bind_addresses_and_preserve_explicit_names(self):
+        from pompey_hosts import hostname, merged_hosts
+        self.assertEqual(hostname("HA.Example.org"), "ha.example.org")
+        self.assertEqual(hostname("[2001:db8::1]"), "[2001:db8::1]")
+        for value in ["*", "*.example.org", "http://ha.example.org", "ha.example.org:8123", "ha.org,evil.org", "0.0.0.0", "[::]", "bad host", "1.2.3.999"]:
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                hostname(value)
+        result = merged_hosts("*,0.0.0.0,manual.example.org;*.trusted.example.org", ["ha.example.org", "127.0.0.1"])
+        self.assertEqual(result, "manual.example.org,*.trusted.example.org,ha.example.org,127.0.0.1")
+
+
+
     def test_torrent_buckets_are_exclusive_and_stale_counts_stay_labelled(self):
         from pompey_observations import torrent_counts, summarize
         states = ["downloading", "stalledDL", "stoppedDL", "stalledUP", "checkingDL", "queuedDL"]
@@ -122,6 +159,22 @@ class IngressPreferences(unittest.TestCase):
 
 
 class WorkflowEvidence(unittest.TestCase):
+    def test_same_series_and_pack_entries_keep_distinct_native_identities(self):
+        from pompey_diagnostics import workflow
+        source = {"available": True, "updated": 100, "data": {"titles": []}}
+        sources = {"radarr": source, "sonarr": source, "qbittorrent": source}
+        titles = [{"kind": "sonarr", "id": 4, "title": "Example", "monitored": True}]
+        queue = [{"id": ident, "seriesId": 4, "downloadId": token, "sizeleft": 10,
+                  "episode": {"seasonNumber": 2, "episodeNumber": episode}}
+                 for ident, token, episode in [(1, "ABC", 4), (2, "ABC", 5), (3, "DEF", 6)]]
+        torrents = {token: {"state": "downloading"} for token in ["abc", "def"]}
+        rows = workflow(sources, titles, {"sonarr": queue}, torrents)
+        self.assertEqual(len({row["key"] for row in rows}), 3)
+        self.assertEqual([row["scope"] for row in rows], ["S02E04", "S02E05", "S02E06"])
+        queue[0]["title"] = "Changed release display name"
+        changed = workflow(sources, titles, {"sonarr": list(reversed(queue))}, torrents)
+        self.assertEqual({row["key"] for row in rows}, {row["key"] for row in changed})
+
     def test_queue_evidence_includes_manual_work_and_marks_stale_peer_data(self):
         from pompey_diagnostics import workflow
         source = {"available": True, "updated": 100, "data": {"titles": []}}
@@ -152,6 +205,113 @@ class WorkflowEvidence(unittest.TestCase):
         rows = workflow(sources, titles, {}, {})
         self.assertEqual([row["title"] for row in rows], ["Partial"])
         self.assertEqual(rows[0]["phase"], "Missing episodes")
+        self.assertEqual([r["title"] for r in workflow(sources, titles, {}, {}, {("sonarr", 3)})], ["Partial"])
+
+    def test_completed_torrent_is_not_proof_of_import_or_cleanup_eligibility(self):
+        from pompey_diagnostics import completed_download
+        torrent = {"progress": 1, "amount_left": 0, "state": "stoppedUP", "category": "radarr", "ratio": .5}
+        self.assertEqual(completed_download(torrent, None, "stop_sharing")[0], "Completed · import unconfirmed")
+        self.assertEqual(completed_download(torrent, {"trackedDownloadState": "imported"}, "stop_sharing")[0], "Imported · cleanup pending")
+        self.assertEqual(completed_download(torrent, None, "share_to_ratio")[0], "Seeding target pending")
+        self.assertEqual(completed_download(dict(torrent, category="personal"), None, "stop_sharing")[0], "Completed · unmanaged")
+        self.assertIsNone(completed_download(dict(torrent, progress=.99), None, "stop_sharing"))
+
+    def test_library_check_requires_healthy_storage_and_targets_one_existing_title(self):
+        from pompey_diagnostics import check_library
+        from unittest.mock import Mock
+        call = Mock(return_value={"id": 7})
+        with tempfile.TemporaryDirectory() as root, patch.dict(os.environ,POMPEY_DATA=root,POMPEY_READY=root), patch("pompey_recovery.api_for",return_value=call):
+            with self.assertRaisesRegex(ValueError,"healthy"):
+                check_library({"kind":"radarr","id":7})
+            call.assert_not_called()
+            Path(root,"storage.json").write_text('{"ok":true}')
+            check_library({"kind":"radarr","id":7})
+            self.assertEqual(call.call_args_list[-1].args, ("POST","/command",{"name":"RescanMovie","movieId":7}))
+            with self.assertRaises(ValueError):
+                check_library({"kind":"radarr","id":True})
+
+
+class DeliveryReceipts(unittest.TestCase):
+    def test_upgrade_never_backfills_a_release_rejected_in_060(self):
+        import pompey_delivery as delivery
+        movie={"id":7,"tmdbId":42,"title":"Example","path":"/media/dlna/Movies/Kid Friendly/Example","hasFile":False,"monitored":True}
+        mutations=[]
+        def call(method,path,body=None):
+            if method == "PUT": mutations.append(body); return body
+            return [movie] if path == "/movie" else []
+        events=[{"eventType":"downloadFolderImported","downloadId":"a"*40,"data":{"importedPath":movie["path"]+"/old.mkv","fileId":"12"}}]
+        with tempfile.TemporaryDirectory() as root, patch.dict(os.environ,POMPEY_DATA=root), patch("pompey_recovery.api_for",return_value=call), patch.object(delivery,"recent_history",return_value=events):
+            state.save("release-sequence-old",{"kind":"radarr","identity":{"tmdbId":42},"attempts":[{"downloadId":"a"*40,"target":{"libraryFiles":[{"id":12}]}}]})
+            delivery.reconcile()
+            self.assertFalse(delivery.for_title("radarr",movie))
+            self.assertEqual(mutations,[])
+            saved=state.load("deliveries")
+            self.assertTrue(saved["rejectionsImported"])
+            # A partial native-removal failure must not turn the rejected file
+            # still on disk into new successful-delivery evidence either.
+            receipts={}
+            self.assertFalse(delivery.record_file(receipts,"movie",{"id":12},"old",excluded=saved["titles"]["radarr:42"]))
+            self.assertTrue(delivery.record_file(receipts,"movie",{"id":13},"new",excluded=saved["titles"]["radarr:42"]))
+
+    def test_delivered_episode_stays_unmonitored_without_stopping_future_episodes(self):
+        import pompey_delivery as delivery
+        calls=[]
+        def call(method,path,body=None):
+            calls.append((method,path,body))
+            if method == "PUT": return body
+            if path == "/series": return [{"id":7,"tvdbId":42,"title":"Example","path":"/media/dlna/TV/Example"}]
+            if path.startswith("/episode?"): return [{"id":8,"seasonNumber":1,"episodeNumber":1,"monitored":True}, {"id":9,"seasonNumber":1,"episodeNumber":2,"monitored":True}]
+            return []
+        with tempfile.TemporaryDirectory() as root, patch.dict(os.environ,POMPEY_DATA=root), patch("pompey_recovery.api_for",return_value=call), patch.object(delivery,"recent_history",return_value=[]):
+            state.save("deliveries",{"titles":{"sonarr:42":{"receipts":{"1:1":{"status":"delivered","fileId":10}}}}})
+            delivery.reconcile()
+            self.assertEqual([c for c in calls if c[0] == "PUT"], [("PUT","/episode/monitor",{"episodeIds":[8],"monitored":False})])
+
+    def test_only_final_library_history_can_backfill_a_missing_movie(self):
+        import pompey_delivery as delivery
+        movie = {"id":7,"tmdbId":42,"title":"Example","path":"/media/dlna/Movies/Kid Friendly/Example","hasFile":False,"monitored":True}
+        for imported, expected in [(movie["path"]+"/movie.mkv",True),("/media/dlna/downloads/By Rating/Movies/Example/movie.mkv",False)]:
+            calls=[]
+            def call(method,path,body=None):
+                calls.append((method,path,body))
+                if method == "PUT": return body
+                return [movie] if path == "/movie" else []
+            events=[{"eventType":"downloadFolderImported","downloadId":"a"*40,"data":{"importedPath":imported,"fileId":"12"}}]
+            with self.subTest(path=imported), tempfile.TemporaryDirectory() as root, patch.dict(os.environ,POMPEY_DATA=root), patch("pompey_recovery.api_for",return_value=call), patch("pompey_delivery.recent_history",return_value=events):
+                delivery.reconcile()
+                receipt=delivery.for_title("radarr",movie).get("movie")
+                self.assertEqual(bool(receipt), expected)
+                self.assertEqual(any(method=="PUT" for method,_,_ in calls),expected)
+                if expected:
+                    self.assertTrue(receipt["historical"])
+                    self.assertEqual(receipt["fileId"],12)
+
+    def test_delivery_survives_missing_file_but_rejection_requires_a_new_file(self):
+        import pompey_delivery as delivery
+        with tempfile.TemporaryDirectory() as root, patch.dict(os.environ,POMPEY_DATA=root):
+            receipts = {}
+            delivery.record_file(receipts,"movie",{"id":10},"/media/Movies/Original.mkv")
+            state.save("deliveries",{"titles":{"radarr:42":{"receipts":receipts}}})
+            self.assertEqual(delivery.for_title("radarr",{"tmdbId":42})["movie"]["status"],"delivered")
+            self.assertEqual(delivery.for_title("radarr",{"tmdbId":43}),{})
+            delivery.reopen({"kind":"radarr","identity":{"tmdbId":42},"libraryFiles":[],"downloadId":"a"*40})
+            receipts = delivery.for_title("radarr",{"tmdbId":42})
+            self.assertFalse(delivery.record_file(receipts,"movie",{"id":10},"old"))
+            self.assertEqual(receipts["movie"]["status"],"retrying")
+            self.assertTrue(delivery.record_file(receipts,"movie",{"id":11},"new"))
+            self.assertEqual(receipts["movie"]["status"],"delivered")
+
+    def test_episode_rejection_reopens_only_affected_coordinates(self):
+        import pompey_delivery as delivery
+        with tempfile.TemporaryDirectory() as root, patch.dict(os.environ,POMPEY_DATA=root):
+            state.save("deliveries",{"titles":{"sonarr:42":{"receipts":{"1:1":{"status":"delivered","fileId":10},"1:2":{"status":"delivered","fileId":11}}}}})
+            delivery.reopen({"kind":"sonarr","identity":{"tvdbId":42},"episodes":[{"season":1,"episode":1}],"libraryFiles":[{"id":10}],"downloadId":"a"*40})
+            receipts=delivery.for_title("sonarr",{"tvdbId":42})
+            self.assertEqual(receipts["1:1"]["status"],"retrying")
+            self.assertEqual(receipts["1:2"]["status"],"delivered")
+            from pompey_recovery import summarize
+            sequence={"attempts":[{"target":{"episodes":[{"season":1,"episode":1},{"season":1,"episode":2}]}}]}
+            self.assertEqual(summarize(sequence)["scope"],"S01E01, S01E02")
 
     def test_requested_monitoring_off_is_not_hidden_as_an_unrequested_title(self):
         from pompey_diagnostics import workflow
@@ -160,6 +320,24 @@ class WorkflowEvidence(unittest.TestCase):
         self.assertEqual(workflow(sources, [title], {}, {}), [])
         rows = workflow(sources, [title], {}, {}, {("radarr", 1)})
         self.assertEqual(rows[0]["phase"], "Monitoring disabled")
+
+
+class ChangingRequestHistory(unittest.TestCase):
+    def test_changed_snapshots_defer_without_loading_or_mutating_monitoring(self):
+        from request_policy import reconcile_requests
+        with patch("request_policy.requests_snapshot", side_effect=[[{"id": 1}], [{"id": 1}, {"id": 2}]]), \
+             patch("request_policy.api.log_if_new") as log, patch("request_policy.state.load") as load, \
+             patch("request_policy.api.http") as http:
+            reconcile_requests()
+            log.assert_called_once()
+            load.assert_not_called()
+            http.assert_not_called()
+
+    def test_snapshot_api_failure_is_still_a_real_failure(self):
+        from request_policy import reconcile_requests
+        with patch("request_policy.requests_snapshot", side_effect=RuntimeError("Seerr unavailable")):
+            with self.assertRaisesRegex(RuntimeError, "Seerr unavailable"):
+                reconcile_requests()
 
 
 class CumulativeFailureEvidence(unittest.TestCase):
@@ -459,6 +637,85 @@ Endpoint = [2001:db8::1]:51820
             with self.assertRaises(ValueError):
                 parse(invalid)
 
+
+class ReleaseRecoverySafety(unittest.TestCase):
+    def test_stale_confirmation_never_changes_files_or_writes_intent(self):
+        import pompey_recovery as recovery
+        with tempfile.TemporaryDirectory() as root, patch.dict(os.environ,POMPEY_DATA=root,POMPEY_READY=root):
+            Path(root,'storage.json').write_text('{"ok":true}')
+            with patch.object(recovery,'inspect_target',return_value=({'token':'new'},None,None,None,None)):
+                with self.assertRaisesRegex(ValueError,'changed'):
+                    recovery.reject({'confirm':True,'kind':'radarr','id':1,'token':'old','confirmationId':'a'*32})
+            self.assertEqual(list(state.directory().glob('release-sequence-*')),[])
+
+    def test_native_removal_failure_keeps_durable_pre_removal_evidence(self):
+        import pompey_recovery as recovery
+        target={'kind':'radarr','id':1,'title':'Real title','release':'Chosen.release',
+                'identity':{'tmdbId':12},'episodeIds':[],'token':'fingerprint','downloadId':'a'*40,
+                'libraryFiles':[],'queueIds':[5],'removeDownload':True,'grabId':4}
+        rows=[{'id':4,'movieId':1,'date':'2026-10-27T10:00:00Z','eventType':'grabbed',
+               'downloadId':'a'*40,'sourceTitle':'Chosen.release','data':{}}]
+        def call(method,path,body=None):
+            if path=='/config/downloadclient':return {'autoRedownloadFailed':False}
+            if path.startswith('/qualityprofile'):return {'id':1,'name':'Default'}
+            if path.startswith('/release?'):return []
+            if method=='DELETE':
+                stored=recovery.read_sequence(recovery.sequence_paths()[0])
+                self.assertEqual(stored['attempts'][0]['stage'],'prepared')
+                self.assertEqual(stored['nativeHistory'][0]['sourceTitle'],'Chosen.release')
+                raise RuntimeError('downloader unavailable')
+            self.fail((method,path))
+        with tempfile.TemporaryDirectory() as root, patch.dict(os.environ,POMPEY_DATA=root,POMPEY_READY=root):
+            Path(root,'storage.json').write_text('{"ok":true}')
+            with patch.object(recovery,'inspect_target',return_value=(target,call,{'qualityProfileId':1},rows,None)):
+                with self.assertRaisesRegex(ValueError,'interrupted'):
+                    recovery.reject({'confirm':True,'token':'fingerprint','confirmationId':'a'*32,'reason':'stalled','note':'Stopped progressing'})
+            saved=recovery.read_sequence(recovery.sequence_paths()[0])
+            self.assertEqual(saved['status'],'Needs attention')
+            self.assertIn('downloader unavailable',saved['attempts'][0]['error'])
+            from pompey_report import collect_report
+            with patch.object(recovery,'reconcile'):
+                with patch('pompey_report.reconcile'):
+                    report=json.loads(collect_report().split('\n\n',1)[1])
+            self.assertEqual(report['schema'],'pompey-release-sequences-v1')
+            self.assertEqual(report['sequences'][0]['attempts'][0]['note'],'Stopped progressing')
+            self.assertNotIn('logs',report)
+            self.assertNotIn('applications',report)
+
+    def test_import_plan_only_includes_current_files_from_the_selected_grab(self):
+        import pompey_recovery as recovery
+        token='a'*40
+        native=[{'id':1,'seriesId':7,'relativePath':'S01E01.mkv','size':10},
+                {'id':2,'seriesId':7,'relativePath':'S01E02.mkv','size':10},
+                {'id':3,'seriesId':7,'relativePath':'S02E01.mkv','size':10}]
+        rows=[{'id':1,'seriesId':7,'episodeId':1,'eventType':'grabbed','downloadId':token,'sourceTitle':'Release.A'},
+              {'id':2,'seriesId':7,'episodeId':2,'eventType':'grabbed','downloadId':token,'sourceTitle':'Release.A'},
+              {'id':3,'seriesId':7,'eventType':'downloadFolderImported','downloadId':token,'data':{'fileId':'1'}},
+              {'id':4,'seriesId':7,'eventType':'downloadFolderImported','downloadId':token,'data':{'fileId':'2'}},
+              {'id':5,'seriesId':7,'eventType':'downloadFolderImported','downloadId':'b'*40,'data':{'fileId':'3'}}]
+        def call(method,path,body=None):
+            if path=='/series/7':return {'id':7,'title':'Example','path':'/media/dlna/TV/Example'}
+            if path.startswith('/episodefile?'):return native
+            if path.startswith('/queue?'):return {'records':[],'totalRecords':0}
+            self.fail((method,path))
+        with patch.object(recovery,'api_for',return_value=call), patch.object(recovery,'history',return_value=rows), \
+             patch.object(api,'http',return_value=[]),patch.object(api,'media_root',return_value='/media/dlna'):
+            plan=recovery.preview({'kind':'sonarr','id':7,'fileId':1})
+            self.assertEqual([r['id'] for r in plan['libraryFiles']],[1,2])
+            self.assertEqual(plan['episodeIds'],[1,2])
+            native[0]['relativePath']='../../../../etc/passwd'
+            with self.assertRaisesRegex(ValueError,'outside'):
+                recovery.preview({'kind':'sonarr','id':7,'fileId':1})
+
+    def test_imported_outcomes_never_count_a_rejected_release_as_success(self):
+        import pompey_recovery as recovery
+        seq={'kind':'sonarr','id':7,'episodeIds':[1,2],'started':0,'status':'Retrying','attempts':[{'at':0,'downloadId':'a'*40}], 'nativeHistory':[]}
+        rows=[{'id':i,'date':'2026-10-27T10:00:00Z','eventType':'downloadFolderImported','episodeId':episode,'downloadId':token,'data':{}}
+              for i,episode,token in [(1,1,'a'*40),(2,2,'a'*40),(3,1,'b'*40)]]
+        recovery.merge_history(seq,rows)
+        self.assertEqual(seq['status'],'Retrying')
+        recovery.merge_history(seq,[{'id':4,'date':'2026-10-27T10:00:00Z','eventType':'downloadFolderImported','episodeId':2,'downloadId':'b'*40,'data':{}}])
+        self.assertEqual(seq['status'],'Imported')
 
 if __name__ == "__main__":
     unittest.main()

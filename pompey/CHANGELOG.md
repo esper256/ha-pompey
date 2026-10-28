@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.6.1
+
+- Keep durable delivery records for movies and individual episodes; stop automatic monitoring after final-library delivery, preserve completion after manual file moves, and reopen content only through an explicit retry.
+- Preserve rejections recorded in 0.6.0 when upgrading, so a rejected release cannot be backfilled as a successful delivery.
+- Explain retained completed torrents and provide Check downloads and per-title Check library actions through existing native maintenance.
+- Distinguish TV recovery entries by episode coordinates or the saved release name.
+- Correct Radarr and Sonarr frontend routing under Home Assistant Ingress, including initial pages and deep links.
+
+## 0.6.0
+
+- Rebuild Ingress with responsive Overview / Releases / Config tabs, compact navigation, clearer VPN traffic and bundled-version displays, and contextual connection warnings.
+- Expand release details directly beneath their table row, preserving selection and search results across refreshes. Add imported-title browsing alongside active work and attention filters.
+- Add Try another for active downloads and imported releases. Preview affected files before native Arr deletion, blocklisting and replacement search; retain unrelated media and durable partial-operation receipts.
+- Record release selections, user rejection reasons, candidate observations and replacement imports as exportable sequences in Releases. Keep general application output in Home Assistant Logs.
+- Configure Prowlarr Allowed Hosts from authenticated Ingress access names and local interfaces, preserving explicit entries. Apply settings only after Prowlarr is ready.
+
+## 0.5.2
+
+- Update quality-resources: trash_guides ed6d7226232c, config_templates 89eebadd4299 → trash_guides 6ac59721b3c9, config_templates 89eebadd4299.
+
+## 0.5.1
+
+- Update Prowlarr: v2.6.5.5623 → v2.7.0.5723.
+
+- Preserve monitoring and defer cancellation when Seerr requests change during inspection, without reporting normal concurrent activity as a failed controller job.
+
 ## 0.5.0
 
 - Refine Ingress to Overview, Requests and Config tabs; show connection checks only when they need attention. Keep VPN connection state beside its label.

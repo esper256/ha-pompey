@@ -160,6 +160,8 @@ def offers(case):
         rows = [
             Offer(case, 0, case.release, quality="480p" if case.index == 2 else "1080p")
         ]
+        if case.index == 1:
+            rows.extend(Offer(case, variant, case.release + "-TRY" + str(variant)) for variant in (1, 2, 3))
         if case.index == 0:
             rows.append(
                 Offer(case, 1, case.prefix + ".2024.480p.WEB-DL", quality="480p")
@@ -189,6 +191,8 @@ def offers(case):
                 ),
             ]
         )
+    if case.index == 6:
+        rows.append(Offer(case, 1, case.release + "-TRY1", season, episodes))
     if case.index == 7:
         rows.append(
             Offer(case, 1, case.prefix + ".S01.1080p.WEB-DL.ENGLISH", 1, episodes)
@@ -211,10 +215,17 @@ def offers(case):
     return rows
 
 
-def cases():
-    run = os.environ["POMPEY_TEST_RUN_ID"]
+def run_namespace(run):
     if not re.fullmatch("[a-f0-9]{10}", run):
         raise ValueError("Invalid test run identity")
+    # Hex can contain embedded media tags: Radarr strips the 8b from 8be,
+    # causing a title mismatch and a legitimate manual-import safeguard.
+    # This bijection preserves run isolation without putting digits in titles.
+    return "".join(chr(ord("A") + int(char, 16)) for char in run)
+
+
+def cases():
+    run = run_namespace(os.environ["POMPEY_TEST_RUN_ID"])
     count = int(os.environ.get("POMPEY_TEST_CASES", "12"))
     if not 1 <= count <= 100:
         raise ValueError("Choose between 1 and 100 scenarios")

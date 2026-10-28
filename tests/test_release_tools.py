@@ -8,7 +8,7 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
-from promote_candidate import validate, validate_contents, validate_acceptance, validate_plan, MANIFEST
+from promote_candidate import validate, validate_contents, validate_acceptance, validate_plan, validate_check_target, MANIFEST
 from release_baseline import choose, FALLBACK
 from release_metadata import next_patch
 
@@ -92,6 +92,15 @@ class PromotionPolicy(unittest.TestCase):
             with self.subTest(path=path), self.assertRaises(ValueError):
                 validate_contents("sonarr", before, changed, "0.5.1")
 
+    def test_pending_notes_move_into_the_next_release_without_rewriting_history(self):
+        from release_metadata import release_notes, split_unreleased
+        before = "# Changelog\n\n## Unreleased\n\n- Fix concurrent requests.\n\n## 0.5.0\n\nExisting release.\n"
+        after = release_notes(before, "0.5.1", "- Update quality resources.")
+        self.assertNotIn("## Unreleased", after)
+        self.assertTrue(after.startswith("# Changelog\n\n## 0.5.1\n"))
+        self.assertIn("- Fix concurrent requests.", after)
+        self.assertTrue(after.endswith(split_unreleased(before)[1]))
+
     def test_baseline_tracks_the_last_stable_release_not_an_old_public_tag(self):
         self.assertEqual(choose({"tag_name": "v0.4.0"}), FALLBACK)
         self.assertEqual(choose({"tag_name": "v0.5.0"}), "v0.5.0")
@@ -100,6 +109,48 @@ class PromotionPolicy(unittest.TestCase):
 
 
 class ReleasePlanning(unittest.TestCase):
+    def test_stable_head_check_requires_identical_accepted_content(self):
+        plan = {"head": "head", "tree": "accepted-tree"}
+        validate_check_target(plan, {"sha": "head", "tree": {"sha": "accepted-tree"}})
+        for head in [{"sha": "changed", "tree": {"sha": "accepted-tree"}},
+                     {"sha": "head", "tree": {"sha": "untested-tree"}}]:
+            with self.assertRaises(ValueError):
+                validate_check_target(plan, head)
+
+    def test_merge_wait_is_bounded_and_rejects_a_changed_release(self):
+        from unittest.mock import patch
+        from promote_candidate import await_merge_gate
+        plan = {"head": "head", "base": "base"}
+        pr = {"head": {"sha": "head"}, "base": {"sha": "base"}, "mergeable_state": "blocked"}
+        with patch("promote_candidate.api", side_effect=[pr, {**pr, "mergeable_state": "clean"}]), patch("promote_candidate.time.sleep") as pause:
+            await_merge_gate("repos/test", "1", plan)
+            pause.assert_called_once_with(2)
+        with patch("promote_candidate.api", return_value={**pr, "mergeable_state": "unstable"}), patch("promote_candidate.time.sleep") as pause:
+            await_merge_gate("repos/test", "1", plan)
+            pause.assert_not_called()
+        with patch("promote_candidate.api", return_value=pr), patch("promote_candidate.time.sleep") as pause, self.assertRaises(ValueError):
+            await_merge_gate("repos/test", "1", plan)
+        self.assertEqual(pause.call_count, 7)
+        with patch("promote_candidate.api", return_value={**pr, "head": {"sha": "changed"}}), patch("promote_candidate.time.sleep") as pause, self.assertRaises(ValueError):
+            await_merge_gate("repos/test", "1", plan)
+        pause.assert_not_called()
+
+    def test_effective_rules_require_the_actions_check_in_the_same_strict_policy(self):
+        from release_protection import protection_from_rules
+        rule = {"type": "required_status_checks", "parameters": {
+            "strict_required_status_checks_policy": True,
+            "required_status_checks": [{"context": "CI required", "integration_id": 15368}]}}
+        self.assertTrue(protection_from_rules([rule])["strict"])
+        loose = copy.deepcopy(rule)
+        loose["parameters"]["strict_required_status_checks_policy"] = False
+        foreign = copy.deepcopy(rule)
+        foreign["parameters"]["required_status_checks"][0]["integration_id"] = 1
+        missing_app = copy.deepcopy(rule)
+        missing_app["parameters"]["required_status_checks"][0].pop("integration_id")
+        for rules in [[], [loose], [foreign], [missing_app], [loose, foreign], [{"type": "pull_request"}]]:
+            with self.subTest(rules=rules), self.assertRaises(ValueError):
+                protection_from_rules(rules)
+
     def test_merge_gate_rejects_changed_head_base_tree_and_foreign_repo(self):
         plan = dict(kind="release", head="head", base="base", revision="merge", tree="tree")
         pr = {"head": {"sha": "head", "repo": {"full_name": "esper256/ha-pompey"}},
@@ -121,14 +172,16 @@ class ReleasePlanning(unittest.TestCase):
         pr = {"head": {"sha": "head", "repo": {"full_name": "esper256/ha-pompey"}},
               "base": {"ref": "main", "sha": "base"}, "state": "open"}
         merge = {"parents": [{"sha": "base"}, {"sha": "head"}]}
-        validate_candidate(pr, "base", merge, "0.5.1", "0.5.0")
+        validate_candidate(pr, "base", merge, "0.5.1", "0.5.0", {"behind_by": 0})
+        with self.assertRaises(ValueError):
+            validate_candidate(pr, "base", merge, "0.5.1", "0.5.0", {"behind_by": 1})
         for version in ["0.5.0", "0.4.9"]:
             with self.assertRaises(ValueError):
-                validate_candidate(pr, "base", merge, version, "0.5.0")
+                validate_candidate(pr, "base", merge, version, "0.5.0", {"behind_by": 0})
         with self.assertRaises(ValueError):
             stable_version('version: "0.5.1-beta.1"')
         with self.assertRaises(ValueError):
-            validate_candidate(pr, "base", {"parents": [{"sha": "head"}]}, "0.5.1", "0.5.0")
+            validate_candidate(pr, "base", {"parents": [{"sha": "head"}]}, "0.5.1", "0.5.0", {"behind_by": 0})
 
     def test_queue_serializes_active_releases_and_retains_failed_evidence(self):
         from dependency_updates import queue_decision

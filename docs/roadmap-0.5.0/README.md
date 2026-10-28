@@ -11,19 +11,21 @@ server and open `/?view=overview`, `diagnostics`, `recovery`, `setup`, `storage`
 ## Roadmap issues
 
 The [0.5.0 milestone](https://github.com/esper256/ha-pompey/milestone/1) groups
-the proposed work. Priorities describe implementation order, not completed work.
+the proposed work. The status below distinguishes delivered behavior from the
+broader work retained in open issues; the original mockups are historical.
 
-| Priority | Issue |
+| Status | Issue |
 | --- | --- |
-| Required | [#89 Automated dependency updates and releases](https://github.com/esper256/ha-pompey/issues/89) |
-| Required | [#90 Reliable VPN download recovery](https://github.com/esper256/ha-pompey/issues/90) |
-| Required | [#91 Per-request troubleshooting](https://github.com/esper256/ha-pompey/issues/91) |
+| Core automation delivered in 0.5.1; build-tool follow-up #110 | [#89 Automated dependency updates and releases](https://github.com/esper256/ha-pompey/issues/89) |
+| Delivered in 0.5.0 | [#90 Reliable VPN download recovery](https://github.com/esper256/ha-pompey/issues/90) |
+| Partial; remaining work open | [#91 Per-request troubleshooting](https://github.com/esper256/ha-pompey/issues/91) |
 | Deferred to 0.6.0 | [#92 Targeted recovery actions](https://github.com/esper256/ha-pompey/issues/92) |
-| Required | [#93 Setup and connectivity checks](https://github.com/esper256/ha-pompey/issues/93) |
-| Next | [#94 Storage failure protection and recovery](https://github.com/esper256/ha-pompey/issues/94) |
-| Next | [#95 Focused outage and recovery acceptance](https://github.com/esper256/ha-pompey/issues/95) |
-| Polish | [#96 Application status, versions and support logs](https://github.com/esper256/ha-pompey/issues/96) |
-| Required | [#97 Terse ecosystem overview](https://github.com/esper256/ha-pompey/issues/97) |
+| Partial; remaining work open | [#93 Setup and connectivity checks](https://github.com/esper256/ha-pompey/issues/93) |
+| Delivered in 0.5.0, with periodic detection | [#94 Storage failure protection and recovery](https://github.com/esper256/ha-pompey/issues/94) |
+| Partial; broader fault coverage open | [#95 Focused outage and recovery acceptance](https://github.com/esper256/ha-pompey/issues/95) |
+| Delivered in 0.5.0 with approved UI scope | [#96 Application status, versions and support logs](https://github.com/esper256/ha-pompey/issues/96) |
+| Delivered in 0.5.0 | [#97 Terse ecosystem overview](https://github.com/esper256/ha-pompey/issues/97) |
+| Delivered in 0.5.0; filename filtering only | [#99 Executable-payload protection](https://github.com/esper256/ha-pompey/issues/99) |
 
 ## Accepted implementation refinements
 
@@ -37,15 +39,15 @@ Maintainer review on issues #89–#97 supersedes the original mockups:
 - Separate fast PR checks from release acceptance. Add fault scenarios only when their value justifies their runtime and complexity.
 - #99 adds an inert executable-payload regression and native downloader exclusion policy. This is extension protection, not an antivirus guarantee.
 
-## Development implementation status
+## Release status
 
 [Current implementation screenshots and release-review notes](release-review.md) show the actual product screens with explicitly synthetic data. The older images below remain design proposals.
 
-The maintainer approved the implementation screenshots and authorized stable 0.5.0 after full release integration and previous-release upgrade acceptance. Remaining gaps below are deferred; they are not release guarantees. Dependency discovery operates on stable main and skips prerelease versions.
+Stable [0.5.0](https://github.com/esper256/ha-pompey/releases/tag/v0.5.0) shipped after the maintainer approved the implementation screenshots and full release integration and previous-release upgrade acceptance passed. Remaining gaps below are deferred; they are not release guarantees. Dependency discovery operates on stable main and skips prerelease versions.
 
-The development branch uses Overview, Requests and Config tabs, with Overview selected by default and contextual connection/storage attention visible across all views. It includes the compact overview and shared observations (#97), native workflow tables and explicit release inspection (#91), optional media-server/setup checks (#93), bundled versions and bounded log repetition (#96), native executable exclusions (#99), VPN interface-replacement recovery (#90), and storage service holds/restoration (#94). These are implemented increments; the broader issue checklists remain open until their remaining cases are verified.
+The release uses Overview, Requests and Config tabs, with Overview selected by default and contextual connection/storage attention visible across all views. It includes the compact overview and shared observations (#97), native workflow tables and explicit release inspection (#91), optional media-server/setup checks (#93), bundled versions and bounded log repetition (#96), native executable exclusions (#99), VPN interface-replacement recovery (#90), and storage service holds/restoration (#94). Issues #90, #94, #96, #97 and #99 are closed with their scope and limits documented. Issues #91, #93 and #95 retain their broader remaining work; #92 remains deferred.
 
-Dependency discovery/promotion code and real previous-release upgrade coverage are prepared for #89. Repository settings now permit Actions-created PRs while keeping workflow tokens read-only by default. Main requires an up-to-date GitHub Actions `CI required` check, including for administrators, with no manual review requirement. Release approval uses required automated acceptance only: the current candidate’s release integration and aggregate jobs must pass in the exact workflow attempt, with no manual HAOS gate. An actual GitHub discovery → PR → acceptance → publication cycle remains outstanding; discovery operates on stable main and skips prerelease versions.
+The first live discovery → PR → acceptance → protected merge → publication cycle for #89 shipped [0.5.1](https://github.com/esper256/ha-pompey/releases/tag/v0.5.1), updating Prowlarr from 2.6.5.5623 to 2.7.0.5723 through [PR #113](https://github.com/esper256/ha-pompey/pull/113) and [full release/actual 0.5.0 upgrade acceptance](https://github.com/esper256/ha-pompey/actions/runs/40560630829). Repository settings permit Actions-created PRs while keeping workflow tokens read-only by default. Main requires an up-to-date GitHub Actions `CI required` check, including for administrators, with no manual review requirement. Release approval uses required automated acceptance only: the current candidate’s release integration and aggregate jobs must pass in the exact workflow attempt, with no manual HAOS gate. Discovery operates on stable main, skips prerelease versions and serializes subsequent components against the newly released version. Standalone build-tool maintenance remains in [#110](https://github.com/esper256/ha-pompey/issues/110).
 
 For #95, local and draft edits use fast checks only. Submitted PRs use the shared movie/episode/executable cohort and required packet checks, with auto-merge after required CI. Release acceptance adds the configured clone, broader shared scenarios, cold startup without VPN, storage recovery, strict VPN download resumption and actual previous-release forward upgrade. Full indexer/metadata outage families, native history-brake/rebaseline scenarios and unmatched direct-grab cases remain stretch work. Existing focused safety logic checks remain meaningful coverage, not claims that those real-engine scenarios exist.
 

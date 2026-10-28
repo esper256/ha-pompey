@@ -7,7 +7,7 @@ import time
 import urllib.parse
 from applications import tunnel_bytes
 from stack_checks import outage
-from support import digest, save_json
+from support import digest, save_json, HttpFailure
 from request_lifecycle import close_request
 
 
@@ -60,6 +60,7 @@ def _movie_request(client, case, background, ledger_file, *, resume):
         flush=True,
     )
     before = tunnel_bytes()
+    download = case
     status = client.peer(case)
     assert resume or status["blocks"] == 0, (
         "Unrequested case already downloaded",
@@ -140,6 +141,9 @@ def _movie_request(client, case, background, ledger_file, *, resume):
     client.refresh_downloads()
     item = movie()
     assert item and not item["hasFile"], item
+    parsed = client.arr("GET", "/parse?title=" + urllib.parse.quote(case.release))
+    assert (parsed.get("movie") or {}).get("id") == item["id"] and case.title in parsed["parsedMovieInfo"]["movieTitles"], (
+        "Fixture title did not survive native parsing; ID-only matching is not import confidence", parsed)
     if case.scenario == "movie-pg":
         choices = client.arr("GET", "/release?movieId=" + str(item["id"]))
         low = [
@@ -198,6 +202,12 @@ def _movie_request(client, case, background, ledger_file, *, resume):
         ), "Closing a request changed partial files"
         active["requestState"] = state
         active["restartPreservedPartial"] = True
+    if case.scenario == "movie-r" and os.environ.get("POMPEY_TEST_BASELINE") != "1":
+        from release_recovery import reject_three_releases
+        download, infohash = reject_three_releases(client, case, item)
+        active["infoHash"] = infohash
+        active["selectedRelease"] = download.release
+        active["releaseRecoveryVerified"] = True
     received_before_incident = 0
     if case.scenario == "vpn-download-loss":
         from catalogue import cases, offers
@@ -237,7 +247,7 @@ def _movie_request(client, case, background, ledger_file, *, resume):
             unwanted,
         )
         active["unwantedFilesIncluded"] = unwanted
-    client.release(case)
+    client.release(download)
     wait(
         lambda: (t := torrent()) and t["progress"] == 1,
         "Downloader did not verify the payload",
@@ -262,7 +272,8 @@ def _movie_request(client, case, background, ledger_file, *, resume):
             and native["quality"]["quality"]["resolution"] == 480
         ), native
         active["nativeMediaInfo"] = native["mediaInfo"]
-    assert item["monitored"] is (active.get("requestState") != "deleted"), item
+    if active.get("requestState") == "deleted":
+        assert not item["monitored"], item
     stamp("imported")
     if case.late_certification:
         staging = Path(item["path"])
@@ -321,7 +332,7 @@ def _movie_request(client, case, background, ledger_file, *, resume):
             "Staging payload remains"
         )
 
-    source = Path("/tmp/world") / case.release / (case.release + ".mkv")
+    source = Path("/tmp/world") / download.release / (download.release + ".mkv")
     checksum = digest(imported)
     assert checksum == digest(source), "Imported bytes belong to another case"
     wrong = base / (
@@ -334,7 +345,7 @@ def _movie_request(client, case, background, ledger_file, *, resume):
     assert len(subtitles) == 1 and digest(subtitles[0]) == digest(
         source.with_suffix(".en.srt")
     ), "Wrong or missing subtitle"
-    transfer = client.peer(case)
+    transfer = client.peer(download)
     assert (
         transfer["sent"] + active.get("sentBeforeRestart", 0)
         >= transfer["payloadBytes"]
@@ -374,10 +385,64 @@ def _movie_request(client, case, background, ledger_file, *, resume):
         {"kind": "radarr", "id": item["id"]},
     )
     assert explanation["status"] == "Search complete" and any(
-        r["title"] == case.release and "rejections" in r
+        r["title"] == download.release and "rejections" in r
         for r in explanation["releases"]
     ), explanation
-    assert not client.peer(case)["unknown"], client.peer(case)["unknown"]
+    if case.scenario == "movie-pg" and os.environ.get("POMPEY_TEST_BASELINE") != "1":
+        def remember_host():
+            try:
+                result = client.session.call("POST", "http://127.0.0.1:8099/diagnostics/access-host", {"hostname": "ha.pompey-test.invalid"})
+                if not result.get("ok"):
+                    return False
+                settings = client.session.call("GET", "http://127.0.0.1:9696/api/v1/config/host", key=client.secrets["prowlarr_api_key"])
+                warnings = client.session.call("GET", "http://127.0.0.1:9696/api/v1/health", key=client.secrets["prowlarr_api_key"])
+                return settings if "ha.pompey-test.invalid" in settings["allowedHosts"] and not any("AllowedHosts" in row.get("source", "") for row in warnings) else False
+            except HttpFailure as exc:
+                if exc.status != 409:
+                    raise
+                return False
+        hosts = client.wait(remember_host, "Ingress hostname was not applied to Prowlarr", 10)
+        assert "ha.pompey-test.invalid" in hosts["allowedHosts"] and "*" not in hosts["allowedHosts"], hosts["allowedHosts"]
+        exported = client.session.call("POST", "http://127.0.0.1:8099/diagnostics/report", {})
+        report = json.loads(exported.split("\n\n", 1)[1])
+        assert report["schema"] == "pompey-release-sequences-v1", report
+        assert "logs" not in report and "applications" not in report, "General logs must remain in HA Logs"
+        active["developmentReportVerified"] = True
+    if active.get("releaseRecoveryVerified"):
+        from release_recovery import assert_sequence
+        assert_sequence(client, item["id"], download.release)
+    if os.environ.get("POMPEY_TEST_BASELINE") != "1":
+        def delivered():
+            data = client.session.call("GET", "http://127.0.0.1:8099/diagnostics")
+            return any(t["kind"] == "radarr" and t["id"] == item["id"] and t.get("delivered") for t in data["titles"]) and not movie()["monitored"]
+        wait(delivered, "Final library import did not record delivery and stop monitoring")
+        item = movie()
+        if case.scenario == "movie-pg":
+            from release_recovery import post
+            checked = post(client, "/check-downloads", {})
+            for kind, command in checked["commands"].items():
+                client.wait_command(command, kind)
+            wait(lambda: not torrent(), "Native cleanup did not remove the delivered torrent")
+            moved = wrong / imported.parent.name
+            original_folder = imported.parent
+            original_folder.rename(moved)
+            # Leave the original title directory, as a file move does. Radarr
+            # intentionally skips missing-file reconciliation for an empty root.
+            original_folder.mkdir()
+            imported = moved / imported.name
+            subtitles = [moved / p.name for p in subtitles]
+            scan = post(client, "/check-library", {"kind":"radarr","id":item["id"]})
+            client.wait_command(scan["commandId"])
+            wait(lambda: not movie()["hasFile"], "Radarr did not notice the user-moved file")
+            wait(delivered, "Moving the file reopened its delivery")
+            current = client.session.call("GET", "http://127.0.0.1:8099/diagnostics")
+            assert not any(r["kind"] == "radarr" and r["id"] == item["id"] for r in current["workflow"]), current
+            choices = post(client, "/recovery/releases", {"kind":"radarr","id":item["id"]})
+            assert choices["choices"] and choices["choices"][0].get("movedFilesRetained"), choices
+            plan = post(client, "/recovery/preview", {"kind":"radarr","id":item["id"],"downloadId":infohash})
+            assert not plan["libraryFiles"] and digest(imported) == checksum, plan
+            active["manualMovePreservedDelivery"] = True
+    assert not client.peer(download)["unknown"], client.peer(download)["unknown"]
     ledger.append(
         {
             "prefix": case.prefix,
@@ -385,6 +450,7 @@ def _movie_request(client, case, background, ledger_file, *, resume):
             "arrId": item["id"],
             "requestId": request["id"],
             "monitored": item["monitored"],
+            "manuallyMoved": active.get("manualMovePreservedDelivery", False),
             "since": active["wallStarted"],
             "infoHash": infohash,
             "kind": "radarr",

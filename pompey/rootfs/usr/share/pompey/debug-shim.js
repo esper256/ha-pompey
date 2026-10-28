@@ -11,6 +11,22 @@
   var base = mountPrefix();
   if (!base) return;
 
+  // Both the inline bootstrap and initialize.json assign this object. Keep
+  // the router's basename aligned with Ingress on both assignments; rewriting
+  // outbound requests alone leaves the initial page/deep links at Arr's 404.
+  var app = /\/radarr$/.test(base) ? "Radarr" : /\/sonarr$/.test(base) ? "Sonarr" : null;
+  if (app) {
+    var configuration;
+    Object.defineProperty(window, app, {
+      configurable: true,
+      get: function () { return configuration; },
+      set: function (value) {
+        configuration = value;
+        if (value && typeof value === "object") value.urlBase = base;
+      }
+    });
+  }
+
   function rewrite(url) {
     if (typeof url !== "string" || !url) return url;
     if (url.indexOf(base) === 0) return url;

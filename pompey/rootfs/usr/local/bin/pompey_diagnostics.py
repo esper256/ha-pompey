@@ -1,6 +1,8 @@
 """Diagnostic information from real service APIs; explicit searches never run on page load."""
 
 import time
+import json
+from pathlib import Path
 from urllib.parse import urlencode
 import pompey_common as api
 import pompey_state as state
@@ -47,6 +49,8 @@ def request_progress(request, title, queue, torrents):
         return "Available according to Seerr", "", messages
     if title["kind"] == "radarr" and title.get("hasFile"):
         return "Imported to library", "Check your media player if the title is not visible yet.", messages
+    if title["kind"] == "radarr" and title.get("delivered"):
+        return "Delivered", "Previously delivered to the library. Later file moves do not reopen this request.", messages
     if title["kind"] == "sonarr" and title.get("hasFile"):
         if media.get("status4k" if request.get("is4k") else "status") == 4:
             return "Partially available", "Review the requested seasons for episodes that are still missing.", messages
@@ -70,13 +74,42 @@ def download_evidence(torrent):
         "connectedSeeds": "num_seeds", "connectedPeers": "num_leechs",
         "reportedSeeds": "num_complete", "availability": "availability",
         "remainingBytes": "amount_left", "eta": "eta", "added": "added_on",
+        "category": "category", "path": "content_path", "size": "total_size",
+        "ratio": "ratio", "seedingSeconds": "seeding_time", "completed": "completion_on",
     }.items()}
+
+
+def completed_download(torrent, queued, policy):
+    """Explain retention without treating completion/category as proof of import."""
+    from media_policy import finished, seed_goal_reached, STOPPED, TRANSIENT
+    if not finished(torrent):
+        return None
+    category = torrent.get("category")
+    if category not in {"radarr", "sonarr", "prowlarr"}:
+        return "Completed · unmanaged", "This category is not managed by Pompey. No automatic removal is scheduled. Review it in qBittorrent."
+    if torrent.get("state") in TRANSIENT:
+        return "Checking completed files", "qBittorrent is checking or moving the files. Removal waits for this to finish."
+    if policy == "share_one_day" and "seeding_time" not in torrent:
+        return "Seeding time unavailable", "The downloader snapshot does not include elapsed seeding time. Maintenance checks the native torrent properties before deciding whether to stop it."
+    if not seed_goal_reached(torrent, policy):
+        target = "a 1:1 upload ratio" if policy == "share_to_ratio" else "24 hours of seeding"
+        return "Seeding target pending", f"Files are retained until {target}. Arr must also confirm import before removing the torrent."
+    if torrent.get("state") not in STOPPED:
+        return "Waiting to stop seeding", "The seeding target is met. Pompey stops this torrent on its next download check, normally within 30 seconds."
+    if queued and queued.get("trackedDownloadState") == "imported":
+        return "Imported · cleanup pending", "Arr reports this release imported and the torrent is stopped. Its next download check should remove the torrent and leftover download files."
+    if queued:
+        return "Waiting for import", "The torrent is complete and stopped. Arr has not confirmed import; files remain until import succeeds."
+    if category == "prowlarr":
+        return "Manual download retained", "Pompey submits matching manual downloads to Arr. Unmatched, rejected or ambiguous imports are retained; completion alone does not authorize removal."
+    return "Completed · import unconfirmed", "This torrent is stopped but absent from the observed Arr queue. Import and removal eligibility are unconfirmed. Use Check downloads; if it remains, review the native application rather than assuming it will be deleted."
 
 
 def workflow(sources, titles, queues, torrents, requested=()):
     """Explain Arr queues and missing monitored media, including non-Seerr work."""
     rows = []
     linked_hashes = set()
+    policy = api.after_download()
     for kind in ("radarr", "sonarr"):
         source = sources.get(kind, {})
         native_titles = {row["id"]: row for row in source.get("data", {}).get("titles", [])}
@@ -92,10 +125,10 @@ def workflow(sources, titles, queues, torrents, requested=()):
             if not owned and title:
                 if not title.get("monitored") and (kind, ident) not in requested:
                     continue
-                if kind == "radarr" and title.get("hasFile"):
+                if kind == "radarr" and (title.get("hasFile") or title.get("delivered")):
                     continue
                 stats = native.get("statistics") or {}
-                if kind == "sonarr" and (kind, ident) not in requested and stats.get("episodeCount", 0) <= stats.get("episodeFileCount", 0):
+                if kind == "sonarr" and all(type(stats.get(k)) is int for k in ("episodeCount", "episodeFileCount")) and stats["episodeCount"] <= stats["episodeFileCount"]:
                     continue  # No missing aired monitored episodes reported by Sonarr.
             for queued in owned or [None]:
                 token = str((queued or {}).get("downloadId", "")).lower()
@@ -103,17 +136,37 @@ def workflow(sources, titles, queues, torrents, requested=()):
                 if torrent:
                     linked_hashes.add(token)
                 phase, action, messages = request_progress({"status": 2}, title, [queued] if queued else [], torrents)
+                completion = completed_download(torrent, queued, policy) if torrent else None
+                if completion and phase != "Import needs attention":
+                    phase, action = completion
+                if not queued and kind == "radarr" and title and not title.get("hasFile"):
+                    if phase == "Waiting for a suitable release":
+                        phase = "Not in Radarr library"
+                    action = "Radarr reports no imported movie file in its library folder. If it already plays in Plex, check the folder below and use Check library. Plex availability does not establish that Radarr recognizes that file."
                 if not queued and kind == "radarr" and native.get("isAvailable") is False:
                     phase, action = "Not available yet", "Radarr is waiting for the configured release availability."
                 elif not queued and kind == "sonarr" and phase in {"Waiting for a suitable release", "Waiting for requested episodes"}:
-                    phase = "Missing episodes"
+                    stats = native.get("statistics") or {}
+                    if all(type(stats.get(k)) is int for k in ("episodeCount", "episodeFileCount")):
+                        missing = max(0, stats["episodeCount"] - stats["episodeFileCount"])
+                        phase = "Missing episodes"
+                        action = f"Sonarr reports {missing} missing aired, monitored episode(s) and {stats['episodeFileCount']} episode file(s). Existing episodes can be available in Plex while others are missing. Use Check library if files are already present."
+                    else:
+                        phase, action = "Episode status unavailable", "Sonarr did not report episode counts. Check its library before searching for another release."
                 if not title:
                     phase, action = "Unmatched download", "Arr has not matched this download to a library title."
                 observed = [source] + ([sources.get("qbittorrent", {})] if queued else [])
                 available = all(item.get("available") for item in observed)
+                episode = (queued or {}).get("episode") or {}
+                season = episode.get("seasonNumber")
+                number = episode.get("episodeNumber")
+                scope = f"S{season:02d}E{number:02d}" if type(season) is int and type(number) is int else None
                 rows.append({"kind": kind, "id": ident if title else None,
+                    "key": f"{kind}:download:{token}:queue:{queued.get('id', '')}" if token else f"{kind}:queue:{queued['id']}" if queued else f"{kind}:title:{ident}",
+                    "downloadId": token or None, "scope": scope,
                     "title": (title or {}).get("title") or (queued or {}).get("title", "Unmatched download"),
                     "release": (queued or {}).get("title"),
+                    "path": (title or {}).get("path"), "canCheckLibrary": bool(title and not queued),
                     "phase": phase if available else "Current progress unavailable", "lastKnownPhase": phase,
                     "nextAction": action if available else "Restore the application connection before taking action.",
                     "messages": messages, "download": download_evidence(torrent) if torrent else None,
@@ -123,11 +176,17 @@ def workflow(sources, titles, queues, torrents, requested=()):
         if token in linked_hashes:
             continue
         source = sources.get("qbittorrent", {})
+        observed = [source]
+        if torrent.get("category") in {"radarr", "sonarr"}:
+            observed.append(sources.get(torrent["category"], {}))
+        available = all(item.get("available") for item in observed)
+        phase, action = completed_download(torrent, None, policy) or ("Outside Arr queue", "No matching entry is visible in Arr's queue. This can be a manual grab or pending synchronization; files are retained.")
         rows.append({"kind": "qbittorrent", "id": None, "title": torrent.get("name", "Download"),
-            "phase": "Outside Arr queue" if source.get("available") else "Current progress unavailable",
-            "nextAction": "This may be a manual grab, seeding, or awaiting queue synchronization. Files are retained.",
-            "messages": [], "download": download_evidence(torrent), "available": source.get("available", False),
-            "updated": source.get("updated"), "attention": False})
+            "key": "qbittorrent:" + token, "downloadId": token,
+            "phase": phase if available else "Current progress unavailable", "lastKnownPhase": phase,
+            "nextAction": action,
+            "messages": [], "download": download_evidence(torrent), "available": available,
+            "updated": min((item.get("updated") or 0 for item in observed), default=0), "attention": phase in {"Completed · import unconfirmed", "Manual download retained", "Completed · unmanaged"}})
     return sorted(rows, key=lambda row: (not row["attention"], not bool(row["download"]), row["title"].lower()))
 
 
@@ -136,6 +195,8 @@ def snapshot():
     from request_policy import identity
 
     sources = observations(max_age=2)
+    from pompey_delivery import identity as delivery_identity
+    deliveries = state.load("deliveries").get("titles", {})
     result = {"updated": time.time(), "titles": [], "downloads": [], "requests": [], "attention": []}
     titles_by_identity = {}
     queues = {}
@@ -149,9 +210,14 @@ def snapshot():
         queue = data.get("queue", {})
         queues[kind] = queue.get("records", [])
         for row in data.get("titles", []):
+            receipts = deliveries.get(delivery_identity(kind, row), {}).get("receipts", {})
+            delivered = [r for r in receipts.values() if r.get("status") == "delivered"]
             title = {"kind": kind, "id": row["id"], "title": row.get("title", "Untitled"),
                      "monitored": row.get("monitored"), "path": row.get("path"),
+                     "fileId": (row.get("movieFile") or {}).get("id") if kind == "radarr" else None,
                      "hasFile": row.get("hasFile") if kind == "radarr" else (row.get("statistics") or {}).get("episodeFileCount", 0),
+                     "delivered": bool(delivered) if kind == "radarr" else len(delivered),
+                     "deliveryPath": delivered[-1].get("path") if delivered else None,
                      "lastSearch": state.load("search-" + kind + "-" + str(row["id"])),
                      "available": sources[kind].get("available", False), "updated": sources[kind].get("updated")}
             result["titles"].append(title)
@@ -193,13 +259,59 @@ def snapshot():
         result["attention"].append("Showing the 100 most recent requests. Open Seerr for the full history.")
     requested = {(row["kind"], row["arrId"]) for row in result["requests"]
                  if row["state"] == "Approved" and row["arrLinked"]
-                 and row["phase"] not in {"Available according to Seerr", "Imported to library"}}
+                 and row["phase"] not in {"Available according to Seerr", "Imported to library", "Delivered"}}
     result["workflow"] = workflow(sources, result["titles"], queues, torrents, requested)
     for request in result["requests"]:
         if request["state"] == "Approved" and not request["arrLinked"]:
-            result["workflow"].append({**request, "kind": "seerr", "id": None, "attention": True})
+            result["workflow"].append({**request, "key": "seerr:request:" + str(request["id"]), "kind": "seerr", "id": None, "attention": True})
+    from pompey_recovery import sequences
+    result["sequences"] = sequences()
     result["requestReview"] = state.load("requests").get("reviewRequired", "")
+    try:
+        health = json.loads((Path(api.ready_dir()) / "health.json").read_text())
+        job = health.get("jobs", {}).get("downloads", {})
+        result["maintenance"] = {"updated": health.get("updated"), "lastSuccess": job.get("lastSuccess"),
+            "running": job.get("running"), "error": job.get("error"), "policy": api.after_download()}
+    except (OSError, ValueError):
+        result["maintenance"] = {"policy": api.after_download()}
     return result
+
+
+def check_downloads():
+    from media_policy import maintain_downloads
+    from pompey_runtime import stack_lock
+    from pompey_recovery import api_for
+    with stack_lock(blocking=False):
+        require_storage()
+        maintain_downloads()
+        from pompey_delivery import reconcile
+        reconcile()
+        commands = {}
+        for kind in ("radarr", "sonarr"):
+            commands[kind] = api_for(kind)("POST", "/command", {"name": "RefreshMonitoredDownloads"})["id"]
+    return {"ok": True, "commands": commands,
+            "message": "Download policies checked. Radarr and Sonarr download checks submitted; import and cleanup continue in the background. Retained items show the remaining conditions below."}
+
+
+def require_storage():
+    path = Path(api.ready_dir()) / "storage.json"
+    if not path.exists() or json.loads(path.read_text()).get("ok") is not True:
+        raise ValueError("Storage must be healthy before checking downloads or rescanning the library")
+
+
+def check_library(payload):
+    from pompey_runtime import stack_lock
+    from pompey_recovery import api_for
+    kind, ident = payload.get("kind"), payload.get("id")
+    if kind not in {"radarr", "sonarr"} or type(ident) is not int or ident <= 0:
+        raise ValueError("Choose an existing movie or series")
+    with stack_lock(blocking=False):
+        require_storage()
+        call = api_for(kind)
+        call("GET", ("/movie/" if kind == "radarr" else "/series/") + str(ident))
+        command = call("POST", "/command", {"name": "RescanMovie" if kind == "radarr" else "RescanSeries",
+                       "movieId" if kind == "radarr" else "seriesId": ident})
+    return {"ok": True, "commandId": command["id"], "message": "Library scan submitted. The application will check this title's configured folder for existing files. This does not search indexers or start a download."}
 
 
 def explain_search(kind, ident):
@@ -287,9 +399,16 @@ if __name__ == "__main__":
             result = explain_search(payload.get("kind"), payload.get("id"))
         elif action == "rebaseline":
             result = rebaseline()
+        elif action == "check-downloads":
+            result = check_downloads()
+        elif action == "check-library":
+            result = check_library(json.load(sys.stdin))
         else:
             raise ValueError("Unknown diagnostic action")
         print(json.dumps(result))
+    except BlockingIOError:
+        print(json.dumps({"error": "Maintenance is running. Try again shortly."}))
+        sys.exit(2)
     except Exception as exc:
         print(json.dumps({"error": str(exc)}))
         sys.exit(1)
