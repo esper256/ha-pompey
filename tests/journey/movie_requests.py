@@ -253,7 +253,8 @@ def _movie_request(client, case, background, ledger_file, *, resume):
         # keeps the download incomplete. Only product maintenance may reset it.
         client.qbit("torrents/setShareLimits", {"hashes": infohash, "ratioLimit": 1,
                                                 "seedingTimeLimit": 1440,
-                                                "inactiveSeedingTimeLimit": -1})
+                                                "inactiveSeedingTimeLimit": -1,
+                                                "shareLimitAction": "Stop", "shareLimitsMode": "MatchAny"})
         reconciled = wait(lambda: (t := torrent()) and t.get("ratio_limit") == 0
                           and t.get("seeding_time_limit") == -1 and t,
                           "Managed torrent retained an incompatible seeding goal")
@@ -266,6 +267,11 @@ def _movie_request(client, case, background, ledger_file, *, resume):
         lambda: (t := torrent()) and t["progress"] == 1,
         "Downloader did not verify the payload",
     )
+    if move_identity:
+        # Exercise the native move precondition before explicitly requesting
+        # an immediate Arr scan. Do not stop/resume the torrent from the test.
+        wait(lambda: (t := torrent()) and t["state"] in {"stoppedUP", "pausedUP"},
+               "Completed download did not stop for native move import")
     stamp("download-verified")
     client.refresh_downloads()
     item = wait(

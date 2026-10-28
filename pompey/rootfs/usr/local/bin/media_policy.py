@@ -60,10 +60,13 @@ def apply_managed_share_limits(items):
     hashes = [r["hash"] for r in items
               if r.get("category") in {"radarr", "sonarr", "prowlarr"} and r.get("hash")
               and (r.get("ratio_limit") != 0 or r.get("seeding_time_limit") != -1
-                   or r.get("inactive_seeding_time_limit") != -1)]
+                   or r.get("inactive_seeding_time_limit") != -1
+                   or r.get("share_limit_action") != "Stop"
+                   or r.get("share_limits_mode") != "MatchAny")]
     if hashes:
         data = urllib.parse.urlencode({"hashes": "|".join(hashes), "ratioLimit": 0,
-                                      "seedingTimeLimit": -1, "inactiveSeedingTimeLimit": -1}).encode()
+                                      "seedingTimeLimit": -1, "inactiveSeedingTimeLimit": -1,
+                                      "shareLimitAction": "Stop", "shareLimitsMode": "MatchAny"}).encode()
         api.http("POST", api.qbit_url() + "/api/v2/torrents/setShareLimits", data)
 
 

@@ -591,9 +591,12 @@ class SharingBoundaries(unittest.TestCase):
             self.assertEqual(http.call_count, 1)
             self.assertIn(b"hashes=owned&ratioLimit=0", http.call_args.args[2])
             self.assertNotIn(b"unknown", http.call_args.args[2])
+            self.assertIn(b"shareLimitAction=Stop", http.call_args.args[2])
+            self.assertIn(b"shareLimitsMode=MatchAny", http.call_args.args[2])
         with patch.object(api, "http") as http:
             media.apply_managed_share_limits([{**managed, "ratio_limit": 0, "seeding_time_limit": -1,
-                                               "inactive_seeding_time_limit": -1}])
+                                               "inactive_seeding_time_limit": -1, "share_limit_action": "Stop",
+                                               "share_limits_mode": "MatchAny"}])
             http.assert_not_called()
 
     def test_only_complete_downloads_can_reach_a_goal(self):

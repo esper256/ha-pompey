@@ -143,6 +143,11 @@ def tv_request(client, case, background, ledger_file):
     client.wait(
         lambda: (t := torrent()) and t["progress"] == 1, "TV payload was not verified"
     )
+    if move_identity:
+        # Exercise the native move precondition before explicitly requesting
+        # an immediate Arr scan. Do not stop/resume the torrent from the test.
+        client.wait(lambda: (t := torrent()) and t["state"] in {"stoppedUP", "pausedUP"},
+               "Completed download did not stop for native move import")
     command = api("POST", "/command", {"name": "RefreshMonitoredDownloads"})
     client.wait_command(command["id"], "sonarr")
     files = client.wait(
