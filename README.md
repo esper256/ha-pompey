@@ -34,7 +34,7 @@ The default directory names are retained for compatibility. You can configure di
 
 Arr manages imports and upgrades. Replaced media files are retained in `downloads/recycle` for seven days. Point your media player or server at the library directories and exclude `downloads`.
 
-**Stop sharing** stops completed torrents so Arr can move media into the library. **Share to ratio** seeds until the upload/download ratio reaches 1.0. **Share one day** seeds for 24 hours. Continued seeding uses hardlinks where supported, otherwise it requires an additional file copy. Arr removes completed torrents after import and the selected seeding target. Stalled transfers do not count toward the active download limit.
+Completed managed torrents always stop sharing so Arr can move media into the library. Legacy ratio/day seeding settings no longer change this policy. Pompey reconciles managed per-torrent limits as well as the downloader default; unknown categories are left alone. Hardlink imports are disabled. Keep downloads and libraries on the same mounted filesystem: native renames avoid copying media bytes, including on compatible CIFS shares. Cross-filesystem moves and explicit manual-copy imports may still copy into a final filename; this release does not guarantee atomic publication. Arr removes completed torrents after successful import. Stalled transfers do not count toward the active download limit.
 
 Pompey checks download policies about every 30 seconds. Arr also checks imports and cleanup automatically: each retained torrent shows its seeding, import or ownership condition. Unknown downloads are not deleted simply because they are complete.
 
@@ -74,7 +74,7 @@ A later candidate search is not the original automatic selection list, and a cur
 
 Opening authenticated Ingress records the actual access hostname for Prowlarr's Allowed Hosts setting. Loopback, local interface addresses and explicit user entries remain allowed; no Supervisor subnet is hardcoded and no unrestricted wildcard is added. Open Ingress using a new hostname/IP before using that address for Prowlarr. Native host-filter changes may require an application restart to take effect.
 
-Config saves seeding policy, simultaneous download limits and the Anime dual-audio preference. The controller applies saved preferences on its next successful configuration pass, normally within about a minute. The UI distinguishes saved from applied; changes to profiles can take longer if upstream services are unavailable. Existing HA behavior options are accepted until the first Ingress save, then Ingress preferences take precedence. Media paths and network access remain in Home Assistant’s app configuration.
+Config saves simultaneous download limits and the Anime dual-audio preference. The controller applies saved preferences on its next successful configuration pass, normally within about a minute. The UI distinguishes saved from applied; changes to profiles can take longer if upstream services are unavailable. Existing HA behavior options are accepted until the first Ingress save, then Ingress preferences take precedence. Media paths and network access remain in Home Assistant’s app configuration.
 
 Configuration, requests, download policies and library routing run as separate jobs with bounded execution and retry backoff. They continue retrying after an outage.
 

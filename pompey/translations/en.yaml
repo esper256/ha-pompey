@@ -37,9 +37,8 @@ configuration:
   after_download:
     name: Legacy seeding policy
     description: >-
-      Use Config in the Pompey sidebar to manage seeding. This existing value
-      is retained only until preferences are first saved there; subsequent
-      changes to this Home Assistant option have no effect.
+      Completed torrents now always stop sharing to favor native file moves.
+      This legacy option is accepted for compatibility but has no effect.
   simultaneous_downloads:
     name: Legacy active download limit
     description: >-

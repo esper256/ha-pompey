@@ -276,7 +276,7 @@ def ensure_media_management(base: str, api_key: str, kind: str) -> None:
     """Configure native imports, free-space checks and replacement-file recovery.
 
     Network shares can report unavailable free-space information. Stop-sharing
-    imports use moves; continued seeding enables hardlinks with copy fallback.
+    imports favor moves on the same filesystem; hardlinks are not required.
     Required configuration failures propagate to the controller.
     """
     try:
@@ -291,7 +291,7 @@ def ensure_media_management(base: str, api_key: str, kind: str) -> None:
         "enableCompletedDownloadHandling": True,
         "skipFreeSpaceCheckWhenImporting": True,
         "minimumFreeSpaceWhenImporting": MIN_IMPORT_FREE_SPACE,
-        "copyUsingHardlinks": after_download() != "stop_sharing",
+        "copyUsingHardlinks": False,
         "importExtraFiles": True,
         "extraFileExtensions": "srt",
     }

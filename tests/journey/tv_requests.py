@@ -6,7 +6,7 @@ import time
 import urllib.parse
 from catalogue import offers
 from applications import tunnel_bytes
-from support import digest, save_json
+from support import download_file_identity, assert_native_move, digest, save_json
 
 
 def tv_request(client, case, background, ledger_file):
@@ -134,6 +134,11 @@ def tv_request(client, case, background, ledger_file):
         }, workflow_rows
         assert len({row["key"] for row in workflow_rows}) == len(workflow_rows), workflow_rows
         active["workflowEpisodeVerified"] = True
+    move_identity = None
+    if case.scenario == "single-episode" and os.environ.get("POMPEY_TEST_BASELINE") != "1":
+        move_identity = download_file_identity(torrent())
+        settings = api("GET", "/config/mediamanagement")
+        assert settings["copyUsingHardlinks"] is False, settings
     client.release(selected)
     client.wait(
         lambda: (t := torrent()) and t["progress"] == 1, "TV payload was not verified"
@@ -179,6 +184,9 @@ def tv_request(client, case, background, ledger_file):
             file["mediaInfo"]
         )
         target = next(p for p in imported if p.name == Path(file["relativePath"]).name)
+        if move_identity:
+            assert_native_move(move_identity, target)
+            active["nativeMoveVerified"] = move_identity
         source_file = (
             source
             / f"{case.prefix}.S{episode['seasonNumber']:02d}E{episode['episodeNumber']:02d}.{selected.quality}.WEB-DL.mkv"

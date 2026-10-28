@@ -51,6 +51,22 @@ def contained(path, root):
         return False
 
 
+def apply_managed_share_limits(items):
+    """Override old/indexer-specific seeding goals without touching unknown torrents.
+
+    Native Arr requires the torrent's seed goal to be met before choosing Move.
+    Stopping a torrent alone does not satisfy a conflicting per-torrent goal.
+    """
+    hashes = [r["hash"] for r in items
+              if r.get("category") in {"radarr", "sonarr", "prowlarr"} and r.get("hash")
+              and (r.get("ratio_limit") != 0 or r.get("seeding_time_limit") != -1
+                   or r.get("inactive_seeding_time_limit") != -1)]
+    if hashes:
+        data = urllib.parse.urlencode({"hashes": "|".join(hashes), "ratioLimit": 0,
+                                      "seedingTimeLimit": -1, "inactiveSeedingTimeLimit": -1}).encode()
+        api.http("POST", api.qbit_url() + "/api/v2/torrents/setShareLimits", data)
+
+
 def stop_at_goal(items):
     hashes = [
         r["hash"]
@@ -266,7 +282,7 @@ def maintain_downloads():
     payload = api.http("GET", api.qbit_url() + "/api/v2/torrents/info")
     if not isinstance(payload, list):
         raise RuntimeError("Download client returned an invalid torrent list")
-    seed_times(payload)
+    apply_managed_share_limits(payload)
     stop_at_goal(payload)
     # Fetch again: stop acknowledgement does not mean file handles are closed.
     payload = api.http("GET", api.qbit_url() + "/api/v2/torrents/info")

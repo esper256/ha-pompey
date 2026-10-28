@@ -210,7 +210,7 @@ class IngressPreferences(unittest.TestCase):
     def test_invalid_write_preserves_prior_policy_and_pending_means_not_applied(self):
         import pompey_preferences as preferences
         with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, POMPEY_DATA=tmp):
-            original = {**preferences.DEFAULTS, "after_download": "share_one_day"}
+            original = {**preferences.DEFAULTS, "simultaneous_downloads": 3}
             state.save("preferences", {"values": original})
             preferences.applied()
             self.assertFalse(preferences.status()["pending"])
@@ -233,7 +233,7 @@ class IngressPreferences(unittest.TestCase):
         from recyclarr_sync import render_config
         with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, POMPEY_DATA=tmp,
                 AFTER_DOWNLOAD="share_to_ratio", SIMULTANEOUS_DOWNLOADS="3"):
-            self.assertEqual(preferences.current()["after_download"], "share_to_ratio")
+            self.assertEqual(preferences.current()["after_download"], "stop_sharing")
             state.save("preferences", {"values": {**preferences.DEFAULTS, "prefer_dual_audio": False}})
             self.assertEqual(api.after_download(), "stop_sharing")
             self.assertIn("score: 0", render_config("r", "key", "s", "key"))
@@ -575,6 +575,27 @@ class RequestSafety(unittest.TestCase):
 
 
 class SharingBoundaries(unittest.TestCase):
+    def test_stored_seeding_policy_normalizes_without_losing_other_preferences(self):
+        import pompey_preferences as preferences
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, POMPEY_DATA=tmp):
+            old = {**preferences.DEFAULTS, "after_download": "share_one_day", "simultaneous_downloads": 3}
+            state.save("preferences", {"values": old})
+            state.save("preferences-applied", {"values": old})
+            self.assertEqual(preferences.current(), {**old, "after_download": "stop_sharing"})
+            self.assertTrue(preferences.status()["pending"])
+
+    def test_share_limit_overrides_only_apply_to_managed_torrents(self):
+        managed = {"hash": "owned", "category": "sonarr", "ratio_limit": 1}
+        with patch.object(api, "http") as http:
+            media.apply_managed_share_limits([managed, {**managed, "hash": "unknown", "category": "personal"}])
+            self.assertEqual(http.call_count, 1)
+            self.assertIn(b"hashes=owned&ratioLimit=0", http.call_args.args[2])
+            self.assertNotIn(b"unknown", http.call_args.args[2])
+        with patch.object(api, "http") as http:
+            media.apply_managed_share_limits([{**managed, "ratio_limit": 0, "seeding_time_limit": -1,
+                                               "inactive_seeding_time_limit": -1}])
+            http.assert_not_called()
+
     def test_only_complete_downloads_can_reach_a_goal(self):
         complete = {"progress": 1, "amount_left": 0, "ratio": 1, "seeding_time": 86400}
         for policy in ["stop_sharing", "share_to_ratio", "share_one_day"]:

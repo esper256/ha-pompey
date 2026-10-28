@@ -60,7 +60,7 @@
       </section>
       <section id="config-panel" class="dashboard-view" role="tabpanel" aria-labelledby="config-tab" tabindex="0" hidden>
         <form id="preferences" class="panel settings-panel" aria-label="Download preferences">
-          <div class="setting"><label for="seeding-policy">After downloading</label><div><select id="seeding-policy" name="after_download" aria-describedby="seeding-help"><option value="stop_sharing">Stop seeding when complete</option><option value="share_to_ratio">Seed to a 1:1 ratio</option><option value="share_one_day">Seed for one day</option></select><p id="seeding-help" class="field-help"></p></div></div>
+          <p class="field-help">Completed downloads stop sharing so Arr can move files into the library. Keep downloads and libraries on the same mounted filesystem to avoid copies.</p>
           <div class="setting"><label for="download-slots">Simultaneous downloads</label><div><input id="download-slots" name="simultaneous_downloads" type="number" min="1" max="20" required value="8" aria-describedby="slots-help"><p id="slots-help" class="field-help">Slow or stalled torrents do not occupy a slot.</p></div></div>
           <div class="setting"><label for="dual-audio">Prefer dual audio for anime</label><div><input id="dual-audio" name="prefer_dual_audio" type="checkbox" aria-describedby="audio-help"><p id="audio-help" class="field-help">Prefer releases with original and dubbed audio.</p></div></div>
           <div class="form-actions"><button type="submit" id="save-preferences" class="primary" disabled>Save changes</button><p id="preferences-result" role="status"></p></div>

@@ -281,3 +281,5 @@ After one explicit development-tool preparation, the default `bash tests/run.sh`
 ## Storage interruption safety
 
 Fast safety checks distinguish confirmed mount replacement from I/O failures and timeouts. Only mount replacement stops services; failed probes suspend new Pompey maintenance and recovery does not restart applications that were never held. The existing release storage scenario continues to cover replacement of the mounted filesystem. This is not yet evidence of atomic media publication: native copy fallbacks and interruption during an import still require an Arr transfer-boundary change and a real-application regression scenario.
+
+The 0.6.3 movie-pg and single-episode journeys capture device/inode identity before releasing the incomplete torrent, then require that identity at the final library path with one link and no original download path. Existing digest, subtitle, cleanup and background-preservation checks remain. This proves native media moves on the integration filesystem, not NAS-specific atomicity or interrupted-copy safety. Released-image seeding is exempt from this new candidate-only assertion.
