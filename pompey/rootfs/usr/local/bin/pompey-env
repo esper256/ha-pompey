@@ -33,9 +33,6 @@ if [[ -f /data/options.json ]]; then
   : "${NAT_PMP_GATEWAY:=$(pompey_option nat_pmp_gateway)}"
   : "${AFTER_DOWNLOAD:=$(pompey_option after_download)}"
   : "${SIMULTANEOUS_DOWNLOADS:=$(pompey_option simultaneous_downloads)}"
-  if [[ "$(pompey_option debug)" == true ]]; then
-    : "${POMPEY_DEBUG:=1}"
-  fi
 fi
 NAT_PMP_GATEWAY="${NAT_PMP_GATEWAY:-}"
 [[ "${NAT_PMP_GATEWAY}" != "null" ]] || NAT_PMP_GATEWAY=""
@@ -47,8 +44,7 @@ MEDIA_TV="${MEDIA_TV:-TV/Not Kid Friendly}"
 MEDIA_TV_KID="${MEDIA_TV_KID:-TV/Kid Friendly}"
 AFTER_DOWNLOAD="${AFTER_DOWNLOAD:-stop_sharing}"
 SIMULTANEOUS_DOWNLOADS="${SIMULTANEOUS_DOWNLOADS:-8}"
-POMPEY_DEBUG="${POMPEY_DEBUG:-0}"
-export MEDIA_ROOT MEDIA_MOVIES MEDIA_MOVIES_KID MEDIA_TV MEDIA_TV_KID AFTER_DOWNLOAD SIMULTANEOUS_DOWNLOADS POMPEY_DEBUG
+export MEDIA_ROOT MEDIA_MOVIES MEDIA_MOVIES_KID MEDIA_TV MEDIA_TV_KID AFTER_DOWNLOAD SIMULTANEOUS_DOWNLOADS
 
 python3 "$(command -v pompey_config.py)"
 

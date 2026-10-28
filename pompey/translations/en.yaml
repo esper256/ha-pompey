@@ -46,13 +46,6 @@ configuration:
       Use Config in the Pompey sidebar to manage download concurrency. This
       existing value is retained only until preferences are first saved
       there; subsequent changes to this Home Assistant option have no effect.
-  debug:
-    name: Advanced application interfaces
-    description: >-
-      Show links to the Radarr, Sonarr and qBittorrent web interfaces in
-      the Pompey sidebar. Access uses authenticated Home Assistant Ingress;
-      these interfaces are not published on the local network. Disabled by
-      default. Restart Pompey after changing this setting.
   nat_pmp_gateway:
     name: NAT-PMP gateway
     description: >-

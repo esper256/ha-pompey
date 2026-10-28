@@ -30,7 +30,6 @@ def default_status(*, search=False):
         "search": search,
         "search_port": int(os.environ.get("SEERR_PORT", "5055")),
         "sources_port": int(os.environ.get("PROWLARR_PORT", "9696")),
-        "debug": os.environ.get("POMPEY_DEBUG", "0") == "1",
         "steps": [
             {"id": name, "label": label, "state": "pending"}
             for name, label in [

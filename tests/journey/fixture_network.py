@@ -164,6 +164,9 @@ def control(action):
             (5055, "/api/v1/settings/public", 200),
             (9696, "/ping", 200),
             (8099, "/", 403),
+            (8099, "/debug/radarr/activity/queue", 403),
+            (8099, "/debug/sonarr/activity/queue", 403),
+            (8099, "/debug/qbittorrent/", 403),
         ]:
             connection = http.client.HTTPConnection(
                 "198.18.0.1", port, timeout=2,
@@ -174,7 +177,7 @@ def control(action):
                 response = connection.getresponse()
                 response.read()
                 assert response.status == expected, (port, response.status)
-                observed.append({"port": port, "status": response.status})
+                observed.append({"port": port, "path": path, "status": response.status})
             finally:
                 connection.close()
         print(json.dumps(observed), flush=True)

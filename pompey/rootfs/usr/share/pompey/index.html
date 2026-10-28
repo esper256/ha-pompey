@@ -10,10 +10,6 @@
   <main>
     <header class="app-header">
       <h1><span class="brand-mark" aria-hidden="true">P</span>Pompey</h1>
-      <div id="open-search" class="app-links" hidden>
-        <a id="open-search-btn" class="button primary" href="#" target="_blank" rel="noopener">Open Seerr <span aria-hidden="true">↗</span></a>
-        <a id="open-sources-btn" class="button" href="#" target="_blank" rel="noopener">Manage indexers <span aria-hidden="true">↗</span></a>
-      </div>
     </header>
     <div class="startup">
       <div class="bar" aria-hidden="true"><span id="fill"></span></div>
@@ -28,39 +24,39 @@
     </div>
     <p class="error global-alert" id="err" role="status" hidden></p>
     <div id="dashboard" hidden>
-      <nav id="dashboard-tabs" class="dashboard-tabs" role="tablist" aria-label="Pompey sections">
+      <div class="tabs-row"><nav id="dashboard-tabs" class="dashboard-tabs" role="tablist" aria-label="Pompey sections">
         <button id="overview-tab" type="button" role="tab" aria-selected="true" aria-controls="overview-panel">Overview</button>
         <button id="requests-tab" type="button" role="tab" aria-selected="false" aria-controls="diagnostic-panel" tabindex="-1">Releases</button>
         <button id="config-tab" type="button" role="tab" aria-selected="false" aria-controls="config-panel" tabindex="-1">Config</button>
-      </nav>
+      </nav><details id="refresh-status" class="refresh-status"><summary aria-label="Updating application status"><span id="refresh-ring" aria-hidden="true"></span></summary><p id="refresh-message"></p></details></div>
       <aside id="storage-alert" class="notice danger" hidden role="status"><h2>Storage needs attention</h2><p id="storage-reason"></p><p id="storage-action"></p></aside>
       <section id="overview-panel" class="dashboard-view" role="tabpanel" aria-labelledby="overview-tab" tabindex="0">
         <section id="ecosystem" hidden aria-label="Application overview">
           <div id="ecosystem-counts" class="ecosystem-grid"></div>
           <p id="overview-note" class="notice" hidden></p>
         </section>
-        <aside id="setup-panel" class="notice" hidden aria-labelledby="setup-title"><div class="section-heading"><h2 id="setup-title">Connections need attention</h2><button id="setup-recheck" type="button">Check again</button></div><table id="setup-checks" aria-label="Connection checks"></table><p id="setup-note"></p></aside>
+        <aside id="setup-panel" class="notice" hidden aria-labelledby="setup-title"><div class="section-heading"><h2 id="setup-title">Connections</h2></div><table id="setup-checks" aria-label="Connection checks"></table><p id="setup-note"></p></aside>
         <section id="vpn-bw" class="panel" hidden aria-label="VPN connection and traffic">
           <div class="section-heading vpn-heading"><h2>VPN <span id="vpn-iface" class="connection-state">Connected</span></h2><span id="vpn-axis" class="muted">Measuring speed…</span></div>
           <svg id="vpn-graph" viewBox="0 0 320 68" preserveAspectRatio="none" aria-hidden="true"><path id="vpn-down-fill" fill="rgba(212,175,55,0.10)"></path><path id="vpn-down-line" fill="none" stroke="#d4af37" stroke-width="1.6" vector-effect="non-scaling-stroke"></path><path id="vpn-up-line" fill="none" stroke="#8aa0b4" stroke-width="1.4" vector-effect="non-scaling-stroke"></path></svg>
           <div class="vpn-footer"><div class="vpn-rates"><span class="down"><span aria-hidden="true">↓</span> <strong id="vpn-down-rate" aria-label="Download speed">—</strong></span><span class="up"><span aria-hidden="true">↑</span> <strong id="vpn-up-rate" aria-label="Upload speed">—</strong></span></div><div class="vpn-totals"><span id="vpn-down-total">0 B received</span> · <span id="vpn-up-total">0 B sent</span><small>Since tunnel started</small></div></div>
           <p id="vpn-unavailable" class="notice" hidden></p>
         </section>
-        <section class="panel" aria-labelledby="applications-title"><div class="section-heading"><h2 id="applications-title">Applications</h2><div class="version-meta"><span id="bundle-version">Pompey</span><a href="https://github.com/esper256/ha-pompey/releases" target="_blank" rel="noopener">Release notes ↗</a></div></div><div id="application-versions" class="version-list"></div></section>
+
       </section>
       <section id="diagnostic-panel" class="dashboard-view" role="tabpanel" aria-labelledby="requests-tab" tabindex="0" hidden>
         <div class="requests-toolbar">
           <label class="search-field"><span class="visually-hidden">Find a title</span><input id="request-filter" type="search" placeholder="Find a title…" autocomplete="off"></label>
           <div class="request-filters" role="group" aria-label="Show releases"><button id="filter-all" type="button" aria-pressed="true">In progress <span id="count-all" class="count">0</span></button><button id="filter-attention" type="button" aria-pressed="false">Needs attention <span id="count-attention" class="count">0</span></button><button id="filter-imported" type="button" aria-pressed="false">Delivered <span id="count-imported" class="count">0</span></button></div>
-          <button id="collect-report" type="button">Diagnostics</button>
-          <button id="inspect" type="button">Refresh</button>
         </div>
-        <div class="download-maintenance"><p id="download-maintenance" class="field-help"></p><button id="check-downloads" type="button">Check downloads</button></div>
-        <p id="download-check-result" class="field-help" role="status" hidden></p>
         <p id="request-status" class="muted request-status" role="status"></p>
         <div id="request-notices"></div>
         <div id="diagnostics"></div>
-        <section id="sequence-history" class="panel" hidden aria-labelledby="sequence-heading"><h2 id="sequence-heading">Recovery history</h2><div id="sequence-list"></div></section>
+        <section id="sequence-history" class="panel recovery-panel" aria-labelledby="sequence-heading">
+          <div class="section-heading"><div><h2 id="sequence-heading">Recovery</h2><p id="sequence-summary" class="field-help">Release choices and replacement outcomes for troubleshooting.</p></div><button id="collect-report" type="button">Diagnostics</button></div>
+          <details id="recent-recoveries"><summary>Recent retries</summary><div id="sequence-list"></div><p id="sequence-limit" class="field-help"></p></details>
+        </section>
+
       </section>
       <section id="config-panel" class="dashboard-view" role="tabpanel" aria-labelledby="config-tab" tabindex="0" hidden>
         <form id="preferences" class="panel settings-panel" aria-label="Download preferences">
@@ -70,7 +66,7 @@
           <div class="form-actions"><button type="submit" id="save-preferences" class="primary" disabled>Save changes</button><p id="preferences-result" role="status"></p></div>
         </form>
 
-        <section id="debug-consoles" class="panel" hidden aria-labelledby="advanced-heading"><h2 id="advanced-heading">Advanced interfaces</h2><div class="actions"><a id="debug-radarr-btn" class="button" href="#" target="_blank" rel="noopener">Radarr ↗</a><a id="debug-sonarr-btn" class="button" href="#" target="_blank" rel="noopener">Sonarr ↗</a><a id="debug-qbit-btn" class="button" href="#" target="_blank" rel="noopener">qBittorrent ↗</a></div></section>
+        <section class="panel" aria-labelledby="applications-title"><div class="section-heading"><h2 id="applications-title">Applications</h2><div class="version-meta"><span id="bundle-version">Pompey</span><a href="https://github.com/esper256/ha-pompey/releases" target="_blank" rel="noopener">Release notes ↗</a></div></div><div id="application-versions" class="version-list"></div></section>
         <p class="environment-note">Media paths and network settings are configured in Home Assistant’s app settings.</p>
       </section>
     </div>
@@ -102,13 +98,6 @@
     const vpn = document.getElementById("vpn");
     const wg = document.getElementById("wg");
     const wgGo = document.getElementById("wg-go");
-    const openSearch = document.getElementById("open-search");
-    const openSearchBtn = document.getElementById("open-search-btn");
-    const openSourcesBtn = document.getElementById("open-sources-btn");
-    const debugConsoles = document.getElementById("debug-consoles");
-    const debugRadarrBtn = document.getElementById("debug-radarr-btn");
-    const debugSonarrBtn = document.getElementById("debug-sonarr-btn");
-    const debugQbitBtn = document.getElementById("debug-qbit-btn");
     const vpnBw = document.getElementById("vpn-bw");
     const vpnIface = document.getElementById("vpn-iface");
     const vpnDownRate = document.getElementById("vpn-down-rate");
@@ -127,6 +116,7 @@
     let tickBusy = false;
     let vpnLast = null;
     let sawDashboard = false;
+    let appAccess = {ready: false};
     let lastPorts = { search: 5055, sources: 9696 };
 
     function ingressBase() {
@@ -274,7 +264,6 @@
         data.search,
         data.search_port,
         data.sources_port,
-        data.debug,
         data.steps,
         dashboard,
       ]);
@@ -305,27 +294,8 @@
       });
       if (Number(data.search_port)) lastPorts.search = Number(data.search_port);
       if (Number(data.sources_port)) lastPorts.sources = Number(data.sources_port);
-      if (data.search && !showForm) {
-        const port = lastPorts.search;
-        const sourcesPort = lastPorts.sources;
-        const url = "http://" + location.hostname + ":" + port + "/";
-        const sourcesUrl = "http://" + location.hostname + ":" + sourcesPort + "/";
-        now.textContent = data.label || "Ready";
-        openSearch.hidden = false;
-        openSearchBtn.href = url;
-        openSourcesBtn.href = sourcesUrl;
-      } else {
-        openSearch.hidden = true;
-      }
-      if (data.debug) {
-        const root = ingressBase();
-        debugConsoles.hidden = false;
-        debugRadarrBtn.href = root + "debug/radarr/";
-        debugSonarrBtn.href = root + "debug/sonarr/";
-        debugQbitBtn.href = root + "debug/qbittorrent/";
-      } else {
-        debugConsoles.hidden = true;
-      }
+      appAccess = {ready: Boolean(data.search && !showForm)};
+      window.dispatchEvent(new Event("pompey-access"));
     }
 
     vpn.addEventListener("submit", async (event) => {

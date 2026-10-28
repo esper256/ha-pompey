@@ -2,6 +2,8 @@
 
 ## Fast development checks
 
+The native interface check opens Radarr/Sonarr queue pages and qBittorrent through the built Ingress proxy without a debug option, and rejects direct external requests to those same paths. The older released-image seed is exempt only from the new positive interface expectation; the upgraded candidate must pass it. Router/bootstrap checks include `/activity/queue` for both Arr apps. Dashboard layout, refresh failure/recovery and diagnostics access are inspected in a browser with synthetic observation responses; that preview is not application integration evidence.
+
 Fixture run IDs are encoded as letters inside media titles. Raw hex can accidentally contain native media tags such as `8b`, producing a legitimate ID-only match and manual-import requirement. The movie journey checks native title parsing before completion; fixture identity cannot depend on relaxing Arr's import confidence.
 
 Native completion and cached Ingress observations converge separately. The moved-file journey waits up to ten seconds for healthy dashboard observations showing durable delivery, the missing original file and no remaining workflow entry, after native cleanup and rescan already succeed. It retains the last selected-title observation on failure. This is a bounded user-visible outcome check, not a scenario retry or an exception to cumulative invariants. Harness self-tests capture their deliberate failure output while still verifying it and the saved error evidence, so passing checks do not print misleading standalone `FAIL` lines.
