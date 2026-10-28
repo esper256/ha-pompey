@@ -215,10 +215,17 @@ def offers(case):
     return rows
 
 
-def cases():
-    run = os.environ["POMPEY_TEST_RUN_ID"]
+def run_namespace(run):
     if not re.fullmatch("[a-f0-9]{10}", run):
         raise ValueError("Invalid test run identity")
+    # Hex can contain embedded media tags: Radarr strips the 8b from 8be,
+    # causing a title mismatch and a legitimate manual-import safeguard.
+    # This bijection preserves run isolation without putting digits in titles.
+    return "".join(chr(ord("A") + int(char, 16)) for char in run)
+
+
+def cases():
+    run = run_namespace(os.environ["POMPEY_TEST_RUN_ID"])
     count = int(os.environ.get("POMPEY_TEST_CASES", "12"))
     if not 1 <= count <= 100:
         raise ValueError("Choose between 1 and 100 scenarios")

@@ -232,6 +232,27 @@ class WorkflowEvidence(unittest.TestCase):
 
 
 class DeliveryReceipts(unittest.TestCase):
+    def test_upgrade_never_backfills_a_release_rejected_in_060(self):
+        import pompey_delivery as delivery
+        movie={"id":7,"tmdbId":42,"title":"Example","path":"/media/dlna/Movies/Kid Friendly/Example","hasFile":False,"monitored":True}
+        mutations=[]
+        def call(method,path,body=None):
+            if method == "PUT": mutations.append(body); return body
+            return [movie] if path == "/movie" else []
+        events=[{"eventType":"downloadFolderImported","downloadId":"a"*40,"data":{"importedPath":movie["path"]+"/old.mkv","fileId":"12"}}]
+        with tempfile.TemporaryDirectory() as root, patch.dict(os.environ,POMPEY_DATA=root), patch("pompey_recovery.api_for",return_value=call), patch.object(delivery,"recent_history",return_value=events):
+            state.save("release-sequence-old",{"kind":"radarr","identity":{"tmdbId":42},"attempts":[{"downloadId":"a"*40,"target":{"libraryFiles":[{"id":12}]}}]})
+            delivery.reconcile()
+            self.assertFalse(delivery.for_title("radarr",movie))
+            self.assertEqual(mutations,[])
+            saved=state.load("deliveries")
+            self.assertTrue(saved["rejectionsImported"])
+            # A partial native-removal failure must not turn the rejected file
+            # still on disk into new successful-delivery evidence either.
+            receipts={}
+            self.assertFalse(delivery.record_file(receipts,"movie",{"id":12},"old",excluded=saved["titles"]["radarr:42"]))
+            self.assertTrue(delivery.record_file(receipts,"movie",{"id":13},"new",excluded=saved["titles"]["radarr:42"]))
+
     def test_delivered_episode_stays_unmonitored_without_stopping_future_episodes(self):
         import pompey_delivery as delivery
         calls=[]

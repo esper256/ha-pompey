@@ -26,6 +26,18 @@ from fixture_network import DnsServer, PEER_IP
 from invariants import CommandHistory, Invariants, InvariantFailure
 
 
+class FixtureIdentity(unittest.TestCase):
+    def test_run_names_cannot_contain_embedded_bitrate_or_year_tokens(self):
+        from catalogue import cases
+        with patch.dict(os.environ, POMPEY_TEST_RUN_ID="f7ad38be50", POMPEY_TEST_CASES="16"):
+            first = cases()
+        with patch.dict(os.environ, POMPEY_TEST_RUN_ID="f7ad38be51", POMPEY_TEST_CASES="16"):
+            second = cases()
+        self.assertEqual(len({case.prefix for case in first}), 16)
+        self.assertTrue(set(case.prefix for case in first).isdisjoint(case.prefix for case in second))
+        self.assertTrue(all(case.prefix.removeprefix("Pompey").split("Case")[0].isalpha() for case in first))
+
+
 class CumulativeInvariantEvents(unittest.TestCase):
     def test_recovered_failures_and_cleared_notices_still_reject_checkpoint(self):
         for event in [
