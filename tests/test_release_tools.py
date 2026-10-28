@@ -5,12 +5,52 @@ import json
 from pathlib import Path
 import sys
 import unittest
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
 from promote_candidate import validate, validate_contents, validate_acceptance, validate_plan, validate_check_target, MANIFEST
 from release_baseline import choose, FALLBACK
 from release_metadata import next_patch
+
+
+class DependabotQueue(unittest.TestCase):
+    def test_privileged_queue_rejects_forks_people_drafts_and_unrelated_branches(self):
+        from dependabot_queue import eligible
+        pr={"state":"open","draft":False,"user":{"login":"dependabot[bot]"},
+            "base":{"ref":"main"},"head":{"repo":{"full_name":"esper256/ha-pompey"},"ref":"dependabot/docker/pompey/base"}}
+        self.assertTrue(eligible(pr))
+        for change in [{"draft":True},{"state":"closed"},{"user":{"login":"person"}},
+                       {"head":{"repo":{"full_name":"someone/fork"},"ref":"dependabot/docker/base"}},
+                       {"head":{"repo":{"full_name":"esper256/ha-pompey"},"ref":"codex/upstream-sonarr"}}]:
+            self.assertFalse(eligible({**pr,**change}))
+
+    def test_failed_acceptance_never_requests_rebase_or_merge(self):
+        import dependabot_queue as queue
+        pr={"state":"open","draft":False,"user":{"login":"dependabot[bot]"},
+            "base":{"ref":"main"},"head":{"sha":"head","repo":{"full_name":queue.REPO},"ref":"dependabot/docker/base"}}
+        with patch.object(queue,"api",side_effect=[pr,{"check_runs":[{"name":"CI required","status":"completed","conclusion":"failure"}]}]) as api, patch.object(queue.subprocess,"run") as merge:
+            queue.process(104)
+            self.assertEqual(api.call_count,2)
+            merge.assert_not_called()
+
+    def test_stale_branch_uses_bot_rebase_once_and_keeps_head_protection(self):
+        import dependabot_queue as queue
+        pr={"state":"open","draft":False,"user":{"login":"dependabot[bot]"},
+            "base":{"ref":"main"},"head":{"sha":"head","repo":{"full_name":queue.REPO},"ref":"dependabot/docker/base"}}
+        marker="<!-- pompey-dependabot-rebase:base -->"
+        for comments, writes in [([],1),([{"user":{"login":"github-actions[bot]"},"body":marker}],0)]:
+            responses=[pr,{"check_runs":[]},{"object":{"sha":"base"}},{"behind_by":1},comments]+([{}] if writes else [])
+            with patch.object(queue,"api",side_effect=responses) as api, patch.object(queue.subprocess,"run") as merge:
+                queue.process(104)
+                posts=[c for c in api.call_args_list if len(c.args)>1 and c.args[1]=="POST"]
+                self.assertEqual(len(posts),writes)
+                if posts:
+                    self.assertEqual(posts[0].args[2]["body"],"@dependabot rebase\n\n"+marker)
+                args=merge.call_args.args[0]
+                self.assertIn("--auto",args)
+                self.assertEqual(args[-2:],["--match-head-commit","head"])
+                self.assertNotIn("--admin",args)
 
 
 class PromotionPolicy(unittest.TestCase):

@@ -175,6 +175,8 @@ Required automated acceptance is the release gate. Dependency publication verifi
 
 ## PR completion
 
+Dependabot's Docker and GitHub Actions PRs enter protected auto-merge through `Dependabot auto-merge`. The privileged workflow checks out trusted main only, accepts same-repository PRs from the actual Dependabot account, verifies strict required protection, and never approves or bypasses CI. Behind branches receive one Dependabot rebase request per main revision, so Dependabot's own update triggers normal PR CI; a GITHUB_TOKEN branch update would suppress that event. Required-check failures remain for review. This maintenance also runs after successful Dependabot validation and main updates so sequential merges do not leave the remaining branches stale. Vendored application release candidates retain their separate full-release/upgrade gate.
+
 Validate locally, push and take at most one non-waiting CI snapshot. Report passed, failed and pending checks accurately, then end the turn. Do not poll or wait for CI unless the user explicitly asks. `CI required` remains the stable aggregate branch-protection check. Candidate discovery is separate from acceptance and promotion.
 
 ## Network fault check
