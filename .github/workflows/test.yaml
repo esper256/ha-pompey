@@ -107,7 +107,7 @@ jobs:
           daemon-config: |
             {"features":{"containerd-snapshotter":true}}
       - name: Restore build layers
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: /tmp/pompey-build-cache
           key: pompey-build-${{ runner.os }}-${{ hashFiles('pompey/Dockerfile', 'pompey/vendor_bundle.py', 'pompey/rootfs/usr/share/pompey/engines.json', 'tests/journey/Dockerfile') }}
