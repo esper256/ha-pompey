@@ -88,7 +88,9 @@ def report():
         except OSError as exc:
             import errno
             reason = {errno.ENOSPC: "Storage is full.", errno.EROFS: "Storage is read-only.", errno.EACCES: "Storage access was denied.", errno.EDQUOT: "Storage quota is exhausted."}.get(exc.errno, "Storage could not be accessed.")
-            return {"ok": False, "path": folder, "reason": reason, "updated": time.time()}
+            return {"ok": False, "path": folder, "reason": reason,
+                    "detail": f"{exc.strerror or 'I/O error'} (errno={exc.errno})",
+                    "updated": time.time()}
     return {"ok": True, "updated": time.time()}
 
 

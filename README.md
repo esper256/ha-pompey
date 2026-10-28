@@ -38,6 +38,8 @@ Arr manages imports and upgrades. Replaced media files are retained in `download
 
 Pompey checks download policies about every 30 seconds. Arr also checks imports and cleanup automatically: each retained torrent shows its seeding, import or ownership condition. Unknown downloads are not deleted simply because they are complete.
 
+If storage checks fail, Pompey pauses qBittorrent, Radarr and Sonarr to protect media and restarts the held applications when checks pass. Home Assistant Logs records the pause reason, the affected path when known, and recovery. A check exceeding eight seconds is identified separately from a filesystem error; repeated identical failed checks do not flood the log.
+
 Successful delivery is durable. Once an imported movie or episode reaches a configured final library, Pompey records delivery and stops its automatic monitoring. Moving or deleting it later does not reopen the work or cause another download. Future TV episodes remain monitored. Seerr continues to show current media-server availability; Pompey does not duplicate that catalogue. **Try another** explicitly reopens the selected content for replacement. Existing successful native imports into final libraries can also establish delivery; incomplete history and staging imports cannot. This policy means automatic quality upgrades stop after delivery, including for Max.
 
 Prowlarr's **Grab** action sends downloads to `downloads/manual`. Pompey submits completed, stopped downloads to Arr only when Arr accepts the match. Unmatched files, rejected upgrades and ambiguous import attempts remain available for review through the application interfaces. Downloads can originate independently of Seerr requests.

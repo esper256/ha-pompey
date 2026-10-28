@@ -24,6 +24,60 @@ from pompey_controller import Job, dispatch
 from concurrent.futures import Future
 
 
+class StorageInterruptionEvidence(unittest.TestCase):
+    def test_outage_and_recovery_are_logged_without_repeated_probe_spam(self):
+        from contextlib import nullcontext
+        from types import SimpleNamespace
+        from storage_guard import StorageGuard
+        with tempfile.TemporaryDirectory() as folder:
+            ready = Path(folder)
+            (ready / "storage.json").write_text(json.dumps({"ok": True, "phase": "ready"}))
+            guard = StorageGuard(ready)
+            failure = {"ok": False, "path": "/media/share/downloads", "reason": "Storage could not be accessed.",
+                       "detail": "Input/output error (errno=5)"}
+
+            def run(args, **kwargs):
+                return SimpleNamespace(stdout=json.dumps(failure if args[-1] == "report" else {}))
+
+            with patch("storage_guard.subprocess.run", side_effect=run) as commands, \
+                 patch("storage_guard.subprocess.check_output", return_value="true"), \
+                 patch("storage_guard.stack_lock", side_effect=lambda: nullcontext()), \
+                 patch("storage_guard.emit") as log:
+                guard.check()
+                guard.check()
+                self.assertTrue(guard.blocked)
+                self.assertEqual(log.call_count, 1)
+                self.assertIn("/media/share/downloads", log.call_args.args[1])
+                self.assertIn("errno=5", log.call_args.args[1])
+                self.assertEqual(sum(c.args[0][0:2] == ["s6-svc", "-d"] for c in commands.call_args_list), 3)
+                failure = {"ok": True}
+                guard.check()
+                guard.check()
+                self.assertFalse(guard.blocked)
+                self.assertEqual(log.call_count, 2)
+                self.assertIn("restarting held applications: qbittorrent, radarr, sonarr", log.call_args.args[1])
+                self.assertEqual(sum(c.args[0][0:2] == ["s6-svc", "-u"] for c in commands.call_args_list), 3)
+
+    def test_timed_out_probe_is_distinguishable_from_a_permission_failure(self):
+        from contextlib import nullcontext
+        import subprocess
+        from storage_guard import StorageGuard
+        with tempfile.TemporaryDirectory() as folder:
+            guard = StorageGuard(Path(folder))
+
+            def run(args, **kwargs):
+                if args[-1] == "report":
+                    raise subprocess.TimeoutExpired(args, 8)
+
+            with patch("storage_guard.subprocess.run", side_effect=run), \
+                 patch("storage_guard.subprocess.check_output", return_value="false"), \
+                 patch("storage_guard.stack_lock", side_effect=lambda: nullcontext()), \
+                 patch("storage_guard.emit") as log:
+                guard.check()
+                self.assertTrue(guard.blocked)
+                self.assertIn("exceeded 8 seconds", log.call_args.args[1])
+
+
 class SupportLogEvidence(unittest.TestCase):
 
     def test_report_endpoint_preserves_raw_text_and_disables_http_caching(self):
