@@ -48,6 +48,16 @@ def execute(job):
     if job.exclusive:
         try:
             with stack_lock(blocking=False):
+                if job.name in {"configuration", "downloads"}:
+                    # One bounded probe, never a readiness loop under the lock.
+                    # Checking here serializes with planned downloader stops;
+                    # returning releases the lock for its startup import gate.
+                    try:
+                        with urllib.request.urlopen(HEALTH["qbittorrent"], timeout=1):
+                            pass
+                    except OSError:
+                        job.phase = "waiting"
+                        return False
                 job.phase = "running"
                 job.started = time.time()
                 run_process(job.args, job.timeout)

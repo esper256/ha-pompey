@@ -225,6 +225,7 @@ def configure(client, restored):
             lambda: call("GET", url, key=client.secrets.get(name.lower() + "_api_key")),
             name + " did not start",
         )
+    wait(lambda: client.qbit("app/preferences"), "qBittorrent did not start after the native import gate")
     client.qbit(
         "app/setPreferences",
         {

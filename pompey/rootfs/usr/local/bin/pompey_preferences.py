@@ -20,7 +20,8 @@ def validate(values):
         raise ValueError("Simultaneous downloads must be between 1 and 20")
     if type(values["prefer_dual_audio"]) is not bool:
         raise ValueError("Dual-audio preference must be enabled or disabled")
-    return dict(values)
+    # Retain the legacy key for stored/HA options; imports now always favor moves.
+    return {**values, "after_download": "stop_sharing"}
 
 
 def current():

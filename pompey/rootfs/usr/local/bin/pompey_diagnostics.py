@@ -26,7 +26,7 @@ def request_progress(request, title, queue, torrents):
     if not title:
         return "Waiting for Arr", "Check the Seerr application connections.", messages
     if messages and any(row.get("trackedDownloadStatus") in {"warning", "error"} for row in queue):
-        return "Import needs attention", "Resolve the reported import problem; Arr will retry automatically.", messages
+        return "Import needs attention", "Review the reported problem and file matches in the native importer.", messages
     for row in queue:
         torrent = torrents.get(str(row.get("downloadId", "")).lower(), {})
         native = torrent.get("state", "")
@@ -110,6 +110,7 @@ def workflow(sources, titles, queues, torrents, requested=()):
     rows = []
     linked_hashes = set()
     policy = api.after_download()
+    imports = state.load("download-imports")
     for kind in ("radarr", "sonarr"):
         source = sources.get(kind, {})
         native_titles = {row["id"]: row for row in source.get("data", {}).get("titles", [])}
@@ -181,12 +182,19 @@ def workflow(sources, titles, queues, torrents, requested=()):
             observed.append(sources.get(torrent["category"], {}))
         available = all(item.get("available") for item in observed)
         phase, action = completed_download(torrent, None, policy) or ("Outside Arr queue", "No matching entry is visible in Arr's queue. This can be a manual grab or pending synchronization; files are retained.")
-        rows.append({"kind": "qbittorrent", "id": None, "title": torrent.get("name", "Download"),
+        receipt = imports.get(token, {})
+        managed = receipt.get("kind") in {"radarr", "sonarr"} and receipt.get("kind") == torrent.get("category")
+        if managed:
+            phase = "Import needs attention" if receipt.get("phase") in {"review", "submitting"} else "Waiting for import"
+            action = ("The native import command has finished or its result is uncertain, but this download remains. Open Review import, choose Manual Import and select the download location shown below. Review file and episode matches before importing; completion alone does not authorize deletion."
+                      if phase == "Import needs attention" else "Pompey submitted this complete, stopped download to Arr. Native import and cleanup are pending.")
+        rows.append({"kind": receipt["kind"] if managed else "qbittorrent", "id": receipt.get("titleId") if managed else None, "title": torrent.get("name", "Download"),
+            "manualImport": managed,
             "key": "qbittorrent:" + token, "downloadId": token,
             "phase": phase if available else "Current progress unavailable", "lastKnownPhase": phase,
             "nextAction": action,
-            "messages": [], "download": download_evidence(torrent), "available": available,
-            "updated": min((item.get("updated") or 0 for item in observed), default=0), "attention": phase in {"Completed · import unconfirmed", "Manual download retained", "Completed · unmanaged"}})
+            "messages": receipt.get("messages", []) if managed else [], "download": download_evidence(torrent), "available": available,
+            "updated": min((item.get("updated") or 0 for item in observed), default=0), "attention": phase in {"Import needs attention", "Completed · import unconfirmed", "Manual download retained", "Completed · unmanaged"}})
     return sorted(rows, key=lambda row: (not row["attention"], not bool(row["download"]), row["title"].lower()))
 
 

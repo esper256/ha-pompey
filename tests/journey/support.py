@@ -255,3 +255,21 @@ class FileChecks:
         if full or self.checked.get(path) != fingerprint:
             assert digest(path) == expected, ("Earlier file changed", str(path))
             self.checked[path] = fingerprint
+
+
+def download_file_identity(torrent):
+    """Observe the real incomplete media file before releasing the peer gate."""
+    root = Path(torrent["content_path"])
+    paths = list(root.rglob("*")) if root.is_dir() else [root, Path(str(root) + ".!qB")]
+    files = [p for p in paths if p.is_file() and p.name.removesuffix(".!qB").endswith(".mkv")]
+    assert len(files) == 1, ("Expected one incomplete movie/episode", paths)
+    stat = files[0].stat()
+    return {"path": str(files[0]), "device": stat.st_dev, "inode": stat.st_ino}
+
+
+def assert_native_move(identity, destination):
+    stat = destination.stat()
+    assert (stat.st_dev, stat.st_ino) == (identity["device"], identity["inode"]), (
+        "Native import/routing copied media instead of renaming it", identity, str(destination))
+    assert not Path(identity["path"]).exists(), ("Download media path remains", identity)
+    assert stat.st_nlink == 1, "Native import relied on a hardlink"

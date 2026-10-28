@@ -24,6 +24,119 @@ from pompey_controller import Job, dispatch
 from concurrent.futures import Future
 
 
+class NativeImportHandoffSafety(unittest.TestCase):
+    def test_vpn_restart_releases_lock_before_waiting_for_startup_gate(self):
+        from contextlib import contextmanager
+        import vpn_recovery as recovery
+        held = False
+        @contextmanager
+        def lock():
+            nonlocal held
+            held = True
+            try: yield
+            finally: held = False
+        @contextmanager
+        def ready(*args, **kwargs):
+            from types import SimpleNamespace
+            self.assertFalse(held, "Startup gate cannot run while recovery owns its lock")
+            yield SimpleNamespace(status=200)
+        with tempfile.TemporaryDirectory() as root, patch.dict(os.environ, POMPEY_READY=root):
+            Path(root, "vpn-recovery.json").write_text('{"interface":1}')
+            read = Path.read_text
+            with patch.object(Path, "read_text", lambda p, *a, **kw: "2" if str(p) == "/sys/class/net/wg0/ifindex" else read(p, *a, **kw)), \
+                 patch.object(recovery, "stack_lock", lock), patch.object(recovery.subprocess, "check_output", return_value="true"), \
+                 patch.object(recovery.subprocess, "run"), patch.object(recovery.urllib.request, "urlopen", ready):
+                recovery.main()
+            self.assertEqual(json.loads(Path(root, "vpn-recovery.json").read_text())["phase"], "reconnected")
+
+    def test_routing_preserves_intent_while_native_workers_can_overwrite_paths(self):
+        import route_rating as routing
+        for name in ["RefreshSeries", "DownloadedEpisodesScan", "BulkMoveSeries"]:
+            with patch.object(routing, "http_json", return_value=[{"id": 1, "name": name, "status": "started"}]) as http, \
+                 patch.object(state, "save") as save:
+                routing.route_library("key", "http://sonarr/api/v3/series", "/kid", "/general", ["/staging"], set(), "series")
+                self.assertEqual(http.call_count, 1)
+                save.assert_not_called()
+
+    def test_downloader_jobs_release_startup_gate_lock_when_service_is_absent(self):
+        import pompey_controller as controller
+        for name in ["configuration", "downloads"]:
+            job = Job(name, [], 60, 180)
+            with patch.object(controller.urllib.request, "urlopen", side_effect=OSError("not ready")) as probe, \
+                 patch.object(controller, "stack_lock") as lock, patch.object(controller, "run_process") as run:
+                self.assertFalse(controller.execute(job))
+                probe.assert_called_once()
+                lock.return_value.__exit__.assert_called_once()
+                self.assertEqual(job.phase, "waiting")
+                run.assert_not_called()
+
+    def test_handoff_requires_complete_stopped_owned_path_and_persists_before_post(self):
+        import pompey_imports as imports
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, POMPEY_DATA=tmp, MEDIA_ROOT=tmp):
+            path = Path(tmp) / "downloads/complete/release"
+            path.mkdir(parents=True)
+            (path / "episode.mkv").write_bytes(b"test")
+            torrent = {"hash": "abc", "category": "sonarr", "content_path": str(path),
+                       "state": "stoppedUP", "progress": 1, "amount_left": 0}
+            queue = [{"id": 1, "seriesId": 7, "downloadId": "ABC", "trackedDownloadState": "importPending"}]
+            history = []
+            commands = []
+            posts = []
+            def http(method, url, body=None, **kwargs):
+                if "/config/downloadclient" in url:
+                    return {"id": 1, "enableCompletedDownloadHandling": False}
+                if "/queue?" in url:
+                    return {"records": queue}
+                if "/history?" in url:
+                    return {"records": history}
+                if "/manualimport?" in url:
+                    return [{"path": str(path / "episode.mkv"), "rejections": [{"reason": "Existing file is better"}]}]
+                if method == "GET" and url.endswith("/command"):
+                    return commands
+                if method == "POST":
+                    self.assertEqual(state.load(imports.JOURNAL)["abc"]["phase"], "submitting")
+                    posts.append(body)
+                    return {"id": 9}
+                return {"status": "completed"}
+            secrets = {"radarr_api_key": "r", "sonarr_api_key": "s"}
+            with patch.object(api, "http", side_effect=http):
+                for altered in [{"state": "stalledUP"}, {"amount_left": 1}, {"progress": 0.9},
+                                {"content_path": tmp}, {"hash": "unowned"}]:
+                    imports.handoff([{**torrent, **altered}], secrets)
+                self.assertEqual(posts, [])
+                history.append({"id": 2, "seriesId": 7, "downloadId": "ABC", "eventType": "grabbed"})
+                queue.clear()  # Native CDH-off behavior hides completed items.
+                commands.append({"id": 3, "name": "BulkMoveSeries", "status": "started"})
+                imports.handoff([torrent], secrets)
+                self.assertEqual(posts, [])
+                commands.clear()
+                imports.handoff([torrent], secrets)
+                self.assertEqual(posts, [{"name": "DownloadedEpisodesScan", "path": str(path),
+                                          "downloadClientId": "ABC", "importMode": "Move"}])
+                imports.handoff([torrent], secrets)
+                imports.handoff([torrent], secrets)
+                self.assertEqual(len(posts), 1)
+                self.assertEqual(state.load(imports.JOURNAL)["abc"]["phase"], "review")
+                queue.append({"id": 1, "seriesId": 7, "downloadId": "ABC", "trackedDownloadState": "imported"})
+                imports.handoff([torrent], secrets)
+                self.assertEqual(state.load(imports.JOURNAL)["abc"]["phase"], "complete")
+                imports.handoff([], secrets)
+                self.assertEqual(state.load(imports.JOURNAL), {})
+
+    def test_unknown_submission_is_retained_without_resubmitting(self):
+        import pompey_imports as imports
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, POMPEY_DATA=tmp):
+            state.save(imports.JOURNAL, {"abc": {"phase": "submitting", "kind": "radarr"}})
+            def http(method, url, **kwargs):
+                self.assertEqual(method, "GET")
+                if url.endswith("/command"): return []
+                return {"enableCompletedDownloadHandling": False} if "/config/" in url else {"records": []}
+            with patch.object(api, "http", side_effect=http):
+                imports.handoff([{"hash": "abc", "category": "radarr"}],
+                                {"radarr_api_key": "r", "sonarr_api_key": "s"})
+            self.assertEqual(state.load(imports.JOURNAL)["abc"]["phase"], "submitting")
+
+
 class StorageInterruptionEvidence(unittest.TestCase):
     def test_outage_and_recovery_are_logged_without_repeated_probe_spam(self):
         from contextlib import nullcontext
@@ -210,7 +323,7 @@ class IngressPreferences(unittest.TestCase):
     def test_invalid_write_preserves_prior_policy_and_pending_means_not_applied(self):
         import pompey_preferences as preferences
         with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, POMPEY_DATA=tmp):
-            original = {**preferences.DEFAULTS, "after_download": "share_one_day"}
+            original = {**preferences.DEFAULTS, "simultaneous_downloads": 3}
             state.save("preferences", {"values": original})
             preferences.applied()
             self.assertFalse(preferences.status()["pending"])
@@ -233,7 +346,7 @@ class IngressPreferences(unittest.TestCase):
         from recyclarr_sync import render_config
         with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, POMPEY_DATA=tmp,
                 AFTER_DOWNLOAD="share_to_ratio", SIMULTANEOUS_DOWNLOADS="3"):
-            self.assertEqual(preferences.current()["after_download"], "share_to_ratio")
+            self.assertEqual(preferences.current()["after_download"], "stop_sharing")
             state.save("preferences", {"values": {**preferences.DEFAULTS, "prefer_dual_audio": False}})
             self.assertEqual(api.after_download(), "stop_sharing")
             self.assertIn("score: 0", render_config("r", "key", "s", "key"))
@@ -575,6 +688,30 @@ class RequestSafety(unittest.TestCase):
 
 
 class SharingBoundaries(unittest.TestCase):
+    def test_stored_seeding_policy_normalizes_without_losing_other_preferences(self):
+        import pompey_preferences as preferences
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, POMPEY_DATA=tmp):
+            old = {**preferences.DEFAULTS, "after_download": "share_one_day", "simultaneous_downloads": 3}
+            state.save("preferences", {"values": old})
+            state.save("preferences-applied", {"values": old})
+            self.assertEqual(preferences.current(), {**old, "after_download": "stop_sharing"})
+            self.assertTrue(preferences.status()["pending"])
+
+    def test_share_limit_overrides_only_apply_to_managed_torrents(self):
+        managed = {"hash": "owned", "category": "sonarr", "ratio_limit": 1}
+        with patch.object(api, "http") as http:
+            media.apply_managed_share_limits([managed, {**managed, "hash": "unknown", "category": "personal"}])
+            self.assertEqual(http.call_count, 1)
+            self.assertIn(b"hashes=owned&ratioLimit=0", http.call_args.args[2])
+            self.assertNotIn(b"unknown", http.call_args.args[2])
+            self.assertIn(b"shareLimitAction=Stop", http.call_args.args[2])
+            self.assertIn(b"shareLimitsMode=MatchAny", http.call_args.args[2])
+        with patch.object(api, "http") as http:
+            media.apply_managed_share_limits([{**managed, "ratio_limit": 0, "seeding_time_limit": -1,
+                                               "inactive_seeding_time_limit": -1, "share_limit_action": "Stop",
+                                               "share_limits_mode": "MatchAny"}])
+            http.assert_not_called()
+
     def test_only_complete_downloads_can_reach_a_goal(self):
         complete = {"progress": 1, "amount_left": 0, "ratio": 1, "seeding_time": 86400}
         for policy in ["stop_sharing", "share_to_ratio", "share_one_day"]:
@@ -721,6 +858,37 @@ Endpoint = [2001:db8::1]:51820
 
 
 class ReleaseRecoverySafety(unittest.TestCase):
+    def test_hidden_completed_download_requires_settled_owned_handoff(self):
+        import pompey_recovery as recovery
+        token = "a" * 40
+        torrent = {"hash": token, "category": "sonarr", "state": "stoppedUP", "progress": 1,
+                   "amount_left": 0, "content_path": "/media/dlna/downloads/complete/Release"}
+        receipt = {"kind": "sonarr", "titleId": 7, "path": torrent["content_path"], "phase": "review"}
+        def call(method, path, body=None):
+            if path == "/series/7": return {"id": 7, "title": "Example", "path": "/media/dlna/TV/Example"}
+            if path.startswith("/episodefile?"): return []
+            if path.startswith("/queue?"): return {"records": []}
+            self.fail((method, path))
+        def http(method, url, **kwargs):
+            self.assertEqual(method, "GET")
+            return [{"name": "Release/Episode.mkv", "size": 10}] if "/files?" in url else [torrent]
+        rows = [{"id": 1, "seriesId": 7, "episodeId": 1, "eventType": "grabbed", "downloadId": token}]
+        with tempfile.TemporaryDirectory() as root, patch.dict(os.environ, POMPEY_DATA=root), \
+             patch.object(recovery, "api_for", return_value=call), patch.object(recovery, "history", return_value=rows), \
+             patch.object(api, "http", side_effect=http), patch.object(api, "media_root", return_value="/media/dlna"):
+            for altered in [{"phase": "submitted"}, {"phase": "submitting"}, {"titleId": 8}, {"path": "/elsewhere"}]:
+                state.save("download-imports", {token: {**receipt, **altered}})
+                with self.assertRaisesRegex(ValueError, "uncertain"):
+                    recovery.inspect_target({"kind": "sonarr", "id": 7, "downloadId": token})
+            state.save("download-imports", {token: receipt})
+            plan, *_ = recovery.inspect_target({"kind": "sonarr", "id": 7, "downloadId": token})
+            self.assertTrue(plan["removeDownload"])
+            self.assertEqual(plan["queueIds"], [])
+            self.assertEqual(plan["downloadFiles"], [{"name": "Release/Episode.mkv", "size": 10}])
+            torrent["state"] = "stalledUP"
+            with self.assertRaisesRegex(ValueError, "uncertain"):
+                recovery.inspect_target({"kind": "sonarr", "id": 7, "downloadId": token})
+
     def test_stale_confirmation_never_changes_files_or_writes_intent(self):
         import pompey_recovery as recovery
         with tempfile.TemporaryDirectory() as root, patch.dict(os.environ,POMPEY_DATA=root,POMPEY_READY=root):

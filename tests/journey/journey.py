@@ -55,6 +55,7 @@ def collect_failure(client, root):
             ),
             ("sonarrQueue", lambda: probe.sonarr("GET", "/queue?page=1&pageSize=100")),
             ("sonarrSeries", lambda: probe.sonarr("GET", "/series")),
+            ("sonarrCommands", lambda: probe.sonarr("GET", "/command")),
             ("torrents", lambda: probe.qbit("torrents/info")),
             ("requests", lambda: probe.search("GET", "/request?take=100&skip=0")),
         ]:
@@ -85,6 +86,10 @@ def collect_failure(client, root):
                 snapshots["caseDetailError"] = str(exc)
     for file in [
         Path("/etc/resolv.conf"),
+        Path("/data/pompey/state/download-imports.json"),
+        Path("/data/pompey/state/routing-movie.json"),
+        Path("/data/pompey/state/routing-series.json"),
+        Path("/tmp/pompey/vpn-recovery.json"),
         *[
             Path("/tmp/pompey") / name
             for name in ["configuration.json", "health.json", "status.json"]

@@ -7,7 +7,7 @@ import time
 import urllib.parse
 from applications import tunnel_bytes
 from stack_checks import outage
-from support import digest, save_json, HttpFailure
+from support import download_file_identity, assert_native_move, digest, save_json, HttpFailure
 from request_lifecycle import close_request
 
 
@@ -33,13 +33,7 @@ def movie_request(client, case, background, ledger_file, *, resume=False):
         client.evidence.active.update(status="running", resumed=True)
     else:
         client.evidence.begin(case)
-    if case.late_certification:
-        client.service("wire", False)
-    try:
-        return _movie_request(client, case, background, ledger_file, resume=resume)
-    finally:
-        if case.late_certification:
-            client.service("wire", True)
+    return _movie_request(client, case, background, ledger_file, resume=resume)
 
 
 def _movie_request(client, case, background, ledger_file, *, resume):
@@ -247,6 +241,22 @@ def _movie_request(client, case, background, ledger_file, *, resume):
             unwanted,
         )
         active["unwantedFilesIncluded"] = unwanted
+    move_identity = None
+    if case.scenario == "movie-pg" and os.environ.get("POMPEY_TEST_BASELINE") != "1":
+        # Reproduce a persisted/indexer-specific goal while the fixture gate
+        # keeps the download incomplete. Only product maintenance may reset it.
+        client.qbit("torrents/setShareLimits", {"hashes": infohash, "ratioLimit": 1,
+                                                "seedingTimeLimit": 1440,
+                                                "inactiveSeedingTimeLimit": -1,
+                                                "shareLimitAction": "Stop", "shareLimitsMode": "MatchAny"})
+        reconciled = wait(lambda: (t := torrent()) and t.get("ratio_limit") == 0
+                          and t.get("seeding_time_limit") == -1 and t,
+                          "Managed torrent retained an incompatible seeding goal")
+        active["shareLimitsReconciled"] = True
+        move_identity = download_file_identity(reconciled)
+        settings = client.arr("GET", "/config/mediamanagement")
+        assert settings["copyUsingHardlinks"] is False, settings
+        assert client.arr("GET", "/config/downloadclient")["enableCompletedDownloadHandling"] is False
     client.release(download)
     wait(
         lambda: (t := torrent()) and t["progress"] == 1,
@@ -277,7 +287,8 @@ def _movie_request(client, case, background, ledger_file, *, resume):
     stamp("imported")
     if case.late_certification:
         staging = Path(item["path"])
-        assert str(staging).startswith("/media/dlna/downloads/By Rating/Movies/"), item
+        assert any(str(staging).startswith(root) for root in (
+            "/media/dlna/downloads/By Rating/Movies/", "/media/dlna/Movies/Not Kid Friendly/")), item
         staged = next(staging.glob("*.mkv"))
         before_move = digest(staged)
         client.session.call(
@@ -289,7 +300,6 @@ def _movie_request(client, case, background, ledger_file, *, resume):
         client.wait_command(command["id"])
         assert client.arr("GET", "/movie/" + str(item["id"]))["certification"] == "PG"
         active["freshHealthSince"] = time.time()
-        client.service("wire", True)
 
         def move_intent():
             state = Path("/data/pompey/state/routing-movie.json")
@@ -325,6 +335,9 @@ def _movie_request(client, case, background, ledger_file, *, resume):
         "Controller did not route " + case.prefix + " to " + case.library,
         90,
     )
+    if move_identity:
+        assert_native_move(move_identity, imported)
+        active["nativeMoveVerified"] = move_identity
     stamp("library-routed")
     if case.late_certification:
         assert digest(imported) == active["moveWithFiles"]["sha256"]

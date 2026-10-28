@@ -51,6 +51,25 @@ def contained(path, root):
         return False
 
 
+def apply_managed_share_limits(items):
+    """Override old/indexer-specific seeding goals without touching unknown torrents.
+
+    Native Arr requires the torrent's seed goal to be met before choosing Move.
+    Stopping a torrent alone does not satisfy a conflicting per-torrent goal.
+    """
+    hashes = [r["hash"] for r in items
+              if r.get("category") in {"radarr", "sonarr", "prowlarr"} and r.get("hash")
+              and (r.get("ratio_limit") != 0 or r.get("seeding_time_limit") != -1
+                   or r.get("inactive_seeding_time_limit") != -1
+                   or r.get("share_limit_action") != "Stop"
+                   or r.get("share_limits_mode") != "MatchAny")]
+    if hashes:
+        data = urllib.parse.urlencode({"hashes": "|".join(hashes), "ratioLimit": 0,
+                                      "seedingTimeLimit": -1, "inactiveSeedingTimeLimit": -1,
+                                      "shareLimitAction": "Stop", "shareLimitsMode": "MatchAny"}).encode()
+        api.http("POST", api.qbit_url() + "/api/v2/torrents/setShareLimits", data)
+
+
 def stop_at_goal(items):
     hashes = [
         r["hash"]
@@ -113,6 +132,10 @@ def attention():
     review = state.load("requests").get("reviewRequired")
     if review:
         notices.append(str(review))
+    for receipt in state.load("download-imports").values():
+        if receipt.get("phase") == "submitting":
+            notices.append("Import acknowledgement missing for " + receipt.get("title", "download") +
+                           ". Review the native queue/history before manually importing; Pompey will not resubmit it.")
     extra = persist_notices()
     if extra:
         notices.extend(extra)
@@ -266,7 +289,7 @@ def maintain_downloads():
     payload = api.http("GET", api.qbit_url() + "/api/v2/torrents/info")
     if not isinstance(payload, list):
         raise RuntimeError("Download client returned an invalid torrent list")
-    seed_times(payload)
+    apply_managed_share_limits(payload)
     stop_at_goal(payload)
     # Fetch again: stop acknowledgement does not mean file handles are closed.
     payload = api.http("GET", api.qbit_url() + "/api/v2/torrents/info")
@@ -274,6 +297,8 @@ def maintain_downloads():
         raise RuntimeError("Download client returned an invalid torrent list")
     seed_times(payload)
     secrets = api.load_secrets()
+    from pompey_imports import handoff
+    handoff(payload, secrets)
     manual_imports(payload, secrets)
     observe_blocked_imports(secrets)
 

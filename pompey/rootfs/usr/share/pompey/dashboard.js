@@ -366,11 +366,6 @@
   const preferencesResult = element("preferences-result");
   const preferenceFields = [...preferencesForm.querySelectorAll("input, select")];
   preferenceFields.forEach(field => { field.disabled = true; });
-  function seedingHelp() {
-    element("seeding-help").textContent = element("seeding-policy").value === "stop_sharing"
-      ? "Download files are removed after a successful import."
-      : "Completed download files remain until import and the seeding target are complete.";
-  }
   function preferenceMessage(pending) {
     preferencesResult.classList.remove("check-warning");
     preferencesResult.textContent = pending ? "Saved · Applying in the background…" : "Saved";
@@ -381,10 +376,9 @@
     try {
       const data = await diagnosticRequest("/preferences");
       if (!preferencesDirty) {
-        element("seeding-policy").value = data.values.after_download;
         element("download-slots").value = data.values.simultaneous_downloads;
         element("dual-audio").checked = data.values.prefer_dual_audio;
-        preferenceMessage(data.pending); seedingHelp();
+        preferenceMessage(data.pending);
       }
       preferencesLoaded = true;
       preferenceFields.forEach(field => { field.disabled = false; });
@@ -397,7 +391,7 @@
     }
   }
   preferencesForm.addEventListener("input", () => {
-    preferencesDirty = true; seedingHelp();
+    preferencesDirty = true;
     element("save-preferences").disabled = !preferencesLoaded || preferencesBusy;
     preferencesResult.classList.remove("check-warning"); preferencesResult.textContent = "Unsaved changes";
   });
@@ -405,7 +399,7 @@
     event.preventDefault();
     if (!preferencesLoaded || preferencesBusy) return;
     preferencesBusy = true;
-    const values = {after_download: element("seeding-policy").value, simultaneous_downloads: Number(element("download-slots").value), prefer_dual_audio: element("dual-audio").checked};
+    const values = {after_download: "stop_sharing", simultaneous_downloads: Number(element("download-slots").value), prefer_dual_audio: element("dual-audio").checked};
     element("save-preferences").disabled = true;
     preferenceFields.forEach(field => { field.disabled = true; });
     preferencesResult.textContent = "Saving…";
@@ -555,7 +549,7 @@
     if (signature !== component.actionSignature) {
       component.actionSignature = signature; component.actions.replaceChildren(); component.primaryActions.replaceChildren(); component.searchButton = null;
       if (item.available && item.phase === "Import needs attention" && ["radarr","sonarr"].includes(item.kind)) {
-        nativeLink(item.kind, component.primaryActions, "Review import", "activity/queue");
+        nativeLink(item.kind, component.primaryActions, "Review import", item.manualImport ? "wanted/missing" : "activity/queue");
       }
       if(item.available && ["radarr","sonarr"].includes(item.kind) && item.id && (item.downloadId || item.library)) {
         const retry = text("button","Try another","danger-button");

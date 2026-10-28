@@ -15,4 +15,6 @@ LOG_DIR="${POMPEY_CONFIG}/qBittorrent/logs"
 mkdir -p "${LOG_DIR}"
 pompey-log start "qBittorrent"
 
+python3 /usr/local/bin/pompey_imports.py
+
 exec "${QBIT}" --profile="${POMPEY_CONFIG}" --webui-port=8080 --confirm-legal-notice

@@ -160,13 +160,14 @@ def control(action):
             pass
     elif action == "ui-access":
         observed = []
-        # The released baseline disables these routes with an explicit 404.
-        # The candidate always enables them, retaining the Ingress access deny.
-        internal_denied = 404 if os.environ.get("POMPEY_TEST_BASELINE") == "1" else 403
+        # Baselines before 0.6.2 disable these routes (404); newer releases
+        # enable them behind Ingress (403). Both must deny external access.
+        # The candidate must specifically retain the enabled-route access deny.
+        internal_denied = {403, 404} if os.environ.get("POMPEY_TEST_BASELINE") == "1" else {403}
         for port, path, expected in [
-            (5055, "/api/v1/settings/public", 200),
-            (9696, "/ping", 200),
-            (8099, "/", 403),
+            (5055, "/api/v1/settings/public", {200}),
+            (9696, "/ping", {200}),
+            (8099, "/", {403}),
             (8099, "/debug/radarr/activity/queue", internal_denied),
             (8099, "/debug/sonarr/activity/queue", internal_denied),
             (8099, "/debug/qbittorrent/", internal_denied),
@@ -179,7 +180,7 @@ def control(action):
                 connection.request("GET", path)
                 response = connection.getresponse()
                 response.read()
-                assert response.status == expected, (port, path, response.status, expected)
+                assert response.status in expected, (port, path, response.status, expected)
                 observed.append({"port": port, "path": path, "status": response.status})
             finally:
                 connection.close()

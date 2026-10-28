@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.6.3
+
+- Coordinate native Arr imports after downloads finish and stop, closing the automatic-import race before qBittorrent starts. Preserve durable handoff receipts and review paths for unresolved imports.
+- Release the maintenance lock before waiting for a VPN-triggered downloader restart. Defer library routing while native refresh/import workers are active, and defer imports during native library moves.
+
+- Keep applications running through slow or failed storage I/O probes so monitoring does not interrupt active imports; retain service holds for confirmed mount replacement.
+- Always stop completed managed torrents and reconcile per-torrent seeding overrides so native Arr imports can move files rather than retain seeding copies. Legacy seeding settings are accepted but no longer change this policy.
+- Disable hardlink imports and verify native movie/episode file identity through download, import and library routing on one filesystem. Cross-filesystem and manual-copy imports can still copy; atomic publication is not guaranteed.
+
 ## 0.6.2
 
 - Always provide internal application interfaces through authenticated Home Assistant Ingress; remove the advanced-interface option without exposing additional network ports.

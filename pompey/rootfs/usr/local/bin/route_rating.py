@@ -118,6 +118,15 @@ def route_library(
     every minute because the movie body still had path set to the current
     location. Editor takes rootFolderPath + moveFiles and computes the dest.
     """
+    commands = object_list(http_json("GET", list_url.rsplit("/", 1)[0] + "/command",
+                                    headers=headers(key)), "native commands", ("id", "name", "status"))
+    if any(c["status"] in {"queued", "started"} and c["name"] in {
+            "RefreshMovie", "RefreshSeries", "DownloadedMoviesScan", "DownloadedEpisodesScan",
+            "ManualImport", "BulkMoveMovie", "BulkMoveSeries"} for c in commands):
+        # Native commands outlive our shared controller lock. Refresh/import
+        # workers can still hold a title object with its previous path; moving
+        # now lets their later update overwrite the new library location.
+        return
     payload = http_json("GET", list_url, headers=headers(key))
     if not isinstance(payload, list):
         raise RuntimeError("Invalid Arr routing snapshot")
