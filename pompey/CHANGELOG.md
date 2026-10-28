@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.6.2
+
+- Update quality-resources: trash_guides 6ac59721b3c9, config_templates 89eebadd4299 → trash_guides d24f13ceea5e, config_templates 89eebadd4299.
+
 ## 0.6.1
 
 - Keep durable delivery records for movies and individual episodes; stop automatic monitoring after final-library delivery, preserve completion after manual file moves, and reopen content only through an explicit retry.

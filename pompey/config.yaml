@@ -1,6 +1,6 @@
 # https://developers.home-assistant.io/docs/apps/configuration
 name: Pompey
-version: "0.6.1"
+version: "0.6.2"
 slug: pompey
 description: >-
   Request and organize movies and TV series, with downloads
