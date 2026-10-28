@@ -141,6 +141,9 @@ def _movie_request(client, case, background, ledger_file, *, resume):
     client.refresh_downloads()
     item = movie()
     assert item and not item["hasFile"], item
+    parsed = client.arr("GET", "/parse?title=" + urllib.parse.quote(case.release))
+    assert (parsed.get("movie") or {}).get("id") == item["id"] and case.title in parsed["parsedMovieInfo"]["movieTitles"], (
+        "Fixture title did not survive native parsing; ID-only matching is not import confidence", parsed)
     if case.scenario == "movie-pg":
         choices = client.arr("GET", "/release?movieId=" + str(item["id"]))
         low = [
