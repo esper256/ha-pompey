@@ -5,7 +5,7 @@ const vm = require('node:vm');
 const source = fs.readFileSync('pompey/rootfs/usr/share/pompey/debug-shim.js', 'utf8');
 for (const app of ['Radarr', 'Sonarr']) {
   const base = '/api/hassio_ingress/example-token/debug/' + app.toLowerCase();
-  for (const suffix of ['/', '/movie/123', '/series/example']) {
+  for (const suffix of ['/', '/activity/queue', '/movie/123', '/series/example']) {
     const calls = [];
     const window = {
       location: {pathname: base + suffix, origin: 'https://ha.example', href: 'https://ha.example' + base + suffix},

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.6.2
+
+- Always provide internal application interfaces through authenticated Home Assistant Ingress; remove the advanced-interface option without exposing additional network ports.
+- Link overview metrics to their applications and move linked application versions into Config; remove redundant header shortcuts and the separate advanced-interface section.
+- Keep indexer retry details inside the overview metric and replace manual refresh controls with an automatic-update countdown and stale-data warning.
+- Compact episode labels into release title rows, remove the manual download-check button and repeated seeding settings, and bound the Recovery display to five recent retries with Diagnostics alongside.
+- Add Review import links to Radarr and Sonarr’s native queue so blocked file and episode matches can be reviewed without rejecting a wanted release.
+
 ## 0.6.1
 
 - Keep durable delivery records for movies and individual episodes; stop automatic monitoring after final-library delivery, preserve completion after manual file moves, and reopen content only through an explicit retry.

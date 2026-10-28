@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Write the Ingress nginx include that exposes hidden engine Web UIs.
+"""Write the authenticated Ingress routes for internal application interfaces.
 
-When POMPEY_DEBUG is on, /debug/radarr/ /debug/sonarr/ /debug/qbittorrent/
+The /debug/radarr/ /debug/sonarr/ /debug/qbittorrent/ routes
 proxy to the localhost engines. UrlBase stays empty so wire_stack.py and
 housekeeping keep talking to /api/v3.
 
@@ -12,8 +12,8 @@ we cannot stage through a sentinel. Turning those paths into ./ relative
 URLs does not rematch (the replacement is quote-dot-slash, not quote-slash)
 and they resolve under this location plus <base href>.
 
-When debug is off, /debug/ is 404 so the wait-screen fallback cannot be
-used as a back door onto those consoles.
+Access restrictions are inherited from the containing Ingress server block.
+Application listeners remain on localhost; no additional ports are published.
 """
 from __future__ import annotations
 
@@ -44,22 +44,6 @@ ROOT_TOKENS = (
     "icons/",
     "scripts/",
 )
-
-
-def debug_enabled(raw: str | None = None) -> bool:
-    if raw is None:
-        raw = os.environ.get("POMPEY_DEBUG", "")
-    return str(raw).strip().lower() in {"1", "true", "yes", "on"}
-
-
-def off_include() -> str:
-    return """# Debug consoles are off (HA option debug).
-location ^~ /debug/ {
-    default_type text/plain;
-    add_header Cache-Control "no-store";
-    return 404;
-}
-"""
 
 
 def _filters(mount: str) -> str:
@@ -102,9 +86,9 @@ def _filters(mount: str) -> str:
     return "\n".join(lines)
 
 
-def on_include(*, www: str) -> str:
+def render(*, www: str) -> str:
     blocks = [
-        f"""# Debug consoles (HA option debug). Supervisor strips Ingress.
+        f"""# Internal interfaces. Supervisor strips Ingress.
 # X-Ingress-Path is /api/hassio_ingress/<token> in the sidebar, empty here.
 location = /debug/shim.js {{
     alias {www}/debug-shim.js;
@@ -145,18 +129,13 @@ location /debug/{name}/ {{
     return "\n".join(blocks)
 
 
-def render(*, enabled: bool, www: str) -> str:
-    body = on_include(www=www) if enabled else off_include()
-    return body if body.endswith("\n") else body + "\n"
-
-
 def main(argv: list[str]) -> int:
     if len(argv) != 2:
         print("usage: write_debug_ingress.py INCLUDE_PATH", file=sys.stderr)
         return 2
     dest = argv[1]
     www = os.environ.get("POMPEY_WWW", "/usr/share/pompey").rstrip("/")
-    text = render(enabled=debug_enabled(), www=www)
+    text = render(www=www)
     directory = os.path.dirname(dest) or "."
     os.makedirs(directory, exist_ok=True)
     tmp = dest + ".tmp"

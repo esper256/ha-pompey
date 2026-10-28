@@ -188,41 +188,34 @@
   });
   function renderSequences() {
     const sequences = requestData?.sequences || [];
-    element("sequence-history").hidden = !sequences.length;
+    const attention = sequences.filter(sequence => sequence.status === "Needs attention").length;
+    element("sequence-summary").textContent = sequences.length
+      ? sequences.length + " recorded " + (sequences.length === 1 ? "retry" : "retries") + (attention ? " · " + attention + " need review" : " · Export details for troubleshooting")
+      : "Release choices and replacement outcomes for troubleshooting.";
+    element("recent-recoveries").hidden = !sequences.length;
     const container = element("sequence-list");
-    // Preserve an open history disclosure during routine refreshes.
-    const open = new Set([...container.querySelectorAll("details[open]")].map(n=>n.dataset.sequence));
     container.replaceChildren();
-    for (const sequence of sequences) {
-      const detail = document.createElement("details"); detail.dataset.sequence = sequence.sequenceId;
-      detail.open = open.has(sequence.sequenceId);
-      const summary = text("summary",sequence.title + (sequence.scope ? " · " + sequence.scope : "") + " · " + sequence.attempts.length + (sequence.attempts.length === 1 ? " attempt · " : " attempts · ") + sequence.status);
-      if (sequence.kind === "sonarr" && !sequence.scope) summary.append(text("small",sequence.attempts.at(-1)?.release || "Episode details unavailable", "scope"));
-      detail.append(summary);
-      const list = document.createElement("ol");
-      const events = sequence.attempts.map(attempt => ({at:attempt.at, label:(attempt.stage === "retry-requested" ? "Rejected: " : "Rejection requested: ") + attempt.release + " — " + attempt.reason.replaceAll("_"," ") + (attempt.note ? ": " + attempt.note : "") + (attempt.error ? " · " + attempt.error : "")}));
-      const labels = {grabbed:"Selected",downloadFolderImported:"Imported"};
-      const seen = new Set();
-      for (const outcome of sequence.outcomes || []) {
-        const label = labels[outcome.eventType];
-        if (!label) continue;
-        const key = outcome.eventType + ":" + outcome.downloadId;
-        if(seen.has(key)) continue; seen.add(key);
-        events.push({at:Date.parse(outcome.date)/1000,label:label + ": " + outcome.sourceTitle});
+    const recent = [...sequences].sort((a,b) => (b.attempts.at(-1)?.at || 0) - (a.attempts.at(-1)?.at || 0)).slice(0,5);
+    for (const sequence of recent) {
+      const row = document.createElement("div"); row.className = "sequence-row";
+      const identity = document.createElement("div"); identity.className = "sequence-identity";
+      identity.append(text("span", sequence.title));
+      if (sequence.scope) identity.append(text("small", sequence.scope, "scope"));
+      const attempt = sequence.attempts.at(-1);
+      if (sequence.kind === "sonarr" && !sequence.scope && attempt?.release) {
+        const release = text("small", attempt.release, "sequence-release"); release.title = attempt.release; identity.append(release);
       }
-      events.sort((a,b)=>a.at-b.at);
-      for (const event of events) list.append(text("li",event.label));
-      detail.append(list);
-      if (sequence.status === "Needs attention") {
-        const button = text("button","Try another","danger-button");
-        button.addEventListener("click",()=>openRecovery({...sequence,downloadId:sequence.attempts.at(-1).downloadId},button));
-        detail.append(button);
-      }
-      if (sequence.collectionError) detail.append(text("p","Current outcome unavailable. " + sequence.collectionError,"field-help"));
-      container.append(detail);
+      const status = text("span", sequence.status, "phase" + (sequence.status === "Needs attention" ? " warning" : ""));
+      if (sequence.collectionError) { status.textContent = "Status unavailable"; status.title = sequence.collectionError; }
+      const date = attempt?.at ? new Date(attempt.at * 1000) : null;
+      const when = text("time", date ? date.toLocaleDateString(undefined,{month:"short",day:"numeric"}) : "");
+      if (date) { when.dateTime = date.toISOString(); when.title = date.toLocaleString(); }
+      row.append(identity, status, when); container.append(row);
     }
+    element("sequence-limit").textContent = "Showing " + recent.length + " most recent. Diagnostics includes the retained release sequences.";
   }
 
+  let indexerIssuesOpen = false;
   let overview = null;
   let overviewBusy = false;
   let overviewFailed = false;
@@ -239,6 +232,7 @@
       element(tab.getAttribute("aria-controls")).hidden = !selected;
     }
     if (changed && id === "diagnostic-panel") refreshRequests();
+    updateRefreshStatus();
     if (id === "config-panel") refreshPreferences();
   }
   function openPanel(id) {
@@ -249,44 +243,78 @@
     attentionOnly = true; importedOnly = false;
     setFilters();
   }
-  function metric(title, value, detail, source, action = null, warning = false) {
-    const node = document.createElement(action ? "button" : "div");
+  function appUrl(service, path = "") {
+    if (["radarr", "sonarr", "qbittorrent"].includes(service)) return ingressBase() + "debug/" + service + "/" + path;
+    if (!appAccess.ready) return null;
+    const url = new URL(location.href);
+    url.protocol = "http:"; url.port = service === "seerr" ? lastPorts.search : lastPorts.sources;
+    url.pathname = "/" + path; url.search = ""; url.hash = "";
+    return url.href;
+  }
+  function appLink(service, label, className = "app-link", path = "") {
+    const url = appUrl(service, path);
+    const node = text(url ? "a" : "span", label, className);
+    if (url) {
+      node.dataset.app = service; node.href = url; node.target = "_blank"; node.rel = "noopener";
+      node.title = "Open " + labels[service] + (path ? " · Activity → Queue" : "") + " in a new tab";
+      const arrow = text("span", "↗", "link-arrow"); arrow.setAttribute("aria-hidden","true"); node.append(arrow);
+    } else {
+      node.title = labels[service] + " is starting";
+    }
+    return node;
+  }
+  function metric(title, value, detail, source, service = null, warning = false) {
+    const node = document.createElement("div");
     node.className = "metric" + (warning ? " warning" : "");
     const stale = overviewFailed || !source?.available || Date.now() / 1000 - (source.updated || 0) > 45;
     if (stale) node.classList.add("stale");
-    node.append(text("span", title), text("strong", value));
+    const content = document.createElement("strong");
+    content.append(service ? appLink(service,value) : text("span",value,"metric-value"));
+    node.append(text("span", title), content);
     if (detail) node.append(text("small", detail));
     if (stale) node.append(text("small", source?.updated ? "Last known · " + age(source.updated) : "Unavailable"));
-    if (action) node.addEventListener("click", action);
     element("ecosystem-counts").append(node);
     return node;
   }
   function renderOverview() {
     const data = overview.summary;
+    const focused = document.activeElement;
+    const restoreApp = element("ecosystem-counts").contains(focused) || element("application-versions").contains(focused)
+      ? {service: focused.dataset.app, versions: element("application-versions").contains(focused)} : null;
+    const restoreIssueFocus = focused.matches(".indexer-issues > summary");
     element("ecosystem").hidden = false;
     element("ecosystem-counts").replaceChildren();
     const torrents = data.torrents.value;
     metric("Downloads", torrents ? torrents.downloading + " downloading" : "—",
       torrents ? [torrents.stalled && torrents.stalled + " waiting for peers", torrents.seeding && torrents.seeding + " seeding", torrents.paused && torrents.paused + " stopped", torrents.checking && torrents.checking + " checking", torrents.other && torrents.other + " other"].filter(Boolean).join(" · ") : "",
-      data.torrents, () => { attentionOnly = false; setFilters(); openPanel("diagnostic-panel"); });
-    metric("Monitored", (data.shows.value ?? "—") + " shows · " + (data.movies.value ?? "—") + " movies", "",
+      data.torrents, "qbittorrent");
+    const monitored = metric("Monitored", "", "",
       {available: data.shows.available && data.movies.available, updated: Math.min(data.shows.updated || 0, data.movies.updated || 0)});
+    monitored.querySelector("strong").replaceChildren(appLink("sonarr", (data.shows.value ?? "—") + " shows"),
+      document.createTextNode(" · "), appLink("radarr", (data.movies.value ?? "—") + " movies"));
     const indexers = data.indexers.value;
-    const issues = (overview.setup.indexerIssues || []).length;
     const sourceMetric = metric("Indexers", indexers ? indexers.healthy + " of " + indexers.enabled + " available" : "—", "", data.indexers,
-      issues || indexers?.enabled === 0 ? () => {
-        const target = element("setup-panel");
-        target.scrollIntoView({block: "nearest"}); target.tabIndex = -1; target.focus({preventScroll: true});
-      } : null, indexers && indexers.healthy < indexers.enabled);
-    if (issues) sourceMetric.append(text("small", "View " + issues + (issues === 1 ? " issue" : " issues"), "metric-action"));
-    if (indexers?.enabled === 0) sourceMetric.append(text("small", "Add an indexer", "metric-action"));
+      "prowlarr", indexers && indexers.healthy < indexers.enabled);
+    const issues = overview.setup.indexerIssues || [];
+    if (issues.length) {
+      const detail = document.createElement("details"); detail.className = "indexer-issues";
+      detail.append(text("summary", issues.length + (issues.length === 1 ? " source retrying" : " sources retrying")));
+      for (const issue of issues) detail.append(text("p", issue.name + " · Retry after " + new Date(issue.retryAfter).toLocaleTimeString()));
+      // Keep an intentionally opened explanation visible across observation refreshes.
+      detail.open = indexerIssuesOpen;
+      detail.addEventListener("toggle", () => { if (detail.isConnected) indexerIssuesOpen = detail.open; });
+      sourceMetric.append(detail);
+    }
+    if (indexers?.enabled === 0) sourceMetric.append(text("small", "Add an indexer in Prowlarr"));
     const requests = data.requests.value;
     metric("Requests", requests ? requests.open + " open" : "—", requests ? [requests.approval && requests.approval + " awaiting approval", requests.processing && requests.processing + " in progress", requests.failed && requests.failed + " failed"].filter(Boolean).join(" · ") : "", data.requests,
-      () => { openSearchBtn.click(); }, requests?.failed > 0);
+      "seerr", requests?.failed > 0);
     element("overview-note").hidden = !overviewFailed;
     element("overview-note").textContent = "Overview unavailable; showing last known counts.";
     renderConnections();
     renderVersions();
+    if (restoreApp?.service) element(restoreApp.versions ? "application-versions" : "ecosystem-counts").querySelector('[data-app="' + restoreApp.service + '"]')?.focus({preventScroll:true});
+    if (restoreIssueFocus) element("ecosystem-counts").querySelector(".indexer-issues > summary")?.focus({preventScroll:true});
     const storage = overview.storage || {};
     window.pompeyStorageBlocked = storage.ok === false;
     element("storage-alert").hidden = storage.ok !== false;
@@ -310,15 +338,12 @@
     for (const name of ["radarr", "sonarr"]) {
       if (!setup.sources[name]) row(labels[name], setup.sources[name] === null ? "Connection unavailable" : "No synchronized indexers");
     }
-    for (const source of setup.indexerIssues || []) row(source.name, "Retry after " + new Date(source.retryAfter).toLocaleTimeString());
-    if (overview.summary.indexers.value?.enabled === 0) row("Indexers", "Add a source in Manage indexers");
+    if (overview.summary.indexers.value?.enabled === 0) row("Indexers", "Add a source in Prowlarr");
     const server = setup.mediaServer;
     if (server?.configured && server.reachable === false) row(server.type === 1 ? "Plex" : server.type === 3 ? "Emby" : "Jellyfin", "Library discovery unavailable; check the connection in Seerr");
     element("setup-panel").hidden = !table.children.length;
     element("setup-title").textContent = setup.seerrAvailable && !setup.initialized ? "Finish setup" : "Connections need attention";
-    element("setup-note").textContent = setup.indexerIssues?.length && table.children.length === setup.indexerIssues.length
-      ? "Prowlarr retries these indexers automatically."
-      : "Check server connections in Seerr and sources in Manage indexers.";
+    element("setup-note").textContent = "Review the connection in Seerr or Prowlarr. Status updates automatically.";
   }
   function renderVersions() {
     element("bundle-version").textContent = "Pompey " + overview.versions.pompey;
@@ -328,7 +353,7 @@
       if (!labels[service]) continue;
       const down = health?.services?.[service] === false;
       const item = document.createElement("div");
-      item.append(text("strong", labels[service], down ? "service-down" : ""), text("small", version.replace(/^release-/, "").split("_v")[0] + (down ? " · unavailable" : "")));
+      item.append(appLink(service, labels[service], "app-link" + (down ? " service-down" : "")), text("small", version.replace(/^release-/, "").split("_v")[0] + (down ? " · unavailable" : "")));
       versions.append(item);
     }
   }
@@ -395,12 +420,8 @@
     }
   });
 
-  function nativeLink(service, container) {
-    if (!debugConsoles.hidden && ["radarr", "sonarr", "qbittorrent"].includes(service)) {
-      const link = text("a", "Open " + labels[service] + " ↗", "button");
-      link.href = ingressBase() + "debug/" + service + "/";
-      link.target = "_blank"; link.rel = "noopener"; container.append(link);
-    }
+  function nativeLink(service, container, label = "Open " + labels[service], path = "") {
+    if (appUrl(service, path)) container.append(appLink(service, label, "button app-link", path));
   }
   const releaseResults = new Map();
   const releaseBusy = new Set();
@@ -452,7 +473,8 @@
     const row = document.createElement("tr"); row.setAttribute("role", "row"); row.className = "workflow-row";
     const title = document.createElement("td"); title.setAttribute("role", "cell");
     const button = text("button", "", "title-button"); button.type = "button";
-    const scope = text("small", "", "scope"); title.append(button, scope);
+    const scope = text("small", "", "scope");
+    const titleText = text("span", "", "title-text"); button.append(titleText, scope); title.append(button);
     const status = document.createElement("td"); status.setAttribute("role", "cell"); row.append(title, status);
     const detailRow = document.createElement("tr"); detailRow.setAttribute("role", "row"); detailRow.className = "detail-row";
     const cell = document.createElement("td"); cell.setAttribute("role", "cell"); cell.colSpan = 2; cell.className = "detail-cell"; detailRow.append(cell);
@@ -468,7 +490,7 @@
     const primaryActions = document.createElement("div"); primaryActions.className = "actions";
     technical.append(actions, results);
     detail.append(evidence, primaryActions, technical); cell.append(detail);
-    const component = {key, row, button, scope, status, detailRow, evidence, actions, primaryActions, results, fields, actionSignature: null};
+    const component = {key, row, button, titleText, scope, status, detailRow, evidence, actions, primaryActions, results, fields, actionSignature: null};
     row.addEventListener("click", event => {
       if (event.target.closest("a")) return;
       selectedWorkflow = selectedWorkflow === key ? null : key;
@@ -494,7 +516,9 @@
     if (!item.available) evidence.append(text("p", "Current progress is unavailable. Last known: " + (item.lastKnownPhase || "unknown") + ". Restore the application connection before taking action.", "check-warning"));
     else if (item.messages?.length) {
       for (const message of [...new Set(item.messages)]) evidence.append(text("p", message, "check-warning"));
-      if (item.phase === "Import needs attention") evidence.append(text("p", "The application retries import after the problem is resolved."));
+      if (item.phase === "Import needs attention") {
+        evidence.append(text("p", "Keep this download? Review its files and " + (item.kind === "sonarr" ? "episode assignments" : "movie match") + " using Interactive Import in " + labels[item.kind] + " → Activity → Queue. Confirm any replacement there. Try another rejects this release instead."));
+      }
     } else if (["stalledDL", "metaDL", "forcedMetaDL"].includes(download?.state)) {
       const noConnections = download.connectedSeeds === 0 && download.connectedPeers === 0;
       evidence.append(text("p", noConnections ? "No seeds or peers connected." : "Peers are connected, but no data is arriving."));
@@ -506,7 +530,6 @@
       if (parts.length) evidence.append(text("p", parts.join(" · ")));
     } else if (item.nextAction && !item.library) evidence.append(text("p", item.nextAction));
     if (item.canCheckLibrary && item.path) evidence.append(text("p", "Expected library folder: " + item.path, "library-path"));
-    if (debugConsoles.hidden && ["stoppedDL", "pausedDL", "error", "missingFiles"].includes(download?.state)) evidence.append(text("p", "Enable advanced interfaces in Home Assistant’s app settings to inspect this download."));
     addField("Application", labels[item.kind] || item.kind);
     addField(item.available ? "Observed" : "Last observed", item.updated ? new Date(item.updated * 1000).toLocaleString() : "Unavailable");
     addField("Release", item.release);
@@ -527,9 +550,12 @@
       if (download.completed > 0) addField("Download completed", new Date(download.completed * 1000).toLocaleString());
     }
     const canSearch = item.available && ["radarr", "sonarr"].includes(item.kind) && item.id && !importing;
-    const signature = JSON.stringify([item.available, canSearch, item.kind, item.id, item.library, item.downloadId, item.fileId, !!download, item.canCheckLibrary, debugConsoles.hidden]);
+    const signature = JSON.stringify([item.available, canSearch, item.kind, item.id, item.library, item.downloadId, item.fileId, !!download, item.canCheckLibrary, item.phase]);
     if (signature !== component.actionSignature) {
       component.actionSignature = signature; component.actions.replaceChildren(); component.primaryActions.replaceChildren(); component.searchButton = null;
+      if (item.available && item.phase === "Import needs attention" && ["radarr","sonarr"].includes(item.kind)) {
+        nativeLink(item.kind, component.primaryActions, "Review import", "activity/queue");
+      }
       if(item.available && ["radarr","sonarr"].includes(item.kind) && item.id && (item.downloadId || item.library)) {
         const retry = text("button","Try another","danger-button");
         retry.addEventListener("click",()=>openRecovery(component.item,retry));
@@ -611,7 +637,7 @@
     renderRequests();
   }
   function updateSummary(component, item) {
-        component.button.textContent = item.title; component.button.setAttribute("aria-label", "Details for " + item.title + (item.scope ? ", " + item.scope : ""));
+        component.titleText.textContent = item.title; component.button.setAttribute("aria-label", "Details for " + item.title + (item.scope ? ", " + item.scope : ""));
         component.scope.textContent = item.scope || ""; component.scope.hidden = !item.scope;
         component.status.replaceChildren(text("span", item.phase, "phase " + phaseClass(item)));
         if (item.phase === "Downloading" && item.download) {
@@ -626,7 +652,6 @@
     if (requestsBusy) return;
     requestsBusy = true;
     let restoreFocus = false;
-    element("inspect").disabled = true;
     try {
       const data = await diagnosticRequest("");
       const library = (data.titles || []).filter(item=>item.hasFile || item.delivered).map(item=>({...item,library:true,
@@ -649,10 +674,7 @@
         if(!releaseBusy.has(releaseKey(item))) renderReleases(component.results,releaseResults.get(releaseKey(item)));
       }
       requestData = data;
-      const maintenance = data.maintenance || {};
-      const policy = {stop_sharing:"Stop seeding when complete",share_to_ratio:"Seed to a 1:1 ratio",share_one_day:"Seed for one day"}[maintenance.policy] || "Policy unavailable";
-      const recent = maintenance.updated && Date.now()/1000 - maintenance.updated < 30;
-      element("download-maintenance").textContent = policy + " · Checks every 30s · " + (!recent ? "Maintenance status unavailable" : maintenance.error ? "Download check failed: " + maintenance.error : maintenance.running ? "Checking downloads…" : "Last policy check " + age(maintenance.lastSuccess));
+      requestsLastSuccess = Date.now(); requestsError = "";
       renderSequences();
       const notices = element("request-notices"); notices.replaceChildren();
       for (const message of data.attention || []) notices.append(text("p", message, "notice"));
@@ -671,7 +693,8 @@
       element("request-status").classList.remove("check-warning");
       renderRequests();
     } catch (error) {
-      element("request-status").textContent = error.message + (requestData ? " Showing the previous observation." : "");
+      requestsError = error.message;
+      element("request-status").textContent = requestData ? "" : "Release information is unavailable.";
       element("request-status").classList.add("check-warning");
       requestItems = new Map([...requestItems].map(([key,item])=>[key,{...item,
         lastKnownPhase:item.available ? item.phase : item.lastKnownPhase,available:false,phase:"Current progress unavailable"}]));
@@ -680,17 +703,42 @@
       }
       renderRequests();
     } finally {
-      requestsBusy = false; element("inspect").disabled = false;
-      if (restoreFocus) element("inspect").focus({preventScroll: true});
+      requestsBusy = false; updateRefreshStatus();
+      if (restoreFocus) element("request-filter").focus({preventScroll: true});
     }
   }
+  let overviewLastSuccess = 0;
+  let requestsLastSuccess = 0;
+  let requestsError = "";
+  let nextRefreshAt = Date.now();
+  function updateRefreshStatus() {
+    const releases = activePanel === "diagnostic-panel";
+    const last = releases ? requestsLastSuccess : overviewLastSuccess;
+    const busy = overviewBusy || (releases && requestsBusy);
+    const stale = (releases ? !!requestsError : overviewFailed) || (last && Date.now() - last > 45000);
+    const remaining = Math.max(0, Math.ceil((nextRefreshAt - Date.now()) / 1000));
+    const message = stale ? "Updates unavailable. " + (last ? "Last updated " + age(last / 1000) + ". " : "") + "Retrying automatically." + (releases && requestsError ? " " + requestsError : "")
+      : busy ? "Updating application status…" : "Next update in " + remaining + "s" + (last ? " · Updated " + age(last / 1000) : "");
+    const status = element("refresh-status");
+    status.classList.toggle("stale", !!stale);
+    status.classList.toggle("refreshing", busy && !stale);
+    const ring = element("refresh-ring");
+    ring.style.setProperty("--remaining", Math.min(1, remaining / 15));
+    ring.textContent = stale ? "⚠" : "";
+    const summary = status.querySelector("summary"); summary.title = message; summary.setAttribute("aria-label", message);
+    element("refresh-message").textContent = message;
+  }
+  window.addEventListener("pompey-access", () => {
+    if (overview) renderOverview();
+    renderRequests();
+  });
   async function refreshOverview() {
     if (overviewBusy || location.protocol === "file:") return;
     overviewBusy = true; rememberAccessHost();
     try {
       const response = await timedFetch(ingressBase() + "diagnostics/overview", {cache: "no-store"}, 12000);
       if (!response.ok) throw new Error("Overview unavailable");
-      overview = await response.json(); overviewFailed = false;
+      overview = await response.json(); overviewFailed = false; overviewLastSuccess = Date.now();
       const healthResponse = await timedFetch(ingressBase() + "health.json", {cache: "no-store"});
       health = healthResponse.ok ? await healthResponse.json() : null;
       renderOverview();
@@ -700,21 +748,11 @@
       else { element("ecosystem").hidden = false; element("overview-note").hidden = false; element("overview-note").textContent = "Overview unavailable. Check application status."; }
     } finally { overviewBusy = false; }
     if (activePanel === "config-panel") refreshPreferences();
-    if (activePanel === "diagnostic-panel") refreshRequests();
+    if (activePanel === "diagnostic-panel") await refreshRequests();
+    nextRefreshAt = Date.now() + 15000;
+    updateRefreshStatus();
+    setTimeout(refreshOverview, 15000);
   }
-  element("inspect").addEventListener("click", refreshRequests);
-  element("check-downloads").addEventListener("click", async event => {
-    const button = event.currentTarget;
-    const result = element("download-check-result");
-    button.disabled = true; result.hidden = false; result.classList.remove("check-warning");
-    result.textContent = "Checking download policies and asking Arr to check imports and cleanup…";
-    try {
-      const response = await diagnosticRequest("/check-downloads", {});
-      result.textContent = response.message;
-      await refreshRequests();
-    } catch (error) { result.textContent = error.message; result.classList.add("check-warning"); }
-    finally { button.disabled = false; }
-  });
   element("request-filter").addEventListener("input", renderRequests);
   element("filter-all").addEventListener("click", () => { attentionOnly = false; importedOnly = false; setFilters(); });
   element("filter-imported").addEventListener("click",()=>{importedOnly=true;attentionOnly=false;setFilters();});
@@ -727,7 +765,6 @@
       event.preventDefault(); openPanel(tabs[next].getAttribute("aria-controls"));
     });
   });
-  element("setup-recheck").addEventListener("click", refreshOverview);
   refreshOverview();
-  setInterval(refreshOverview, 15000);
+  setInterval(updateRefreshStatus, 1000);
 })();

@@ -102,7 +102,7 @@ def completed_download(torrent, queued, policy):
         return "Waiting for import", "The torrent is complete and stopped. Arr has not confirmed import; files remain until import succeeds."
     if category == "prowlarr":
         return "Manual download retained", "Pompey submits matching manual downloads to Arr. Unmatched, rejected or ambiguous imports are retained; completion alone does not authorize removal."
-    return "Completed · import unconfirmed", "This torrent is stopped but absent from the observed Arr queue. Import and removal eligibility are unconfirmed. Use Check downloads; if it remains, review the native application rather than assuming it will be deleted."
+    return "Completed · import unconfirmed", "This torrent is stopped but absent from the observed Arr queue. Import and removal eligibility are unconfirmed. Automatic maintenance continues. Review the native application if it remains; completion alone does not authorize deletion."
 
 
 def workflow(sources, titles, queues, torrents, requested=()):

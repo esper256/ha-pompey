@@ -17,8 +17,4 @@ sed -i \
   -e "s|%%debug_inc%%|${DEBUG_INC}|g" \
   "${INGRESS_CONF}"
 
-if [[ "${POMPEY_DEBUG}" == 1 ]]; then
-  bashio::log.info "Ingress nginx will listen on port ${INGRESS_PORT} (Supervisor 172.30.32.2 only). Debug consoles are on."
-else
-  bashio::log.info "Ingress nginx will listen on port ${INGRESS_PORT} (Supervisor 172.30.32.2 only)"
-fi
+bashio::log.info "Application interfaces available through authenticated Home Assistant Ingress on port ${INGRESS_PORT}"

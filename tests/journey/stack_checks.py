@@ -1,6 +1,7 @@
 """Observe the shipped controller, ingress, firewall and real outage/reconnect path."""
 
 import json
+import os
 from pathlib import Path
 import re
 import subprocess
@@ -70,6 +71,18 @@ def assert_ui_access(client):
         text=True, timeout=8,
     ))
     client.evidence.data.setdefault("stackChecks", {}).setdefault("publishedInterfaces", []).append(result)
+    # The released upgrade baseline predates always-on internal interfaces.
+    # Candidate startup must serve the actual native pages without a debug flag.
+    checks = client.evidence.data.setdefault("stackChecks", {})
+    if os.environ.get("POMPEY_TEST_BASELINE") != "1" and not checks.get("internalInterfaces"):
+        pages = {}
+        for name, suffix in [("radarr", "activity/queue"), ("sonarr", "activity/queue"), ("qbittorrent", "")]:
+            path = "/debug/" + name + "/" + suffix
+            html = client.session.call("GET", "http://127.0.0.1:8099" + path)
+            assert isinstance(html, str) and "<html" in html.lower() and "/debug/shim.js" in html, (name, html)
+            assert 'src="dashboard.js"' not in html, ("Internal route fell back to Pompey", name)
+            pages[name] = path
+        checks["internalInterfaces"] = pages
     client.evidence.checkpoint()
 
 
