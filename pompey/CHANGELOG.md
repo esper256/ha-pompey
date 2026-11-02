@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.6.6
+
+- Update recyclarr: v8.8.0 → v8.8.1.
+- Update quality-resources: trash_guides 6ac59721b3c9, config_templates 89eebadd4299 → trash_guides ff6ca2bd6875, config_templates 89eebadd4299.
+
 ## 0.6.5
 
 - Explain missing media-library selections and failures reading Seerr settings, with links and observation age. Saved selections are no longer presented as live media-server connectivity.
