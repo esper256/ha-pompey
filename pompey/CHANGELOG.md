@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.6.7
+
+- Update quality-resources: trash_guides ff6ca2bd6875, config_templates 89eebadd4299 → trash_guides b8967a742411, config_templates 89eebadd4299.
+
 ## 0.6.6
 
 - Update recyclarr: v8.8.0 → v8.8.1.
