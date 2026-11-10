@@ -102,7 +102,7 @@ jobs:
           ref: ${{ needs.changes.outputs.revision }}
           persist-credentials: false
       - name: Use the native containerd image store
-        uses: docker/setup-docker-action@v5.6.0
+        uses: docker/setup-docker-action@v5.7.0
         with:
           daemon-config: |
             {"features":{"containerd-snapshotter":true}}
