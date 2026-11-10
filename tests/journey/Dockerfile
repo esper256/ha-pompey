@@ -1,5 +1,5 @@
 ARG POMPEY_IMAGE=localhost/pompey:foundation
-FROM ghcr.io/home-assistant/base@sha256:880016115f356afc814398e17ba68a7ee66dfc1b4eaef09755ea2c9fa18ea481 AS tools
+FROM ghcr.io/home-assistant/base@sha256:58422480a299b16b6ea376c2167463206d430619ed02b40cd687c8bd6875519e AS tools
 RUN apk add --no-cache openssl py3-yaml shellcheck iputils
 FROM ${POMPEY_IMAGE}
 # Tools use their own loader/libraries. No shipped runtime library is upgraded.
