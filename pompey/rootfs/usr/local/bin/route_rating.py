@@ -118,19 +118,38 @@ def route_library(
     every minute because the movie body still had path set to the current
     location. Editor takes rootFolderPath + moveFiles and computes the dest.
     """
-    commands = object_list(http_json("GET", list_url.rsplit("/", 1)[0] + "/command",
-                                    headers=headers(key)), "native commands", ("id", "name", "status"))
-    if any(c["status"] in {"queued", "started"} and c["name"] in {
-            "RefreshMovie", "RefreshSeries", "DownloadedMoviesScan", "DownloadedEpisodesScan",
-            "ManualImport", "BulkMoveMovie", "BulkMoveSeries"} for c in commands):
+    command_url = list_url.rsplit("/", 1)[0] + "/command"
+    path_writers = {
+        "RefreshMovie", "RefreshSeries", "DownloadedMoviesScan", "DownloadedEpisodesScan",
+        "ManualImport", "BulkMoveMovie", "BulkMoveSeries",
+    }
+
+    def native_commands():
+        return object_list(http_json("GET", command_url, headers=headers(key)),
+                           "native commands", ("id", "name", "status"))
+
+    def writers(commands):
+        return {(c["id"], c["status"]) for c in commands if c["name"] in path_writers}
+
+    def active(commands):
+        return any(c["status"] in {"queued", "started"} and c["name"] in path_writers
+                   for c in commands)
+
+    before = native_commands()
+    if active(before):
         # Native commands outlive our shared controller lock. Refresh/import
-        # workers can still hold a title object with its previous path; moving
-        # now lets their later update overwrite the new library location.
+        # workers can still hold a title object with its previous path.
         return
     payload = http_json("GET", list_url, headers=headers(key))
     if not isinstance(payload, list):
         raise RuntimeError("Invalid Arr routing snapshot")
     rows = object_list(payload, "routing titles", ("id", "path"))
+    after = native_commands()
+    if active(after) or writers(before) != writers(after):
+        # A newly added title and its refresh can appear after the first command
+        # read. Even an already completed worker invalidates the title snapshot.
+        # Leave the journal untouched and take fresh snapshots next cycle.
+        return
     saved = state.load("routing-" + label)
     owned = {}
     autos = [root.rstrip("/") for root in auto_roots if root]
