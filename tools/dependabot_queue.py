@@ -1,4 +1,4 @@
-"""Enable protected Dependabot merges and let Dependabot refresh stale branches."""
+"""Enable protected Dependabot merges; report stale branches requiring maintainer action."""
 
 import os
 import subprocess
@@ -34,20 +34,18 @@ def process(number):
         return
     base = api(ROOT + "/git/ref/heads/main")["object"]["sha"]
     comparison = api(ROOT + "/compare/" + base + "..." + head)
-    # Enable before requesting a rebase, which may advance the head immediately.
+    if comparison["behind_by"]:
+        # GITHUB_TOKEN cannot issue Dependabot commands as a repository writer.
+        # Updating the branch with that token would also suppress push-triggered
+        # acceptance. Do not post a command we cannot execute or deduplicate a
+        # rejected request forever. A maintainer's command lets Dependabot do
+        # the update as its own app, preserving normal PR acceptance.
+        raise RuntimeError(
+            f"#{number}: branch is behind main; a maintainer with push access must "
+            "comment '@dependabot rebase' on the PR, then rerun maintenance after "
+            "Dependabot updates the branch. No automated rebase was requested.")
     subprocess.run(["gh", "pr", "merge", str(number), "--repo", REPO, "--auto", "--squash",
                     "--match-head-commit", head], check=True)
-    if comparison["behind_by"]:
-        marker = "<!-- pompey-dependabot-rebase:" + base + " -->"
-        comments = api(ROOT + f"/issues/{number}/comments?per_page=100")
-        if not any(comment.get("user", {}).get("login") == "github-actions[bot]" and marker in comment.get("body", "") for comment in comments):
-            if len(comments) == 100:
-                print(f"#{number}: comment history exceeds maintenance limit; review manually")
-                return
-            # A GITHUB_TOKEN branch update would suppress push-triggered CI.
-            # Dependabot performs this rebase as its own app, triggering normal
-            # PR acceptance. The marker coalesces requests for the same main.
-            api(ROOT + f"/issues/{number}/comments", "POST", {"body": "@dependabot rebase\n\n" + marker})
     print(f"#{number}: protected auto-merge requested")
 
 
@@ -56,8 +54,15 @@ def main():
         raise ValueError("Dependabot maintenance runs only in the trusted repository workflow")
     required_protection(REPO)
     prs = api(ROOT + "/pulls?state=open&base=main&sort=created&direction=asc&per_page=100")
+    failures = []
     for pr in [pr for pr in prs if eligible(pr)][:10]:
-        process(pr["number"])
+        try:
+            process(pr["number"])
+        except (RuntimeError, subprocess.CalledProcessError) as error:
+            failures.append(str(error))
+            print(f"::error::{error}")
+    if failures:
+        raise RuntimeError(f"Dependabot maintenance requires attention for {len(failures)} PR(s)")
 
 
 if __name__ == "__main__":

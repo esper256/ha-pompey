@@ -118,6 +118,33 @@ class NativeImportHandoffSafety(unittest.TestCase):
                 self.assertEqual(http.call_count, 1)
                 save.assert_not_called()
 
+    def test_routing_rechecks_workers_after_reading_titles(self):
+        import route_rating as routing
+        row = {"id": 7, "tvdbId": 70, "path": "/staging/Example", "certification": "TV-PG"}
+        # Reproduce the add-series race: the initial command list predates the
+        # title, then RefreshSeries is queued, running, or already completed.
+        for status in ["queued", "started", "completed"]:
+            for name in ["RefreshSeries", "DownloadedEpisodesScan", "BulkMoveSeries"]:
+                commands = [{"id": 1, "name": name, "status": status}]
+                with patch.object(routing, "http_json", side_effect=[[], [row], commands]) as http, \
+                     patch.object(state, "save") as save:
+                    routing.route_library("key", "http://sonarr/api/v3/series", "/kid", "/general",
+                                          ["/staging"], routing.KID_TV, "series")
+                    self.assertEqual([call.args[0] for call in http.call_args_list], ["GET"] * 3)
+                    save.assert_not_called()
+
+    def test_routing_stable_completed_workers_allow_native_move(self):
+        import route_rating as routing
+        row = {"id": 7, "tvdbId": 70, "path": "/staging/Example", "certification": "TV-PG"}
+        commands = [{"id": 1, "name": "RefreshSeries", "status": "completed"}]
+        with patch.object(routing, "http_json", side_effect=[commands, [row], commands, []]) as http, \
+             patch.object(state, "load", return_value={}), patch.object(state, "save") as save:
+            routing.route_library("key", "http://sonarr/api/v3/series", "/kid", "/general",
+                                  ["/staging"], routing.KID_TV, "series")
+            self.assertEqual(http.call_args.args[:3], ("PUT", "http://sonarr/api/v3/series/editor",
+                                                       {"seriesIds": [7], "rootFolderPath": "/kid", "moveFiles": True}))
+            self.assertIn("pending", save.call_args.args[1]["7"])
+
     def test_downloader_jobs_release_startup_gate_lock_when_service_is_absent(self):
         import pompey_controller as controller
         for name in ["configuration", "downloads"]:
