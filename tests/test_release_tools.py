@@ -34,23 +34,41 @@ class DependabotQueue(unittest.TestCase):
             self.assertEqual(api.call_count,2)
             merge.assert_not_called()
 
-    def test_stale_branch_uses_bot_rebase_once_and_keeps_head_protection(self):
+    def test_stale_branch_fails_actionably_without_comments_or_merge(self):
         import dependabot_queue as queue
         pr={"state":"open","draft":False,"user":{"login":"dependabot[bot]"},
             "base":{"ref":"main"},"head":{"sha":"head","repo":{"full_name":queue.REPO},"ref":"dependabot/docker/base"}}
-        marker="<!-- pompey-dependabot-rebase:base -->"
-        for comments, writes in [([],1),([{"user":{"login":"github-actions[bot]"},"body":marker}],0)]:
-            responses=[pr,{"check_runs":[]},{"object":{"sha":"base"}},{"behind_by":1},comments]+([{}] if writes else [])
+        # Every run reports the blocker, regardless of historical rejected commands.
+        for _ in range(2):
+            responses=[pr,{"check_runs":[]},{"object":{"sha":"base"}},{"behind_by":1}]
             with patch.object(queue,"api",side_effect=responses) as api, patch.object(queue.subprocess,"run") as merge:
-                queue.process(104)
-                posts=[c for c in api.call_args_list if len(c.args)>1 and c.args[1]=="POST"]
-                self.assertEqual(len(posts),writes)
-                if posts:
-                    self.assertEqual(posts[0].args[2]["body"],"@dependabot rebase\n\n"+marker)
-                args=merge.call_args.args[0]
-                self.assertIn("--auto",args)
-                self.assertEqual(args[-2:],["--match-head-commit","head"])
-                self.assertNotIn("--admin",args)
+                with self.assertRaisesRegex(RuntimeError, "maintainer with push access"):
+                    queue.process(104)
+                self.assertEqual(api.call_count,4)
+                merge.assert_not_called()
+                self.assertTrue(all(len(c.args)==1 for c in api.call_args_list))
+
+    def test_current_branch_keeps_protected_auto_merge(self):
+        import dependabot_queue as queue
+        pr={"state":"open","draft":False,"user":{"login":"dependabot[bot]"},
+            "base":{"ref":"main"},"head":{"sha":"head","repo":{"full_name":queue.REPO},"ref":"dependabot/docker/base"}}
+        responses=[pr,{"check_runs":[]},{"object":{"sha":"base"}},{"behind_by":0}]
+        with patch.object(queue,"api",side_effect=responses), patch.object(queue.subprocess,"run") as merge:
+            queue.process(104)
+            args=merge.call_args.args[0]
+            self.assertIn("--auto",args)
+            self.assertEqual(args[-2:],["--match-head-commit","head"])
+            self.assertNotIn("--admin",args)
+
+    def test_maintenance_continues_other_prs_but_exits_failed(self):
+        import dependabot_queue as queue
+        with patch.dict(queue.os.environ,{"GITHUB_REPOSITORY":queue.REPO,"GITHUB_ACTIONS":"true"}), \
+             patch.object(queue,"required_protection"), patch.object(queue,"eligible",return_value=True), \
+             patch.object(queue,"api",return_value=[{"number":132},{"number":133}]), \
+             patch.object(queue,"process",side_effect=[RuntimeError("#132: blocked"),None]) as process:
+            with self.assertRaisesRegex(RuntimeError,"attention for 1 PR"):
+                queue.main()
+            self.assertEqual([c.args[0] for c in process.call_args_list],[132,133])
 
 
 class PromotionPolicy(unittest.TestCase):
