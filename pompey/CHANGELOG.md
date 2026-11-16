@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.6.8
+
+- Update Radarr: v6.4.4.10685 → v7.0.3.10918.
+- Update seerr: v3.5.1 → v3.5.2.
+- Update dotnet: 10.0.14 → 10.0.15.
+- Update quality-resources: trash_guides b8967a742411, config_templates 89eebadd4299 → trash_guides fa08c05a7471, config_templates 89eebadd4299.
+
 ## 0.6.7
 
 - Update quality-resources: trash_guides ff6ca2bd6875, config_templates 89eebadd4299 → trash_guides b8967a742411, config_templates 89eebadd4299.
