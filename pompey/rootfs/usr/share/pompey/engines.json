@@ -2,11 +2,11 @@
   "schema": 1,
   "engines": {
     "Radarr": {
-      "version": "v6.4.4.10685",
+      "version": "v7.0.3.10918",
       "artifacts": {
         "linuxmusl-amd64": {
-          "url": "https://github.com/Radarr/Radarr/releases/download/v6.4.4.10685/Radarr.master.6.4.4.10685.linux-musl-core-x64.tar.gz",
-          "sha256": "027bce03a2c97bc8216ec636fb31641a729e1cb609700508335344f0423f29ea"
+          "url": "https://github.com/Radarr/Radarr/releases/download/v7.0.3.10918/Radarr.master.7.0.3.10918.linux-musl-core-x64.tar.gz",
+          "sha256": "14a1dc7737dd57955f1136a3fc90e0735f48c5eda7823ecb59eb00b5a9f8ecc7"
         }
       }
     },
@@ -47,21 +47,21 @@
       }
     },
     "seerr": {
-      "version": "v3.5.1",
-      "image": "ghcr.io/seerr-team/seerr@sha256:d8fab675b55ad293ded98fd71efcfd46054cbad9746534ae1cc4794a88c0b3be"
+      "version": "v3.5.2",
+      "image": "ghcr.io/seerr-team/seerr@sha256:aadee014b40e28cf9aa4928bc9d1183a6eb08f8c44d543cddc9efdcb16549be2"
     },
     "dotnet": {
-      "version": "10.0.14",
+      "version": "10.0.15",
       "artifacts": {
         "linuxmusl-amd64": {
-          "url": "https://builds.dotnet.microsoft.com/dotnet/Runtime/10.0.14/dotnet-runtime-10.0.14-linux-musl-x64.tar.gz",
-          "sha512": "b6e1855b3ece331d6d5b1daf4ed0a209931b8527ece85eff6d843ff3e6bccd4bc8b0c484cada7832a453cf9130e8fe83df961f129fcf4e61199ad701814039f0"
+          "url": "https://builds.dotnet.microsoft.com/dotnet/Runtime/10.0.15/dotnet-runtime-10.0.15-linux-musl-x64.tar.gz",
+          "sha512": "dca559d4265deac0a1f16f9f4e31a75f2210a71ff6f62b0131cf0dabdececca193c8a7eaf5a1bf4291b44b0afb13953b24ba1d8e58acd0bf80eb3f148c23594e"
         }
       }
     }
   },
   "resources": {
-    "trash_guides": "b8967a742411667577bf6cc6859fa9ae05e15549",
+    "trash_guides": "fa08c05a7471111ab4451280d6a727d1ae83b8af",
     "config_templates": "89eebadd429952069182a22930af4d768cacda36"
   }
 }
