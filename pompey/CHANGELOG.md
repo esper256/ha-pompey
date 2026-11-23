@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.6.9
+
+- Update Prowlarr: v2.7.0.5723 → v3.0.2.5780.
+- Update quality-resources: trash_guides fa08c05a7471, config_templates 89eebadd4299 → trash_guides 83934a3e72b1, config_templates 89eebadd4299.
+
 ## 0.6.8
 
 - Update Radarr: v6.4.4.10685 → v7.0.3.10918.
