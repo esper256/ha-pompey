@@ -20,11 +20,11 @@
       }
     },
     "Prowlarr": {
-      "version": "v2.7.0.5723",
+      "version": "v3.0.2.5780",
       "artifacts": {
         "linuxmusl-amd64": {
-          "url": "https://github.com/Prowlarr/Prowlarr/releases/download/v2.7.0.5723/Prowlarr.master.2.7.0.5723.linux-musl-core-x64.tar.gz",
-          "sha256": "a587dda90510faba852ed5b92c7ae23a064cd44d462e1b7bbfad0f3b2be42bc0"
+          "url": "https://github.com/Prowlarr/Prowlarr/releases/download/v3.0.2.5780/Prowlarr.master.3.0.2.5780.linux-musl-core-x64.tar.gz",
+          "sha256": "ce00f1407ef0d7f5fb68312381d529eadc02f152a691b4147e8de6d59c02b796"
         }
       }
     },
@@ -61,7 +61,7 @@
     }
   },
   "resources": {
-    "trash_guides": "fa08c05a7471111ab4451280d6a727d1ae83b8af",
+    "trash_guides": "83934a3e72b1950bffe14ca2ce743ce3de6b6b93",
     "config_templates": "89eebadd429952069182a22930af4d768cacda36"
   }
 }
